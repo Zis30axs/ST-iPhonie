@@ -736,6 +736,9 @@ export interface BackendAPI extends BackendFacade {
     close(): void;
     /** id is -1 when there is no readable assistant dialogue. */
     latest(): LatestMessage;
+    /** Last selected story reply, falling back to the newest voiced reply. Revision changes with its chat/message/swipe.
+     * Playback completion and stop keep the selection; editing, deleting or switching chats invalidates it. */
+    currentDialogue(): LatestMessage & { revision: number };
     /** Omit lineIndex to play the whole message. Generation requires an explicit user action. */
     play(messageId: number, lineIndex?: number): void;
     /** Latest chat messages, newest first, for choosing where to insert a picture. */

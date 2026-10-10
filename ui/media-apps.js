@@ -209,21 +209,23 @@ export function notesApp(ctx) {
 export function listenApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'listen');
   let latest = {id: -1, lines: []}, epoch = 0, playbackRevision = 0, currentIndex = -1;
+  const selected = () => api.currentDialogue?.() || api.latest();
+  const sameReply = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const ACTIVE = ['playing', 'paused', 'generating', 'waiting'];
   const indexOf = state => state.source !== 'dialogue' || !state.line ? -1 : latest.lines.findIndex((l, i) => l.role === state.line.role && l.text === state.line.text && (state.line.uiIndex === undefined || state.line.uiIndex === i));
 
   async function render() {
     const ticket = ++epoch;
-    latest = api.latest();
+    latest = selected();
     v.draw(heading('听取', btn('refresh', icon('refresh') + '刷新', 'chip-button'), 'Now Playing')
       + `<div class="listen-stage"><div class="portrait"><span class="ring"></span><span class="ring"></span>${halo()}<span data-portrait></span></div><span class="chip emotion" data-emotion hidden></span><div class="visualizer" aria-hidden="true">${'<i></i>'.repeat(32)}</div></div>
         <div class="dialogue-box"><span class="plate" data-speaker-plate><span></span></span><span class="dialogue-engine" data-engine-label></span><p class="play-caption" data-playback-line aria-live="polite"></p><div class="dialogue-foot"><span data-playback-message></span><svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M1 3h12L7 12z"/></svg></div></div>
         <div class="actions" data-waiting hidden>${btn('configure', icon('mic') + '去给这个角色选音色', 'primary')}</div>
         <div class="transport">${btn('favorite', icon('heart'), '', 'aria-label="收藏这一句"')}${btn('download', icon('download'), '', 'aria-label="下载这一句"')}${btn('prev', icon('prev', true), '', 'aria-label="上一句"')}${btn('main-play', icon('play', true), 'main-play', 'aria-label="播放"')}${btn('next', icon('skip', true), '', 'aria-label="下一句"')}${btn('stop', icon('stop', true), '', 'aria-label="停止"')}</div>
         ${latest.lines.length
-          ? groupTitle('本条回复', `<span class="title-tools">${btn('export-all', icon('download') + '导出', 'chip-button', 'aria-label="导出整条：把这条回复的台词拼成一个音频文件"')}${btn('play-all', icon('play', true) + '整条播放', 'chip-button')}</span>`)
+          ? groupTitle(`回复 #${latest.id}`, `<span class="title-tools">${btn('export-all', icon('download') + '导出', 'chip-button', 'aria-label="导出整条：把这条回复的台词拼成一个音频文件"')}${btn('play-all', icon('play', true) + '整条播放', 'chip-button')}</span>`)
             + `<div class="group">${latest.lines.map((l, i) => `<div class="dialogue-row" data-row="${i}" data-engine="${ctx.engineOf(l.role)}"><div><small>${esc(l.role)}</small><p>${esc(l.translation)}</p></div>${btn('play-line', wave, 'wave-button', `data-index="${i}" data-state="ungenerated" aria-label="朗读 ${esc(l.role)} 的台词"`)}</div>`).join('')}</div>`
-          : empty('等一句真正说出口的话', '回到聊天，点台词旁的声波；最新一条回复的台词会出现在这里。')}`);
+          : empty('等一句真正说出口的话', '回到聊天，点任意楼层的声波，就能在这里整条播放或导出；未选择时显示最新回复。')}`);
     v.onPlayback(api.status());
     for (let i = 0; i < latest.lines.length; i++) {
       const state = await api.lineState(latest.lines[i]);
@@ -234,6 +236,7 @@ export function listenApp(ctx) {
   }
 
   v.onPlayback = state => {
+    if (!sameReply(selected(), latest)) { render().catch(e => ctx.notify(e.message)); return; }
     const revision = ++playbackRevision, on = ACTIVE.includes(state.phase);
     currentIndex = indexOf(state);
     for (const b of v.root.querySelectorAll('[data-action=play-line]')) {
@@ -271,10 +274,15 @@ export function listenApp(ctx) {
   };
   v.refresh = render;
 
-  // The latest reply as one audio file, from the lines already generated (no new requests, no quota).
+  // Pin the displayed reply before any async lookup, so another selection cannot change the exported file.
+  function displayedReply() {
+    if (!sameReply(selected(), latest)) { render().catch(e => ctx.notify(e.message)); throw Error('聊天内容已变化，请重新选择台词'); }
+    return latest;
+  }
+  // The selected reply as one audio file, from the lines already generated (no new requests, no quota).
   async function exportReply() {
-    const now = api.latest();
-    if (!now.lines.length) throw Error('最新的回复里没有台词');
+    const now = displayedReply();
+    if (!now.lines.length) throw Error('这条回复里没有台词');
     const found = [], missing = [];
     for (const line of now.lines) {
       try { found.push((await api.audioFile({line})).blob); }
@@ -289,9 +297,8 @@ export function listenApp(ctx) {
     ctx.notify(`已下载 ${name}（${found.length} 句）`);
   }
   function play(index) {
-    const now = api.latest();
-    if (JSON.stringify(now) !== JSON.stringify(latest)) { render().catch(e => ctx.notify(e.message)); ctx.notify('聊天内容已变化，请重新选择台词'); return; }
-    api.play(latest.id, index);
+    const now = displayedReply();
+    api.play(now.id, index);
   }
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
