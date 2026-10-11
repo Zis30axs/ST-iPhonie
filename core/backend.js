@@ -1367,9 +1367,14 @@ export class TTSBackend {
     async addSounds(list) {
         this.assertOpen();
         const at = Date.now(), rows = (Array.isArray(list) ? list : [list]).map((value, i) => {
-            const row = soundRow(value), blob = value?.blob;
+            const row = soundRow(value);
             if (!row.name) throw Error('给声音起个名字');
-            if (!(blob instanceof Blob) || !blob.size) throw Error(`「${row.name}」不是能用的音频文件`);
+            // Files selected in the phone iframe belong to another window, so instanceof Blob rejects them.
+            // Native slice validates Blob's internal data across realms and gives storage a local Blob.
+            let blob;
+            try { blob = Blob.prototype.slice.call(value?.blob, 0, undefined, value?.blob?.type || ''); }
+            catch { throw Error(`「${row.name}」不是能用的音频文件`); }
+            if (!blob.size) throw Error(`「${row.name}」不是能用的音频文件`);
             if (blob.size > SOUND_LIMITS.file) throw Error(`「${row.name}」太大了（单个声音最多 ${SOUND_LIMITS.file / 1024 / 1024} MB）`);
             const type = String(blob.type || '').toLowerCase();
             if (type && !type.startsWith('audio/') && !['application/octet-stream', 'video/webm', 'video/ogg'].includes(type)) throw Error(`「${row.name}」不是音频文件`);
