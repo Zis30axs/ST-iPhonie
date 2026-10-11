@@ -12,8 +12,8 @@ export function assistantPreviewDocument(html, {auto = false, theme = {}, dark =
   const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https:; img-src data: https:; font-src data: https:; media-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
   const themeCSS = Object.entries(theme).filter(([key, value]) => /^--[a-zA-Z0-9-]+$/.test(key) && /^[#(),.%\w\s-]+$/.test(value)).map(([key, value]) => `${key}:${value}`).join(';');
   const themeSync = `<script>addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='assistant-theme')return;const root=document.documentElement;root.style.colorScheme=event.data.dark?'dark':'light';for(const [key,value] of Object.entries(event.data.theme||{})){if(/^--SmartTheme[A-Za-z]+Color$/.test(key)&&typeof value==='string'&&/^[#(),.%\\w\\s-]+$/.test(value))root.style.setProperty(key,value);}});</script>`;
-  const sizing = auto ? `<script>(()=>{const send=()=>parent.postMessage({type:'assistant-html-size',height:Math.ceil(document.body.getBoundingClientRect().height+8)},'*');new ResizeObserver(send).observe(document.body);addEventListener('load',send);send();})();</script>` : '';
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${esc(policy)}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{color-scheme:${dark ? 'dark' : 'light'};background:var(--SmartThemeChatTintColor,#fff);${themeCSS}}body{background:var(--SmartThemeChatTintColor,#fff);margin:${auto ? 0 : 12}px;color:var(--SmartThemeBodyColor,#25314b);font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img,video,canvas,svg{max-width:100%}button,input,textarea,select{font:inherit}pre{white-space:pre-wrap}p{margin:.65em 0}p:first-child{margin-top:0}p:last-child{margin-bottom:0}h1,h2,h3,h4,h5,h6{line-height:1.4;margin:.9em 0 .45em}ul,ol{padding-left:1.5em;margin:.6em 0}li{margin:.25em 0}blockquote{margin:.6em 0;padding-left:1em;border-left:2px solid var(--SmartThemeQuoteColor,#7dadd6)}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid var(--SmartThemeBorderColor,#dce5ef)}</style></head><body>${themeSync}${String(html)}${sizing}</body></html>`;
+  const sizing = auto ? `<script>(()=>{let queued=false,last=0;const send=()=>{queued=false;const body=document.body,box=body.getBoundingClientRect(),style=getComputedStyle(body),range=document.createRange();range.selectNodeContents(body);const content=range.getBoundingClientRect();const height=Math.max(24,Math.ceil(Math.max(box.bottom,content.bottom)+Math.max(0,parseFloat(style.marginBottom)||0)));if(height!==last){last=height;parent.postMessage({type:'assistant-html-size',height},'*');}};const schedule=()=>{if(!queued){queued=true;requestAnimationFrame(send);}};new ResizeObserver(schedule).observe(document.body);new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,attributes:true,characterData:true});addEventListener('load',schedule,true);addEventListener('resize',schedule);document.fonts?.ready.then(schedule);schedule();})();</script>` : '';
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${esc(policy)}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${auto ? "html,body{height:auto!important;min-height:0!important}" : ""}html{color-scheme:${dark ? 'dark' : 'light'};background:var(--SmartThemeChatTintColor,#fff);${themeCSS}}body{display:flow-root;background:var(--SmartThemeChatTintColor,#fff);margin:${auto ? 0 : 12}px;color:var(--SmartThemeBodyColor,#25314b);font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img,video,canvas,svg{max-width:100%}button,input,textarea,select{font:inherit}pre{white-space:pre-wrap}p{margin:.65em 0}p:first-child{margin-top:0}p:last-child{margin-bottom:0}h1,h2,h3,h4,h5,h6{line-height:1.4;margin:.9em 0 .45em}ul,ol{padding-left:1.5em;margin:.6em 0}li{margin:.25em 0}blockquote{margin:.6em 0;padding-left:1em;border-left:2px solid var(--SmartThemeQuoteColor,#7dadd6)}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid var(--SmartThemeBorderColor,#dce5ef)}</style></head><body>${themeSync}${String(html)}${sizing}</body></html>`;
 }
 
 /** Keep every part of a mixed reply; only explicitly labelled HTML fences become previews. */
@@ -90,13 +90,11 @@ export function assistantApp(ctx) {
   const imageURLs = new Map(), imageLoads = new Set();
   const fileDrafts = new Map(), fileReads = new Set(), displayCache = new Map();
   const attachments = (id = threadId) => fileDrafts.get(id) || [];
-  const drafts = new Map(), errors = new Map(), pending = new Map(), previews = new Set();
+  const drafts = new Map(), errors = new Map(), pending = new Map();
   const state = () => api.getState().assistant || {};
   const busy = id => pending.has(id) || !!api.assistantBusy?.(id);
   function closePreviews() {
-    previews.clear();
-    for (const slot of v.root.querySelectorAll('[data-preview-mid]')) { if (slot.hasAttribute('data-auto')) slot.replaceChildren(); else slot.remove(); }
-    for (const button of v.root.querySelectorAll('[data-action=preview]')) { button.setAttribute('aria-expanded', 'false'); button.innerHTML = icon('eye') + '预览'; }
+    for (const slot of v.root.querySelectorAll('[data-preview-mid]')) slot.replaceChildren();
   }
   const draftKey = id => `st-iphonie-assistant-draft:${api.getState().scope || 'local'}:${id || 'new'}`;
   function draft(id = threadId) {
@@ -167,9 +165,8 @@ export function assistantApp(ctx) {
       if (p.kind === 'code') {
         return spoken.length ? `<div class="assistant-prose">${rendered}</div>` : `<pre class="assistant-code"><code>${esc(p.text)}</code></pre>`;
       }
-      const key = `${m.id}:${i}`, shown = p.auto || previews.has(key);
-      if (p.auto) return `<div class="assistant-html assistant-beautified"><div data-preview-mid="${esc(m.id)}" data-preview-part="${i}" data-auto></div></div>${spoken.length ? `<div class="assistant-prose">${rendered}</div>` : ''}`;
-      return `<div class="assistant-html"><div class="assistant-html-tools"><span>HTML · 可交互</span>${btn('preview', shown ? '收起预览' : icon('eye') + '预览', 'text-button', `${attrs} data-part="${i}" aria-expanded="${shown}"`)}</div>${shown ? `<div data-preview-mid="${esc(m.id)}" data-preview-part="${i}"></div>` : ''}<details data-group="source-${esc(key)}"><summary>查看源码</summary><pre class="assistant-code"><code>${esc(p.text)}</code></pre></details></div>${spoken.length ? `<div class="assistant-prose">${rendered}</div>` : ''}`;
+      const key = `${m.id}:${i}`;
+      return `<div class="assistant-html${p.auto ? ' assistant-beautified' : ''}"><div data-preview-mid="${esc(m.id)}" data-preview-part="${i}" data-auto></div>${p.auto ? '' : `<details data-group="source-${esc(key)}"><summary>查看源码</summary><pre class="assistant-code"><code>${esc(p.text)}</code></pre></details>`}</div>${spoken.length ? `<div class="assistant-prose">${rendered}</div>` : ''}`;
     }).join('')}${m.meta?.image ? `<button class="assistant-image" data-action="image" ${attrs} data-image-photo="${esc(m.meta.image.photoId)}" aria-label="查看生成的图片">正在读取图片…</button>` : ''}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${lines.length ? btn('voice-all', icon('wave') + '整条播放', 'text-button', attrs) : ''}${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('reroll', icon('refresh') + '重 roll', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details>${(m.variants?.length || 1) > 1 ? `<div class="assistant-variants">${btn('variant', '‹', 'icon-button', `${attrs} data-selected="${(m.selected || 0) - 1}" aria-label="上一个回复" ${m.selected > 0 ? '' : 'disabled'}`)}<span>${(m.selected || 0) + 1} / ${m.variants.length}</span>${btn('variant', '›', 'icon-button', `${attrs} data-selected="${(m.selected || 0) + 1}" aria-label="下一个回复" ${(m.selected || 0) < m.variants.length - 1 ? '' : 'disabled'}`)}</div>` : ''}</article>`;
   }
   function mountImages() {
@@ -208,15 +205,15 @@ export function assistantApp(ctx) {
   themeObserver.observe(ctx.doc.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-skin']});
   function mountPreviews() {
     for (const slot of v.root.querySelectorAll('[data-preview-mid]')) {
-      if (slot.querySelector('iframe') || !slot.hasAttribute('data-auto') && !previews.has(`${slot.dataset.previewMid}:${slot.dataset.previewPart}`)) continue;
+      if (slot.querySelector('iframe')) continue;
       const message = thread?.messages.find(m => m.id === slot.dataset.previewMid);
       const part = message && partsFor(message)[Number(slot.dataset.previewPart)];
       if (message?.role !== 'assistant' || part?.kind !== 'html') continue;
       const frame = ctx.doc.createElement('iframe');
-      frame.className = 'assistant-preview' + (part.auto ? ' assistant-auto-preview' : ''); frame.title = part.auto ? '助手正则美化' : '助手 HTML 交互预览';
+      frame.className = 'assistant-preview assistant-auto-preview'; frame.title = part.auto ? '助手正则美化' : '助手 HTML 交互预览';
       frame.setAttribute('sandbox', 'allow-scripts'); frame.setAttribute('referrerpolicy', 'no-referrer');
       frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; autoplay 'none'");
-      frame.srcdoc = assistantPreviewDocument(part.auto ? assistantHTMLMarkdown(part.text, ctx.doc) : part.text, {auto: part.auto, ...previewTheme()});
+      frame.srcdoc = assistantPreviewDocument(part.auto ? assistantHTMLMarkdown(part.text, ctx.doc) : part.text, {auto: true, ...previewTheme()});
       frame.addEventListener('load', () => frame.contentWindow?.postMessage({type: 'assistant-theme', ...previewTheme()}, '*'));
       slot.append(frame);
     }
@@ -283,7 +280,7 @@ export function assistantApp(ctx) {
     if (event.data?.type !== 'assistant-html-size' || !Number.isFinite(event.data.height)) return;
     for (const frame of v.root.querySelectorAll('.assistant-auto-preview')) if (event.source === frame.contentWindow) {
       const scroll = v.root.querySelector('.assistant-messages'), bottom = scroll && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 70;
-      frame.style.height = `${Math.max(24, Math.min(4800, event.data.height))}px`;
+      frame.style.height = `${Math.max(24, Math.min(100000, Math.ceil(event.data.height)))}px`;
       if (bottom) scroll.scrollTop = scroll.scrollHeight;
     }
   };
@@ -292,10 +289,6 @@ export function assistantApp(ctx) {
     const waiting = busy(threadId), saving = pending.get(threadId)?.kind === 'save', list = thread?.messages || [], error = errors.get(threadId), last = list.at(-1);
     const progress = waiting && !saving ? api.assistantProgress?.(threadId) : null;
     syncClock(!!progress);
-    for (const [i, m] of list.entries()) {
-      const before = renderedMessages.get(m.id);
-      if (before && before !== messageKey(m, i, list)) for (const key of previews) if (key.startsWith(m.id + ':')) previews.delete(key);
-    }
     const previous = v.root.querySelector('[data-assistant-draft]'), focused = previous === ctx.doc.activeElement;
     const selection = focused ? [previous.selectionStart, previous.selectionEnd] : null;
     const scroller = v.root.querySelector('.assistant-messages'), bottom = !scroller || scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 70;
@@ -473,17 +466,6 @@ export function assistantApp(ctx) {
         settingsSaving = true;
         try { await api.saveAssistant(settings); settings = null; mode = 'chat'; await render(); }
         finally { settingsSaving = false; } return;
-      case 'preview': {
-        if (message?.role !== 'assistant') return;
-        const key = `${message.id}:${el.dataset.part}`, block = el.closest('.assistant-html');
-        if (previews.has(key)) { previews.delete(key); block.querySelector('[data-preview-mid]')?.remove(); }
-        else {
-          previews.add(key);
-          const slot = ctx.doc.createElement('div'); slot.dataset.previewMid = message.id; slot.dataset.previewPart = el.dataset.part;
-          block.querySelector('details').before(slot); mountPreviews();
-        }
-        el.setAttribute('aria-expanded', String(previews.has(key))); el.innerHTML = previews.has(key) ? '收起预览' : icon('eye') + '预览'; return;
-      }
       case 'copy': if (message && await copyText(win, message.text)) ctx.notify('原文已复制'); else ctx.notify('没能复制，请展开源码后手动选取'); return;
       case 'voice-all': if (message?.role === 'assistant') return api.speak(voiceFor(message)); return;
       case 'voice-line': {
