@@ -112,6 +112,7 @@ export function assistantMeta(value = {}) {
     requestedModel: text(value.requestedModel, 200), reportedModel: text(value.reportedModel, 200),
     provider: text(value.provider, 200), reasoning: text(value.reasoning, ASSISTANT_LIMITS.text),
     ...(Number.isFinite(value.reasoningMs) && value.reasoningMs >= 0 ? {reasoningMs: Math.min(value.reasoningMs, 86400000)} : {}),
+    ...(record(value.image) && typeof value.image.photoId === 'string' && value.image.photoId.length <= 200 && value.image.photoId.trim() ? {image: {photoId: value.image.photoId, prompt: text(value.image.prompt, 6000)}} : {}),
     ...(value.reasoningFormat ? {reasoningFormat: assistantReasoningFormat(value.reasoningFormat)} : {})};
 }
 export function assistantAttachments(value = []) {
@@ -179,6 +180,7 @@ export function assistantReasoningTimer(format, now = () => performance.now()) {
 export function assistantHistory(messages, {textOnly = false} = {}) {
   return messages.map(message => {
     const files = assistantAttachments(message.attachments), body = [message.role === 'assistant' ? assistantThoughts(message.text, message.meta?.reasoningFormat).text : message.text,
+      ...(message.meta?.image ? [`【已生成图片：${message.meta.image.prompt}】`] : []),
       ...files.filter(f => f.kind === 'text').map(f => `【用户附件：${f.name}】\n${f.text}\n【附件结束】`)].filter(Boolean).join('\n\n');
     const images = files.filter(f => f.kind === 'image');
     if (images.length && textOnly) throw Error('当前酒馆生成接口不支持助手图片附件，请使用聊天补全或自定义视觉模型');
@@ -194,4 +196,17 @@ export function assistantSummary(thread) {
   assertAssistantThread(thread);
   const {messages, ...summary} = thread;
   return {...summary, messageCount: messages.length, preview: (messages.at(-1)?.role === 'assistant' ? assistantThoughts(messages.at(-1)?.text, messages.at(-1)?.meta?.reasoningFormat).text : String(messages.at(-1)?.text || '')).replace(/\s+/g, ' ').slice(0, 120)};
+}
+
+/** Explicit drawing requests only; examples, questions about capability and negative instructions stay chat. */
+export function assistantWantsImage(messages) {
+  if (messages?.at(-1)?.role !== 'user') return false;
+  // All consecutive messages form one user turn. A later cancellation wins over an earlier drawing request.
+  for (let i = messages.length - 1; i >= 0 && messages[i].role === 'user'; i--) {
+    const raw = messages[i].text.trim();
+    if (/^(?:不要|别|不用|先不|暂时不)(?:再|帮我|给我)?(?:画|生图|生成|绘制)|^(?:算了|先聊聊|取消生图)/u.test(raw)) return false;
+    if (/(?:能不能|可以|会|怎么|如何).{0,8}(?:生图|画图|生成图片)[？?]?$/u.test(raw)) continue;
+    if (/^(?:(?:请|麻烦|现在|再|给我|帮我|帮忙|为我|替我)\s*)*(?:画(?!风|面|师|质|作|法)|生图[：:\s]|生成(?:一[张幅个]|图片|图像|照片|插画)|绘制|draw\s|generate\s+(?:an?\s+)?image)/iu.test(raw)) return true;
+  }
+  return false;
 }

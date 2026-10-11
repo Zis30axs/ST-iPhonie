@@ -121,7 +121,7 @@ export interface AssistantSettings {
     stream: boolean;
 }
 export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
-export interface AssistantMeta { elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; }
+export interface AssistantMeta { image?: {photoId: string; prompt: string}; elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; }
 export interface AssistantVariant { text: string; at: number; meta?: AssistantMeta; }
 export interface AssistantMessage extends AssistantVariant { id: string; role: 'user' | 'assistant'; attachments?: AssistantAttachment[]; editedAt?: number; variants?: AssistantVariant[]; selected?: number; }
 export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
@@ -627,10 +627,10 @@ export interface BackendFacade {
     libraryStats(): Promise<LibraryStats>;
     /** Album photos made by drawing (the workbench and in-text pictures). */
     /** The photos the phone drew, by where: 绘图 App (draw), 正文图片 (chat), 查手机 (peek), 朋友圈 (moments). */
-    generatedPhotos(): Promise<{ count: number; bytes: number; sources: Record<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp', { label: string; count: number; bytes: number }> }>;
+    generatedPhotos(): Promise<{ count: number; bytes: number; sources: Record<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp' | 'assistant', { label: string; count: number; bytes: number }> }>;
     /** Deletes those photos from the album; returns how many were deleted. Imported photos stay. */
     /** Deletes the drawn photos of those sources (all when none); what showed them goes back to «not drawn». */
-    deleteGeneratedPhotos(sources?: Array<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp'>): Promise<number>;
+    deleteGeneratedPhotos(sources?: Array<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp' | 'assistant'>): Promise<number>;
     saveChatPreset(preset: Partial<ChatPreset> & { name: string }): ChatPreset;
     /** Independent assistant settings; no conversation or model context is saved here. */
     saveAssistant(patch: Partial<AssistantSettings>): AssistantSettings;
@@ -782,10 +782,10 @@ export interface BackendAPI extends BackendFacade {
     assistantDisplay(text: string, role: string, depth: number): string;
     assistantContext(): { available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } };
     /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
-    assistantReply(threadId: string, text?: string): Promise<AssistantThread>;
-    assistantReroll(threadId: string, messageId: string): Promise<AssistantThread>;
+    assistantReply(threadId: string, text?: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
+    assistantReroll(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
     assistantReadFiles(files: File[]): Promise<AssistantAttachment[]>;
-    assistantProgress(threadId: string): {id: string; threadId: string; rerollId: string; startedAt: number; phase: 'waiting' | 'thinking' | 'responding'; text: string; meta: Partial<AssistantMeta>} | null;
+    assistantProgress(threadId: string): {id: string; threadId: string; rerollId: string; startedAt: number; phase: 'waiting' | 'thinking' | 'responding' | 'prompting' | 'drawing'; text: string; meta: Partial<AssistantMeta>} | null;
     assistantBusy(threadId: string): boolean;
     assistantCancel(threadId: string): void;
     /** Omit lineIndex to play the whole message. Generation requires an explicit user action. */

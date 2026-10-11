@@ -84,6 +84,7 @@ const DRAWN_SOURCES = [
     ['chat', '正文图片', /^chat-\d+\.(?:png|jpe?g|webp)$/],
     ['peek', '查手机', /^查手机-.+-\d+\.(?:png|jpe?g|webp)$/],
     ['moments', '朋友圈', /^朋友圈-.+-\d+\.(?:png|jpe?g|webp)$/],
+    ['assistant', '助手生图', /^assistant-\d+\.(?:png|jpe?g|webp)$/],
     ['chatapp', '聊天图片', /^聊天-.+-\d+\.(?:png|jpe?g|webp)$/],
 ];
 export class TTSBackend {

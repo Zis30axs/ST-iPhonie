@@ -1,4 +1,6 @@
 import {createView, esc, btn, heading, field, select, toggle, copyText} from './common.js';
+import {openImageViewer} from '../image-viewer.js';
+import {downloadAction} from '../download.js';
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
 import {assistantAttachments, assistantThoughts} from '../core/assistant.js';
 import {icon, glyph} from './icons.js';
@@ -84,6 +86,7 @@ export function assistantApp(ctx) {
   let mode = 'chat', threadId = null, thread = null, epoch = 0, selectionEpoch = 0, presetsEpoch = 0, settings = null;
   let tavern = [], tavernLoading = false, tavernError = '', settingsSaving = false;
   let renderedThreadId = null, renderedMessages = new Map(), renameId = null, editing = null;
+  const imageURLs = new Map(), imageLoads = new Set();
   const fileDrafts = new Map(), fileReads = new Set(), displayCache = new Map();
   const attachments = (id = threadId) => fileDrafts.get(id) || [];
   const drafts = new Map(), errors = new Map(), pending = new Map(), previews = new Set();
@@ -166,7 +169,29 @@ export function assistantApp(ctx) {
       const key = `${m.id}:${i}`, shown = p.auto || previews.has(key);
       if (p.auto) return `<div class="assistant-html assistant-beautified"><div data-preview-mid="${esc(m.id)}" data-preview-part="${i}" data-auto></div></div>${spoken.length ? `<div class="assistant-prose">${rendered}</div>` : ''}`;
       return `<div class="assistant-html"><div class="assistant-html-tools"><span>HTML · 可交互</span>${btn('preview', shown ? '收起预览' : icon('eye') + '预览', 'text-button', `${attrs} data-part="${i}" aria-expanded="${shown}"`)}</div>${shown ? `<div data-preview-mid="${esc(m.id)}" data-preview-part="${i}"></div>` : ''}<details data-group="source-${esc(key)}"><summary>查看源码</summary><pre class="assistant-code"><code>${esc(p.text)}</code></pre></details></div>${spoken.length ? `<div class="assistant-prose">${rendered}</div>` : ''}`;
-    }).join('')}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${lines.length ? btn('voice-all', icon('wave') + '整条播放', 'text-button', attrs) : ''}${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('reroll', icon('refresh') + '重 roll', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details>${(m.variants?.length || 1) > 1 ? `<div class="assistant-variants">${btn('variant', '‹', 'icon-button', `${attrs} data-selected="${(m.selected || 0) - 1}" aria-label="上一个回复" ${m.selected > 0 ? '' : 'disabled'}`)}<span>${(m.selected || 0) + 1} / ${m.variants.length}</span>${btn('variant', '›', 'icon-button', `${attrs} data-selected="${(m.selected || 0) + 1}" aria-label="下一个回复" ${(m.selected || 0) < m.variants.length - 1 ? '' : 'disabled'}`)}</div>` : ''}</article>`;
+    }).join('')}${m.meta?.image ? `<button class="assistant-image" data-action="image" ${attrs} data-image-photo="${esc(m.meta.image.photoId)}" aria-label="查看生成的图片">正在读取图片…</button>` : ''}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${lines.length ? btn('voice-all', icon('wave') + '整条播放', 'text-button', attrs) : ''}${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('reroll', icon('refresh') + '重 roll', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details>${(m.variants?.length || 1) > 1 ? `<div class="assistant-variants">${btn('variant', '‹', 'icon-button', `${attrs} data-selected="${(m.selected || 0) - 1}" aria-label="上一个回复" ${m.selected > 0 ? '' : 'disabled'}`)}<span>${(m.selected || 0) + 1} / ${m.variants.length}</span>${btn('variant', '›', 'icon-button', `${attrs} data-selected="${(m.selected || 0) + 1}" aria-label="下一个回复" ${(m.selected || 0) < m.variants.length - 1 ? '' : 'disabled'}`)}</div>` : ''}</article>`;
+  }
+  function mountImages() {
+    for (const slot of v.root.querySelectorAll('[data-image-photo]')) {
+      const id = slot.dataset.imagePhoto;
+      if (imageURLs.has(id)) { if (!slot.querySelector('img')) slot.innerHTML = `<img src="${esc(imageURLs.get(id))}" alt="助手生成的图片">`; continue; }
+      if (imageLoads.has(id)) continue;
+      imageLoads.add(id);
+      Promise.resolve().then(() => api.getPhoto(id)).then(photo => {
+        if (v.disposed) return;
+        if (!photo) { slot.textContent = '图片已从相册移除'; return; }
+        const url = win.URL.createObjectURL(photo.blob); imageURLs.set(id, url); mountImages();
+      }).catch(() => { if (!v.disposed) slot.textContent = '图片读取失败，重新打开会话可重试'; }).finally(() => imageLoads.delete(id));
+    }
+  }
+  async function replyWithCost(run) {
+    try { return await run({allowPaid: false}); }
+    catch (error) {
+      if (error.code !== 'PAID') throw error;
+      const ask = api.getState().draw.engine === 'gpt' ? api.paidPrompt() : {title: '这张图会扣 Anlas', text: '按当前绘图参数生成会消耗 Anlas，实际扣费以 NovelAI 结算为准。'};
+      if (!await ctx.confirm(ask.title, ask.text)) throw Object.assign(Error('已取消生图'), {name: 'AbortError'});
+      return run({allowPaid: true});
+    }
   }
   function mountPreviews() {
     for (const slot of v.root.querySelectorAll('[data-preview-mid]')) {
@@ -228,6 +253,7 @@ export function assistantApp(ctx) {
   function liveHTML(progress) {
     if (!progress) return '';
     const elapsed = Math.max(0, Date.now() - progress.startedAt), meta = progress.meta || {};
+    if (['prompting', 'drawing'].includes(progress.phase)) return `<article class="assistant-live"><span class="assistant-who">${icon('star')}助手</span><div class="assistant-bubble" role="status">${progress.phase === 'prompting' ? '正在整理绘图提示词' : '正在生成图片'} · ${(elapsed / 1000).toFixed(1)} 秒</div></article>`;
     const part = assistantThoughts(progress.text, meta.reasoningFormat), show = state().stream !== false;
     const reason = [meta.reasoning, part.reasoning].filter(Boolean).filter((s, i, all) => all.indexOf(s) === i).join('\n\n');
     const phase = progress.phase, seconds = ((phase === 'responding' && Number.isFinite(meta.reasoningMs) ? meta.reasoningMs : elapsed) / 1000).toFixed(1);
@@ -261,8 +287,8 @@ export function assistantApp(ctx) {
     const selection = focused ? [previous.selectionStart, previous.selectionEnd] : null;
     const scroller = v.root.querySelector('.assistant-messages'), bottom = !scroller || scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 70;
     v.root.classList.add('assistant-chat-mode');
-    patchChat(`<div class="assistant-chat"><header class="assistant-header"><div><span class="eyebrow">Assistant</span><h1>助手</h1></div><div class="heading-actions">${btn('threads', icon('layers'), 'round-button', 'aria-label="会话记录"')}${btn('new', icon('add'), 'round-button', 'aria-label="新建会话"')}${btn('settings', icon('sliders'), 'round-button', 'aria-label="助手设置"')}</div></header><div class="assistant-context">${icon(state().readContext ? 'book' : 'bubble')}<span>${esc(contextCopy())}</span></div><div class="assistant-messages" data-keep-scroll="assistant-messages" aria-label="助手对话" role="log">${list.length ? `<p class="assistant-conversation-title">${esc(thread.title || '当前会话')}</p>` + list.map(messageHTML).join('') : `<div class="assistant-welcome"><span class="assistant-mascot">${glyph('assistant')}</span><h2>陪你聊聊，帮你想想</h2></div>`}${progress ? liveHTML(progress) : waiting ? `<div class="assistant-wait" role="status"><i></i><span>${saving ? '正在发送……' : '正在准备回复……'}</span></div>` : ''}${error ? `<p class="assistant-error" role="alert">${esc(error)}</p>` : ''}${!waiting && error && last?.role === 'user' ? `<div class="assistant-retry">${btn('retry', icon('refresh') + '重新回复', 'secondary small')}</div>` : ''}</div><div class="assistant-composer"><div data-attachment-tray>${attachmentHTML(attachments(), true)}${fileReads.has(threadId) ? '<span class="hint">正在读取附件……</span>' : ''}</div><input type="file" data-assistant-files accept="${ASSISTANT_FILE_ACCEPT}" multiple hidden>${btn('attach', icon('add'), 'assistant-attach', `aria-label="附加文件" ${fileReads.has(threadId) || pending.get(threadId)?.kind === 'save' ? 'disabled' : ''}`)}<textarea data-assistant-draft aria-label="发给助手的消息" placeholder="想说点什么……" rows="1">${esc(draft())}</textarea>${waiting ? btn('cancel', icon('stop'), 'assistant-send', 'aria-label="停止回复"') : sendButton()}</div></div>`, list);
-    mountPreviews(); resizeComposer();
+    patchChat(`<div class="assistant-chat"><header class="assistant-header"><div><span class="eyebrow">Assistant</span><h1>助手</h1></div><div class="heading-actions">${btn('threads', icon('layers'), 'round-button', 'aria-label="会话记录"')}${btn('new', icon('add'), 'round-button', 'aria-label="新建会话"')}${btn('settings', icon('sliders'), 'round-button', 'aria-label="助手设置"')}</div></header><div class="assistant-context">${icon(state().readContext ? 'book' : 'bubble')}<span>${esc(contextCopy())}</span></div><div class="assistant-messages" data-keep-scroll="assistant-messages" aria-label="助手对话" role="log">${list.length ? `<p class="assistant-conversation-title">${esc(thread.title || '当前会话')}</p>` + list.map(messageHTML).join('') : `<div class="assistant-welcome"><span class="assistant-mascot">${glyph('assistant')}</span><h2>陪你聊聊，帮你想想</h2></div>`}${progress ? liveHTML(progress) : waiting ? `<div class="assistant-wait" role="status"><i></i><span>${saving ? '正在发送……' : '正在准备回复……'}</span></div>` : ''}${error ? `<p class="assistant-error" role="alert">${esc(error)}</p>` : ''}${!waiting && error && last?.role === 'user' ? `<div class="assistant-retry">${btn('retry', icon('refresh') + '重新回复', 'secondary small')}</div>` : ''}</div><div class="assistant-composer"><div data-attachment-tray>${attachmentHTML(attachments(), true)}${fileReads.has(threadId) ? '<span class="hint">正在读取附件……</span>' : ''}</div><input type="file" data-assistant-files accept="${ASSISTANT_FILE_ACCEPT}" multiple hidden><details class="assistant-add-menu"><summary class="assistant-attach" aria-label="添加" title="添加">${icon('add')}</summary><div class="assistant-add-options">${btn('attach', icon('book') + '添加附件', 'text-button', `aria-label="附加文件" ${fileReads.has(threadId) || pending.get(threadId)?.kind === 'save' ? 'disabled' : ''}`)}${btn('draw-image', icon('image') + '生图', 'text-button')}</div></details><textarea data-assistant-draft aria-label="发给助手的消息" placeholder="想说点什么……" rows="1">${esc(draft())}</textarea>${waiting ? btn('cancel', icon('stop'), 'assistant-send', 'aria-label="停止回复"') : sendButton()}</div></div>`, list);
+    mountPreviews(); mountImages(); resizeComposer();
     for (const button of v.root.querySelectorAll('[data-action=reroll],[data-action=delete-message],[data-action=edit-message]')) button.disabled = waiting;
     const editSave = v.root.querySelector('[data-action=save-edit]'); if (editSave) editSave.disabled = waiting || !!editing?.saving;
     const next = v.root.querySelector('.assistant-messages'); if (bottom) next.scrollTop = next.scrollHeight;
@@ -330,7 +356,7 @@ export function assistantApp(ctx) {
         if (job.cancelled) throw Object.assign(Error('已取消发送'), {name: 'AbortError'});
         await api.appendAssistantMessage(id, {role: 'user', text, attachments: files});
         job.saved = true;
-      } else await api.assistantReply(id);
+      } else await replyWithCost(options => { if (job.cancelled) throw Object.assign(Error('已取消'), {name: 'AbortError'}); return api.assistantReply(id, undefined, options); });
     } catch (error) {
       if (error?.name !== 'AbortError') errors.set(id, error.message || '回复没有完成，请重试。');
       // If generation failed before saving the user message, put the unsent text back.
@@ -344,7 +370,7 @@ export function assistantApp(ctx) {
     if (!message || busy(threadId)) return;
     closePreviews();
     const id = threadId, job = {kind: 'reply'}; pending.set(id, job); errors.delete(id); drawChat();
-    try { await api.assistantReroll(id, message.id); }
+    try { await replyWithCost(options => { if (job.cancelled) throw Object.assign(Error('已取消'), {name: 'AbortError'}); return api.assistantReroll(id, message.id, options); }); }
     catch (error) { if (error.name !== 'AbortError') errors.set(id, error.message); }
     finally { if (pending.get(id) === job) pending.delete(id); if (!v.disposed) await render(); }
   }
@@ -380,7 +406,17 @@ export function assistantApp(ctx) {
   v.on('click', '[data-action]', async el => {
     const action = el.dataset.action, message = thread?.messages.find(m => m.id === el.dataset.mid);
     switch (action) {
-      case 'attach': v.root.querySelector('[data-assistant-files]').click(); return;
+      case 'attach': v.root.querySelector('.assistant-add-menu').open = false; v.root.querySelector('[data-assistant-files]').click(); return;
+      case 'draw-image':
+        v.root.querySelector('.assistant-add-menu').open = false;
+        saveDraft('帮我画：' + draft().replace(/^帮我画[：:]\s*/, '')); drawChat(); v.root.querySelector('[data-assistant-draft]')?.focus(); return;
+      case 'image': {
+        const id = message?.meta?.image?.photoId, src = imageURLs.get(id);
+        if (!src) return;
+        const photo = await api.getPhoto(id); if (v.disposed) return;
+        if (!photo) { ctx.notify('这张图片已从相册移除'); imageURLs.delete(id); win.URL.revokeObjectURL(src); el.textContent = '图片已从相册移除'; return; }
+        openImageViewer({doc: ctx.doc, src, alt: '助手生成的图片', from: el.querySelector('img'), info: photo.info, actions: [downloadAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify)]}); return;
+      }
       case 'remove-file': fileDrafts.set(threadId, attachments().filter((_, i) => i !== Number(el.dataset.file))); drawChat(); return;
       case 'reroll': return reroll(message);
       case 'variant': if (message && !busy(threadId)) { closePreviews(); await api.selectAssistantVariant(threadId, message.id, Number(el.dataset.selected)); await render(); } return;
@@ -453,7 +489,7 @@ export function assistantApp(ctx) {
   v.showing = () => threadId;
   v.leave = () => { active = false; syncClock(false); closePreviews(); displayCache.clear(); };
   const dispose = v.dispose;
-  v.dispose = () => { active = false; syncClock(false); win.removeEventListener('message', resizePreview); composerObserver?.disconnect(); closePreviews(); displayCache.clear(); dispose(); };
+  v.dispose = () => { for (const url of imageURLs.values()) win.URL.revokeObjectURL(url); imageURLs.clear(); active = false; syncClock(false); win.removeEventListener('message', resizePreview); composerObserver?.disconnect(); closePreviews(); displayCache.clear(); dispose(); };
   render().catch(error => ctx.notify(error.message, {error: true}));
   return v;
 }
