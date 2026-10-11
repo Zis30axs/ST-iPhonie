@@ -732,30 +732,65 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
       }
     });
   }, {signal});
-  // A mouse drags the home screen sideways to change page (fingers swipe it natively); a drag is not also a tap.
+  // One gesture, one page: damp finger travel, settle at a page, and keep vertical widget scrolling native.
   {
     const pagesEl = $('.home-pages');
-    let drag = null, dragged = 0;
-    pagesEl.addEventListener('pointerdown', e => { if (e.target.closest('.today-page[data-editing] .tw, .today-page input')) return; if (e.pointerType === 'mouse' && e.button === 0 && pagesEl.children.length > 1) drag = {id: e.pointerId, x: e.clientX, left: pagesEl.scrollLeft, moved: false}; }, {signal});
-    win.addEventListener('pointermove', e => {
-      if (!drag || e.pointerId !== drag.id) return;
-      const dx = e.clientX - drag.x;
-      if (!drag.moved && Math.abs(dx) < 6) return;
-      if (!drag.moved) { drag.moved = true; pagesEl.style.scrollSnapType = 'none'; pagesEl.style.scrollBehavior = 'auto'; }
-      pagesEl.scrollLeft = drag.left - dx;
-    }, {signal});
-    win.addEventListener('pointerup', e => {
+    let drag = null, dragged = 0, wheelAt = 0, wheelTotal = 0, wheelCommitted = false;
+    const resetStyle = () => { pagesEl.style.scrollSnapType = ''; pagesEl.style.scrollBehavior = ''; };
+    const start = (target, x, y, id) => {
+      if (target.closest('.today-page[data-editing] .tw, input, textarea, select') || pagesEl.children.length < 2) return;
+      drag = {id, x, y, left: pagesEl.scrollLeft, width: pagesEl.clientWidth || 1, moved: false};
+    };
+    const move = (x, y) => {
+      if (!drag) return false;
+      const dx = x - drag.x, dy = y - drag.y;
+      if (!drag.moved) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) < 8) return false;
+        if (Math.abs(dy) >= Math.abs(dx)) { drag = null; return false; }
+        drag.moved = true; pagesEl.style.scrollSnapType = 'none'; pagesEl.style.scrollBehavior = 'auto';
+      }
+      const travel = Math.sign(dx) * Math.min(drag.width, Math.abs(dx) * .82);
+      pagesEl.scrollLeft = drag.left - travel;
+      return true;
+    };
+    const end = (x, cancelled = false) => {
       const d = drag; drag = null;
       if (!d?.moved) return;
-      const w = pagesEl.clientWidth || 1, dx = e.clientX - d.x;
-      let page = Math.round(d.left / w);
-      if (Math.abs(dx) > w * 0.15) page += dx < 0 ? 1 : -1;
+      const dx = x - d.x;
+      let page = Math.round(d.left / d.width);
+      if (!cancelled && Math.abs(dx) > Math.min(64, d.width * .18)) page += dx < 0 ? 1 : -1;
       page = Math.max(0, Math.min(pagesEl.children.length - 1, page));
-      pagesEl.style.scrollSnapType = ''; pagesEl.style.scrollBehavior = '';
-      pagesEl.scrollTo({left: page * w, behavior: 'smooth'});
+      resetStyle();
+      pagesEl.scrollTo({left: page * d.width, behavior: motion.matches ? 'auto' : 'smooth'});
       dragged = Date.now();
-    }, {signal});
+    };
+    pagesEl.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch' && e.button === 0) start(e.target, e.clientX, e.clientY, e.pointerId); }, {signal});
+    win.addEventListener('pointermove', e => { if (drag?.id === e.pointerId && move(e.clientX, e.clientY)) e.preventDefault(); }, {signal});
+    win.addEventListener('pointerup', e => { if (drag?.id === e.pointerId) end(e.clientX); }, {signal});
+    win.addEventListener('pointercancel', e => { if (drag?.id === e.pointerId) end(e.clientX, true); }, {signal});
+    pagesEl.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) { end(drag?.x || 0, true); return; }
+      const t = e.touches[0]; start(e.target, t.clientX, t.clientY, 'touch');
+    }, {signal, passive: true});
+    pagesEl.addEventListener('touchmove', e => {
+      const t = e.touches[0];
+      if (drag?.id === 'touch' && t && e.cancelable && move(t.clientX, t.clientY)) e.preventDefault();
+    }, {signal, passive: false});
+    pagesEl.addEventListener('touchend', e => { if (drag?.id === 'touch') end(e.changedTouches[0]?.clientX ?? drag.x); }, {signal});
+    pagesEl.addEventListener('touchcancel', () => end(drag?.x || 0, true), {signal});
+    pagesEl.addEventListener('wheel', e => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) || !e.cancelable) return;
+      e.preventDefault();
+      const now = Date.now();
+      if (now - wheelAt > 220) { wheelTotal = 0; wheelCommitted = false; }
+      wheelAt = now; wheelTotal += e.deltaX * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pagesEl.clientWidth : 1);
+      if (wheelCommitted || Math.abs(wheelTotal) < 36) return;
+      wheelCommitted = true;
+      const w = pagesEl.clientWidth || 1, page = Math.max(0, Math.min(pagesEl.children.length - 1, Math.round(pagesEl.scrollLeft / w) + Math.sign(wheelTotal)));
+      pagesEl.scrollTo({left: page * w, behavior: motion.matches ? 'auto' : 'smooth'});
+    }, {signal, passive: false});
     pagesEl.addEventListener('click', e => { if (Date.now() - dragged < 350) { e.stopPropagation(); e.preventDefault(); } }, {signal, capture: true});
+    signal.addEventListener('abort', resetStyle, {once: true});
   }
   // How far 今天 is in (1: all of it): the wallpaper blurs and the dock and dots go, following the finger.
   $('.home-pages').addEventListener('scroll', e => {

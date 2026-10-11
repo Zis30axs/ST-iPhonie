@@ -131,9 +131,22 @@ export function assistantAttachments(value = []) {
     return item;
   });
 }
+/** Separate returned thought tags; fenced/inline code examples remain literal. Raw saved text is untouched. */
+export function assistantThoughts(value) {
+  const thoughts = [], protectedCode = [];
+  let body = String(value || '').replace(/(```[^]*?```|~~~[^]*?~~~|`[^`\n]*`)/g, code => {
+    protectedCode.push(code); return `\u0000CODE${protectedCode.length - 1}\u0000`;
+  });
+  body = body.replace(/<(think|thinking)\b[^>]*>([^]*?)(?:<\/\1\s*>|$)/gi, (_, tag, content) => {
+    if (content.trim()) thoughts.push(content.trim()); return '';
+  });
+  const restore = text => text.replace(/\u0000CODE(\d+)\u0000/g, (_, i) => protectedCode[Number(i)] || '');
+  return {text: restore(body), reasoning: thoughts.map(restore).join('\n\n')};
+}
+
 export function assistantHistory(messages, {textOnly = false} = {}) {
   return messages.map(message => {
-    const files = assistantAttachments(message.attachments), body = [message.text,
+    const files = assistantAttachments(message.attachments), body = [message.role === 'assistant' ? assistantThoughts(message.text).text : message.text,
       ...files.filter(f => f.kind === 'text').map(f => `【用户附件：${f.name}】\n${f.text}\n【附件结束】`)].filter(Boolean).join('\n\n');
     const images = files.filter(f => f.kind === 'image');
     if (images.length && textOnly) throw Error('当前酒馆生成接口不支持助手图片附件，请使用聊天补全或自定义视觉模型');
@@ -148,5 +161,5 @@ export function assertAssistantThread(thread) {
 export function assistantSummary(thread) {
   assertAssistantThread(thread);
   const {messages, ...summary} = thread;
-  return {...summary, messageCount: messages.length, preview: String(messages.at(-1)?.text || '').replace(/\s+/g, ' ').slice(0, 120)};
+  return {...summary, messageCount: messages.length, preview: (messages.at(-1)?.role === 'assistant' ? assistantThoughts(messages.at(-1)?.text).text : String(messages.at(-1)?.text || '')).replace(/\s+/g, ' ').slice(0, 120)};
 }

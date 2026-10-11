@@ -116,7 +116,7 @@ a{color:var(--accent-ink)}
 .home-foot{position:absolute;left:0;right:0;bottom:0;z-index:1;display:flex;flex-direction:column}
 .home-pages{flex:1;min-height:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior:contain}
 .home-pages::-webkit-scrollbar{display:none}
-.home-page{flex:0 0 100%;scroll-snap-align:start;padding:52px 0 calc(var(--home-foot) + 8px);overflow-y:auto;scrollbar-width:none}
+.home-page{flex:0 0 100%;scroll-snap-align:start;scroll-snap-stop:always;padding:52px 0 calc(var(--home-foot) + 8px);overflow-y:auto;scrollbar-width:none}
 .clock-block{text-align:center;padding:12px 0 16px}
 .home-date{font-size:15px;font-weight:800;letter-spacing:.05em}
 .home-clock{font-size:72px;font-weight:900;line-height:1.05;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
@@ -1897,7 +1897,7 @@ button.gift-item[data-short]{opacity:.55}
 /* A full-screen blur costs a phone every frame something moves over it: only there while 今天 is coming in. */
 .home[data-today-in] .today-veil{display:block}
 .home[data-today] .home-foot,.home[data-today] .dots,.home[data-today] .phone-dock{pointer-events:none}
-.today-page{flex:0 0 100%;scroll-snap-align:start;position:relative;overflow-y:auto;overflow-x:hidden;padding:52px 14px calc(env(safe-area-inset-bottom,0px) + 36px);scrollbar-width:none;overscroll-behavior-y:contain;color:var(--ink);container-type:inline-size;-webkit-mask-image:linear-gradient(#000 calc(100% - 26px),transparent);mask-image:linear-gradient(#000 calc(100% - 26px),transparent)}
+.today-page{flex:0 0 100%;scroll-snap-align:start;scroll-snap-stop:always;position:relative;overflow-y:auto;overflow-x:hidden;padding:52px 14px calc(env(safe-area-inset-bottom,0px) + 36px);scrollbar-width:none;overscroll-behavior-y:contain;color:var(--ink);container-type:inline-size;-webkit-mask-image:linear-gradient(#000 calc(100% - 26px),transparent);mask-image:linear-gradient(#000 calc(100% - 26px),transparent)}
 .today-page::-webkit-scrollbar{display:none}
 .today-top{display:flex;align-items:center;gap:8px;margin:0 2px 14px;min-height:38px}
 .today-search{flex:1;display:flex;align-items:center;gap:6px;height:38px;padding:0 12px;border-radius:12px;background:color-mix(in srgb,var(--card) 58%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);color:var(--ink2)}
@@ -2039,3 +2039,5 @@ button.gift-item[data-short]{opacity:.55}
 .assistant-actions>summary svg{width:19px;height:19px}
 .assistant-actions>summary:hover,.assistant-actions>summary:focus-visible{background:var(--accent-soft)}
 .assistant-actions>.assistant-message-tools{padding:0 0 4px;margin:0}
+
+.assistant-prose hr{border:0;border-top:1px solid var(--line);margin:12px 0}

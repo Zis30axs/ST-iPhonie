@@ -777,6 +777,7 @@ export interface BackendAPI extends BackendFacade {
     currentDialogue(): LatestMessage & { revision: number };
     /** Saved Chat Completion presets copied into the Assistant, without selecting them in the tavern. */
     assistantPresets(): Promise<Array<{ id: string; name: string; entries: Array<{ id: string; title: string; text: string; enabled: boolean; role: MessageRole; marker: boolean; position: number; depth: number; order: number }> }>>;
+    assistantDisplay(text: string, role: string, depth: number): string;
     assistantContext(): { available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } };
     /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
     assistantReply(threadId: string, text?: string): Promise<AssistantThread>;
