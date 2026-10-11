@@ -1508,6 +1508,16 @@ export class TTSBackend {
         if (typeof title !== 'string' || !title.trim() || title.trim().length > ASSISTANT_LIMITS.title) throw Error('会话名字请填写 1–80 个字符');
         return this.mutateAssistantThread(id, thread => { thread.title = title.trim(); thread.titleEdited = true; }, {history: false});
     }
+    async editAssistantMessage(id, messageId, text, expectedText) {
+        if (typeof text !== 'string' || text.length > ASSISTANT_LIMITS.text) throw Error('消息格式无效或超过 100000 字符');
+        return this.mutateAssistantThread(id, thread => {
+            const message = thread.messages.find(m => m.id === messageId);
+            if (message?.role !== 'user') throw Error('只能编辑自己发送的消息');
+            if (expectedText !== undefined && message.text !== expectedText) throw Error('这条消息已经被修改，请重新打开编辑');
+            if (!text.trim() && !message.attachments?.length) throw Error('消息不能为空');
+            message.text = text.trim(); message.editedAt = Date.now();
+        });
+    }
     async deleteAssistantMessage(id, messageId) {
         return this.mutateAssistantThread(id, thread => {
             const index = thread.messages.findIndex(m => m.id === messageId);
@@ -1930,6 +1940,7 @@ export class TTSBackend {
             saveAssistant: patch => this.saveAssistant(patch), assistantThreads: () => this.assistantThreads(), assistantThread: id => this.assistantThread(id),
             newAssistantThread: () => this.newAssistantThread(), appendAssistantMessage: (id, value, expectedLastId, expectedRevision) => this.appendAssistantMessage(id, value, expectedLastId, expectedRevision),
             renameAssistantThread: (id, title) => this.renameAssistantThread(id, title),
+            editAssistantMessage: (id, mid, text, expectedText) => this.editAssistantMessage(id, mid, text, expectedText),
             deleteAssistantMessage: (id, mid) => this.deleteAssistantMessage(id, mid),
             selectAssistantVariant: (id, mid, selected) => this.selectAssistantVariant(id, mid, selected),
             deleteAssistantThread: id => this.deleteAssistantThread(id), clearAssistantThread: id => this.clearAssistantThread(id),

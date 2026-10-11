@@ -122,7 +122,7 @@ export interface AssistantSettings {
 export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
 export interface AssistantMeta { elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; }
 export interface AssistantVariant { text: string; at: number; meta?: AssistantMeta; }
-export interface AssistantMessage extends AssistantVariant { id: string; role: 'user' | 'assistant'; attachments?: AssistantAttachment[]; variants?: AssistantVariant[]; selected?: number; }
+export interface AssistantMessage extends AssistantVariant { id: string; role: 'user' | 'assistant'; attachments?: AssistantAttachment[]; editedAt?: number; variants?: AssistantVariant[]; selected?: number; }
 export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
 export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
@@ -640,6 +640,7 @@ export interface BackendFacade {
     /** Rejects empty/oversized messages and threads already holding 500 messages. */
     appendAssistantMessage(id: string, message: Pick<AssistantMessage, 'role' | 'text' | 'attachments' | 'meta'>, expectedLastId?: string | null, expectedRevision?: number): Promise<AssistantThread>;
     renameAssistantThread(id: string, title: string): Promise<AssistantThread>;
+    editAssistantMessage(id: string, messageId: string, text: string, expectedText?: string): Promise<AssistantThread>;
     deleteAssistantMessage(id: string, messageId: string): Promise<AssistantThread>;
     selectAssistantVariant(id: string, messageId: string, selected: number): Promise<AssistantThread>;
     deleteAssistantThread(id: string): Promise<boolean>;

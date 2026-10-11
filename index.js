@@ -242,6 +242,7 @@ function connect(source){
   assistantReply:(id,text)=>{check();return assistantHost.reply(id,text);},
   assistantReroll:(id,mid)=>{check();return assistantHost.reroll(id,mid);},
   assistantReadFiles:files=>{check();return readAssistantFiles(files);},
+  editAssistantMessage:(id,mid,text,expectedText)=>{check();assistantHost.cancel(id);return api.editAssistantMessage(id,mid,text,expectedText);},
   deleteAssistantMessage:(id,mid)=>{check();assistantHost.cancel(id);return api.deleteAssistantMessage(id,mid);},
   selectAssistantVariant:(id,mid,selected)=>{check();assistantHost.cancel(id);return api.selectAssistantVariant(id,mid,selected);},
   assistantBusy:id=>{check();return assistantHost.busy(id);},
