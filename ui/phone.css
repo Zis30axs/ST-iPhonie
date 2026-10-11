@@ -590,7 +590,18 @@ details>div{padding-bottom:10px}
 .play-caption{position:relative;font-size:18px;font-weight:700;line-height:1.75;min-height:60px;white-space:pre-wrap;overflow-wrap:anywhere}
 .dialogue-foot{position:relative;display:flex;align-items:center;justify-content:space-between;margin-top:4px;font-size:12px;color:var(--ink2)}
 .dialogue-foot svg{width:14px;height:14px;color:var(--e)}
-[data-phase=idle] .dialogue-foot svg,[data-phase=paused] .dialogue-foot svg{animation:nudge 1s ease-in-out infinite}
+.reply-picker-toggle{flex:none;display:grid;place-items:center;width:36px;height:36px;margin:-8px -8px -8px 8px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--e);cursor:pointer}
+.reply-picker-toggle:hover,.reply-picker-toggle:focus-visible{background:var(--e-soft)}
+.reply-picker-toggle svg{transition:transform .18s ease}
+.reply-picker-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
+.reply-picker{position:relative;max-height:224px;overflow-y:auto;overscroll-behavior:contain;margin-top:12px;border-top:1px solid var(--e-soft);padding-top:4px}
+.reply-choice{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:10px 8px;border:0;border-radius:10px;text-align:left;background:transparent;color:var(--ink);cursor:pointer}
+.reply-choice>span:first-child{min-width:0}
+.reply-choice strong,.reply-choice small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reply-choice strong{font-size:13px}.reply-choice small{margin-top:3px;font-size:12px;color:var(--ink2)}
+.reply-choice[aria-pressed=true],.reply-choice:hover,.reply-choice:focus-visible{background:var(--e-soft)}
+.reply-count{flex:none;font-size:12px;color:var(--ink2)}
+.reply-picker-empty{display:block;padding:12px 8px;color:var(--ink2);font-size:13px}
 @keyframes nudge{50%{transform:translateY(3px)}}
 /* Buttons keep their height equal to their width, so a narrow screen shrinks them but never squeezes them oval.
    The play button does not shrink; the others share what is left. */

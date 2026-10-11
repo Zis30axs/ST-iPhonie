@@ -217,9 +217,9 @@ export function listenApp(ctx) {
   async function render() {
     const ticket = ++epoch;
     latest = selected();
-    v.draw(heading('听取', help('点台词播放单句，也可以整条播放和导出。默认显示最新一条带语音的回复；在正文点过其他楼层的声波后，会显示选中的那一条。隐藏正文声波不影响这里播放。') + btn('refresh', icon('refresh') + '刷新', 'chip-button'), 'Now Playing')
+    v.draw(heading('听取', help('点台词播放单句，也可以整条播放和导出。默认显示最新一条带语音的回复。点对话框右下角的小三角，可以选择其他有语音台词的楼层；选中后整条播放和导出都使用该楼层。隐藏正文声波不影响这里播放。') + btn('refresh', icon('refresh') + '刷新', 'chip-button'), 'Now Playing')
       + `<div class="listen-stage"><div class="portrait"><span class="ring"></span><span class="ring"></span>${halo()}<span data-portrait></span></div><span class="chip emotion" data-emotion hidden></span><div class="visualizer" aria-hidden="true">${'<i></i>'.repeat(32)}</div></div>
-        <div class="dialogue-box"><span class="plate" data-speaker-plate><span></span></span><span class="dialogue-engine" data-engine-label></span><p class="play-caption" data-playback-line aria-live="polite"></p><div class="dialogue-foot"><span data-playback-message></span><svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M1 3h12L7 12z"/></svg></div></div>
+        <div class="dialogue-box"><span class="plate" data-speaker-plate><span></span></span><span class="dialogue-engine" data-engine-label></span><p class="play-caption" data-playback-line aria-live="polite"></p><div class="dialogue-foot"><span data-playback-message></span>${btn('toggle-replies', '<svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M1 3h12L7 12z"/></svg>', 'reply-picker-toggle', 'aria-label="选择语音楼层" aria-expanded="false" aria-controls="listen-reply-picker"')}</div><div id="listen-reply-picker" class="reply-picker" role="group" aria-label="有语音台词的楼层" hidden></div></div>
         <div class="actions" data-waiting hidden>${btn('configure', icon('mic') + '去给这个角色选音色', 'primary')}</div>
         <div class="transport">${btn('favorite', icon('heart'), '', 'aria-label="收藏这一句"')}${btn('download', icon('download'), '', 'aria-label="下载这一句"')}${btn('prev', icon('prev', true), '', 'aria-label="上一句"')}${btn('main-play', icon('play', true), 'main-play', 'aria-label="播放"')}${btn('next', icon('skip', true), '', 'aria-label="下一句"')}${btn('stop', icon('stop', true), '', 'aria-label="停止"')}</div>
         ${latest.lines.length
@@ -274,6 +274,26 @@ export function listenApp(ctx) {
   };
   v.refresh = render;
 
+  function closeReplies(focus = false) {
+    const menu = v.root.querySelector('.reply-picker'), button = v.root.querySelector('[data-action=toggle-replies]');
+    if (menu) { menu.hidden = true; menu.replaceChildren(); }
+    button?.setAttribute('aria-expanded', 'false');
+    if (focus) button?.focus();
+  }
+  function toggleReplies() {
+    const menu = v.root.querySelector('.reply-picker'), button = v.root.querySelector('[data-action=toggle-replies]');
+    if (!menu.hidden) { closeReplies(); return; }
+    const rows = api.listDialogueReplies?.() || [];
+    menu.innerHTML = rows.length ? rows.map(row => btn('select-reply', `<span><strong>回复 #${row.id} · ${esc(row.name)}</strong><small>${esc(row.preview)}</small></span><span class="reply-count">${row.count} 句</span>`, 'reply-choice', `data-id="${row.id}" data-token="${esc(row.token)}" aria-pressed="${row.id === latest.id}"`)).join('') : '<span class="reply-picker-empty">还没有可播放的楼层</span>';
+    menu.hidden = false; button.setAttribute('aria-expanded', 'true');
+    const current = menu.querySelector('[aria-pressed="true"]');
+    if (current) menu.scrollTop = current.getBoundingClientRect().top - menu.getBoundingClientRect().top;
+  }
+  v.on('keydown', '.dialogue-box', (el, event) => {
+    if (event.key === 'Escape' && !v.root.querySelector('.reply-picker').hidden) { event.stopPropagation(); closeReplies(true); }
+  });
+  v.on('pointerdown', '*', el => { if (!el.closest('.dialogue-box')) closeReplies(); });
+
   // Pin the displayed reply before any async lookup, so another selection cannot change the exported file.
   function displayedReply() {
     if (!sameReply(selected(), latest)) { render().catch(e => ctx.notify(e.message)); throw Error('聊天内容已变化，请重新选择台词'); }
@@ -302,6 +322,11 @@ export function listenApp(ctx) {
   }
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
+      case 'toggle-replies': toggleReplies(); break;
+      case 'select-reply':
+        try { api.selectDialogue(Number(el.dataset.id), el.dataset.token); }
+        finally { closeReplies(); await render(); v.root.querySelector('[data-action=toggle-replies]')?.focus(); }
+        break;
       case 'refresh': await render(); break;
       case 'play-all': play(); break;
       case 'export-all': await v.busy(el, exportReply); break;

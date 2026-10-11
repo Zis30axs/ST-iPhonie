@@ -777,6 +777,10 @@ export interface BackendAPI extends BackendFacade {
     /** Last selected story reply, falling back to the newest voiced reply. Revision changes with its chat/message/swipe.
      * Playback completion and stop keep the selection; editing, deleting or switching chats invalidates it. */
     currentDialogue(): LatestMessage & { revision: number };
+    /** Readable story replies, newest first; tokens validate the chat/message/swipe when selecting. */
+    listDialogueReplies(): Array<{id: number; token: string; name: string; count: number; preview: string}>;
+    /** Selects without generating audio. A different reply stops the previous playback. */
+    selectDialogue(messageId: number, token: string): LatestMessage & {revision: number};
     /** Saved Chat Completion presets copied into the Assistant, without selecting them in the tavern. */
     assistantPresets(): Promise<Array<{ id: string; name: string; entries: Array<{ id: string; title: string; text: string; enabled: boolean; role: MessageRole; marker: boolean; position: number; depth: number; order: number }> }>>;
     assistantReasoningFormat(): {prefix: string; suffix: string};
