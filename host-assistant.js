@@ -1,6 +1,6 @@
 // Independent conversations with the phone's text model. Nothing here writes to the tavern story or selects its preset.
-import {ASSISTANT_LIMITS, buildAssistantPrompt, normalizeAssistant} from './core/assistant.js';
-import {activeText, customRequest} from './core/llm.js';
+import {ASSISTANT_LIMITS, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta} from './core/assistant.js';
+import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';
 import {tavernAssistantPresets, buildTavernAssistantMessages} from './assistant-presets.js';
 import {buildAssistantContext} from './assistant-context.js';
@@ -36,9 +36,9 @@ async function completionSnapshot(ctx, presetName, load = loadCompletionModule) 
 }
 
 /** Uses the current connection, but passes a request-local preset and an independent abort signal. */
-export async function requestAssistantText(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule} = {}) {
+export async function requestAssistantText(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule, details = false} = {}) {
   const text = activeText(settings.text);
-  if (text.source === 'custom') return customRequest({text, key: backend.textKeys.get(text.id) || '', prompt: messages, signal});
+  if (text.source === 'custom') return customRequest({text, key: backend.textKeys.get(text.id) || '', prompt: messages, signal, details});
   const service = ctx.ChatCompletionService;
   if (hasCompletionService(ctx)) {
     const snapshot = completion || await completionSnapshot(ctx, presetName, loadCompletion);
@@ -46,11 +46,35 @@ export async function requestAssistantText(ctx, backend, settings, messages, {pr
     const payload = await service.presetToGeneratePayload(structuredClone(snapshot.preset), {}, {messages: structuredClone(messages), model: snapshot.model, stream: true});
     checkSignal(signal);
     // No retries after a sent request: a retry is a deliberate user action in the Assistant app.
+    // A request-local raw stream retains the model/provider fields ST's extracted generator omits.
+    // Keep the service fallback for older hosts; never intercept global fetch or other conversations.
+    const module = details && typeof ctx.getRequestHeaders === 'function' ? await loadCompletion() : null;
+    const meta = {requestedModel: snapshot.model || 'OpenRouter 自动选择'};
+    if (module?.getStreamingReply) {
+      checkSignal(signal);
+      const response = await fetch('/api/backends/chat-completions/generate', {method: 'POST', headers: ctx.getRequestHeaders(), cache: 'no-cache', body: JSON.stringify(payload), signal});
+      if (!response.ok) throw failure(response.status, await response.text());
+      const state = {reasoning: '', images: [], signature: '', toolSignatures: {}};
+      const info = {onChunk: raw => responseMetadata(raw, meta), chunkText: raw => {
+        if (raw?.choices?.[0]?.index > 0) return '';
+        return module.getStreamingReply(raw, state, {chatCompletionSource: payload.chat_completion_source, overrideShowThoughts: true});
+      }};
+      let answer = await streamText(response, info);
+      if (!answer && info.raw) {
+        const json = JSON.parse(info.raw);
+        if (json.error) throw failure(response.status, info.raw);
+        responseMetadata(json, meta);
+        try { answer = replyText(json); } catch { answer = json.content?.filter(p => p.type === 'text').map(p => p.text).join('') || json.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('') || ''; }
+      }
+      checkSignal(signal);
+      if (state.reasoning) meta.reasoning = state.reasoning;
+      return {text: answer, meta};
+    }
     const response = await service.sendRequest(payload, true, signal);
-    if (typeof response !== 'function') return String(response?.content || '');
+    if (typeof response !== 'function') return details ? {text: String(response?.content || ''), meta: {...meta, reasoning: response?.reasoning || ''}} : String(response?.content || '');
     let result = '';
-    for await (const chunk of response()) { checkSignal(signal); if (typeof chunk.text === 'string') result = chunk.text; }
-    return result;
+    for await (const chunk of response()) { checkSignal(signal); if (typeof chunk.text === 'string') result = chunk.text; if (details && typeof chunk.state?.reasoning === 'string') meta.reasoning = chunk.state.reasoning; }
+    return details ? {text: result, meta} : result;
   }
   // Older taverns expose generateRaw only. It has no request-local cancellation; its late answer is discarded.
   checkSignal(signal);
@@ -85,7 +109,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
     const rules = buildTavernAssistantMessages(preset, overrides, macroContext);
     return {name: preset.name, rules, markers: new Set(preset.entries.filter(e => e.marker && enabled(e)).map(e => e.id))};
   }
-  async function reply(id, text = '') {
+  async function reply(id, text = '', rerollId = '') {
     checkOpen();
     if (jobs.has(id)) throw Error('这段助手对话正在回复，请等一下或先取消');
     if (typeof text !== 'string') throw Error('助手消息格式无效');
@@ -103,16 +127,20 @@ export function createAssistantHost({context, settings, backend, presets = taver
       let thread = await backend.assistantThread(id);
       if (!thread) throw Error('这条助手会话已经不在了');
       const adding = !!text.trim();
-      if (thread.messages.length > ASSISTANT_LIMITS.messages - (adding ? 2 : 1)) throw Error('这段助手对话已满，请新建对话后继续');
+      const targetIndex = rerollId ? thread.messages.findIndex(m => m.id === rerollId && m.role === 'assistant') : -1;
+      if (rerollId && targetIndex < 0) throw Error('这条回复已经不在了');
+      if (rerollId && (thread.messages[targetIndex].variants?.length || 1) >= ASSISTANT_LIMITS.variants) throw Error('这条消息已有 20 个回复版本');
+      if (!rerollId && thread.messages.length > ASSISTANT_LIMITS.messages - (adding ? 2 : 1)) throw Error('这段助手对话已满，请新建对话后继续');
       if (adding) thread = await backend.appendAssistantMessage(id, {role: 'user', text});
-      const last = thread.messages.at(-1);
-      if (last?.role !== 'user') throw Error('请先发一条消息给助手');
+      const historyMessages = rerollId ? thread.messages.slice(0, targetIndex) : thread.messages;
+      const last = historyMessages.at(-1), revision = thread.revision || 0;
+      if (!last || (!rerollId && last.role !== 'user')) throw Error('请先发一条消息给助手');
       checkSignal(controller.signal);
       const chosen = await selectedPreset(ctx, s);
       checkSignal(controller.signal);
       const rules = chosen.rules.filter(r => r.content.trim());
       const prefix = [{role: 'system', content: IDENTITY}, ...rules.map(({role, content}) => ({role, content}))];
-      const history = thread.messages.map(m => ({role: m.role, content: m.text}));
+      const history = assistantHistory(historyMessages, {textOnly: activeText(s.text).source === 'tavern' && !hasCompletionService(ctx)});
       let reference = [];
       if (s.assistant.readContext) {
         const active = context().streamingProcessor;
@@ -131,15 +159,19 @@ export function createAssistantHost({context, settings, backend, presets = taver
         messages.splice(Math.max(1 + normal.length, messages.length - rule.depth), 0, {role: rule.role, content: rule.content});
       }
       checkSignal(controller.signal);
-      const answer = String(await request(ctx, backend, s, messages, {presetName: chosen.name, signal: controller.signal, completion, loadCompletion}) || '');
+      const started = performance.now();
+      const result = await request(ctx, backend, s, messages, {presetName: chosen.name, signal: controller.signal, completion, loadCompletion, details: true});
+      const answer = typeof result === 'string' ? result : String(result?.text || '');
+      const meta = assistantMeta({...result?.meta, elapsedMs: performance.now() - started});
       checkSignal(controller.signal); checkOpen();
       if (!answer.trim()) throw Error('助手这次没有返回内容，可以重试');
       if (answer.length > ASSISTANT_LIMITS.text) throw Error('助手回复超过保存上限，请缩短回复要求后重试');
       // Clearing/deleting/editing a conversation during a request cannot attach its reply to different messages.
       const current = await backend.assistantThread(id);
       checkSignal(controller.signal); checkOpen();
-      if (current?.messages.at(-1)?.id !== last.id) throw Error('助手会话已变化，这次回复没有写入');
-      return await backend.appendAssistantMessage(id, {role: 'assistant', text: answer}, last.id);
+      if (!current || (current.revision || 0) !== revision || (!rerollId && current.messages.at(-1)?.id !== last.id)) throw Error('助手会话已变化，这次回复没有写入');
+      if (rerollId) return await backend.addAssistantVariant(id, rerollId, {text: answer, meta}, revision);
+      return await backend.appendAssistantMessage(id, {role: 'assistant', text: answer, meta}, last.id, revision);
     } catch (error) {
       if (controller.signal.aborted) throw cancelled();
       throw error;
@@ -150,7 +182,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
   }
   return {
     presets: () => { checkOpen(); return presets(context()); },
-    context: contextInfo, reply,
+    context: contextInfo, reply, reroll: (id, messageId) => reply(id, '', messageId),
     busy: id => jobs.has(id),
     cancel(id) { jobs.get(id)?.controller.abort(); },
     close() { closed = true; for (const job of jobs.values()) job.controller.abort(); jobs.clear(); lastContext = null; },

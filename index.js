@@ -10,6 +10,7 @@ import { createChatHost } from './host-chat.js';
 import { createMomentsHost } from './host-moments.js';
 import { loreBooks } from './host-lore.js';
 import { createAppsHost } from './host-apps.js';
+import { readAssistantFiles } from './assistant-files.js';
 import { createAssistantHost } from './host-assistant.js';
 import { createCallHost } from './host-call.js';
 import { createMemoryHost } from './host-memory.js';
@@ -239,6 +240,10 @@ function connect(source){
   assistantPresets:()=>{check();return assistantHost.presets();},
   assistantContext:()=>{check();return assistantHost.context();},
   assistantReply:(id,text)=>{check();return assistantHost.reply(id,text);},
+  assistantReroll:(id,mid)=>{check();return assistantHost.reroll(id,mid);},
+  assistantReadFiles:files=>{check();return readAssistantFiles(files);},
+  deleteAssistantMessage:(id,mid)=>{check();assistantHost.cancel(id);return api.deleteAssistantMessage(id,mid);},
+  selectAssistantVariant:(id,mid,selected)=>{check();assistantHost.cancel(id);return api.selectAssistantVariant(id,mid,selected);},
   assistantBusy:id=>{check();return assistantHost.busy(id);},
   assistantCancel:id=>{check();assistantHost.cancel(id);},
   deleteAssistantThread:id=>{check();assistantHost.cancel(id);return api.deleteAssistantThread(id);},

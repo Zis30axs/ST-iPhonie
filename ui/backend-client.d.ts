@@ -119,8 +119,11 @@ export interface AssistantSettings {
     /** Recompute story references, including the latest reply, within the tavern token budget. Off by default. */
     readContext: boolean;
 }
-export interface AssistantMessage { id: string; role: 'user' | 'assistant'; text: string; at: number; }
-export interface AssistantThread { id: string; kind: 'assistant'; title: string; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
+export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
+export interface AssistantMeta { elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; }
+export interface AssistantVariant { text: string; at: number; meta?: AssistantMeta; }
+export interface AssistantMessage extends AssistantVariant { id: string; role: 'user' | 'assistant'; attachments?: AssistantAttachment[]; variants?: AssistantVariant[]; selected?: number; }
+export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
 export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
 export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; }
@@ -635,7 +638,10 @@ export interface BackendFacade {
     assistantThread(id: string): Promise<AssistantThread | null>;
     newAssistantThread(): Promise<AssistantThread>;
     /** Rejects empty/oversized messages and threads already holding 500 messages. */
-    appendAssistantMessage(id: string, message: Pick<AssistantMessage, 'role' | 'text'>, expectedLastId?: string | null): Promise<AssistantThread>;
+    appendAssistantMessage(id: string, message: Pick<AssistantMessage, 'role' | 'text' | 'attachments' | 'meta'>, expectedLastId?: string | null, expectedRevision?: number): Promise<AssistantThread>;
+    renameAssistantThread(id: string, title: string): Promise<AssistantThread>;
+    deleteAssistantMessage(id: string, messageId: string): Promise<AssistantThread>;
+    selectAssistantVariant(id: string, messageId: string, selected: number): Promise<AssistantThread>;
     deleteAssistantThread(id: string): Promise<boolean>;
     clearAssistantThread(id: string): Promise<AssistantThread>;
     /** 朋友圈 options. */
@@ -773,6 +779,8 @@ export interface BackendAPI extends BackendFacade {
     assistantContext(): { available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } };
     /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
     assistantReply(threadId: string, text?: string): Promise<AssistantThread>;
+    assistantReroll(threadId: string, messageId: string): Promise<AssistantThread>;
+    assistantReadFiles(files: File[]): Promise<AssistantAttachment[]>;
     assistantBusy(threadId: string): boolean;
     assistantCancel(threadId: string): void;
     /** Omit lineIndex to play the whole message. Generation requires an explicit user action. */

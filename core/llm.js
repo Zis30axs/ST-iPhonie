@@ -49,7 +49,7 @@ export function apiBase(url) {
 
 /** The messages to send: prompts are message lists already; a plain string becomes one user message. */
 export function asMessages(prompt) {
-  if (Array.isArray(prompt)) return prompt.filter(m => m && typeof m.content === 'string').map(m => ({role: ['system', 'user', 'assistant'].includes(m.role) ? m.role : 'user', content: m.content}));
+  if (Array.isArray(prompt)) return prompt.filter(m => m && (typeof m.content === 'string' || Array.isArray(m.content))).map(m => ({role: ['system', 'user', 'assistant'].includes(m.role) ? m.role : 'user', content: typeof m.content === 'string' ? m.content : m.content.filter(p => p?.type === 'text' && typeof p.text === 'string' || p?.type === 'image_url' && typeof p.image_url?.url === 'string').map(p => p.type === 'text' ? {type: 'text', text: p.text} : {type: 'image_url', image_url: {url: p.image_url.url}})}));
   return [{role: 'user', content: String(prompt ?? '')}];
 }
 
@@ -103,7 +103,8 @@ export async function streamText(response, info = {}) {
     const choice = json?.choices?.[0];
     if (choice?.delta?.reasoning_content || choice?.delta?.reasoning || json?.candidates?.[0]?.content?.parts?.some?.(p => p?.thought)) info.thought = true;
     if (choice?.finish_reason) info.finish = choice.finish_reason;
-    text += chunkText(json);
+    info.onChunk?.(json);
+    text += info.chunkText ? info.chunkText(json) : chunkText(json);
   };
   const end = () => { info.raw = events ? '' : raw.trim(); return text; };
   if (!reader) { for (const block of (await response.text()).split(/\r?\n\r?\n/)) take(block); return end(); }
@@ -149,8 +150,10 @@ const thoughtOnly = finish => Error(finish === 'length'
 // like "cannot connect". Chatting itself is allowed from web pages.
 const ARK = /volces\.com|volcengine/i;
 const ARK_MODEL = '火山方舟没有模型列表：在「模型」里直接填推理接入点 ID（ep- 开头）或模型名（比如 doubao-seed-1-6-250615），在火山方舟控制台的「在线推理」或「开通管理」里能看到';
-export async function customRequest({text, key, prompt, responseLength, fetch: send = globalThis.fetch, signal}) {
+export async function customRequest({text, key, prompt, responseLength, fetch: send = globalThis.fetch, signal, details = false}) {
   const base = apiBase(text.url), body = chatBody(text, prompt, responseLength);
+  const meta = {requestedModel: text.model};
+  const finish = answer => details ? {text: answer, meta} : answer;
   const post = async stream => {
     const idle = new AbortController();
     let timer = 0;
@@ -180,6 +183,7 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
   const fromJson = raw => {
     let json;
     try { json = JSON.parse(raw); } catch { throw Error('文字模型：接口返回的不是 JSON，地址可能填错了'); }
+    if (details) responseMetadata(json, meta);
     let reply = '';
     try { reply = replyText(json); } catch { /* no text */ }
     if (reply.trim()) return reply;
@@ -195,14 +199,14 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
   } else if (/json/i.test(first.response.headers?.get?.('content-type') || '')) {
     // Streaming not supported but not refused either: an ordinary answer came back.
     const reply = fromJson(await first.read(() => first.response.text()));
-    if (reply) return reply;
+    if (reply) return finish(reply);
   } else {
-    const info = {};
+    const info = details ? {onChunk: json => responseMetadata(json, meta)} : {};
     const reply = await first.read(alive => streamText(first.response, Object.assign(info, {alive})));
-    if (reply.trim()) return reply;
+    if (reply.trim()) return finish(reply);
     if (info.thought) throw thoughtOnly(info.finish);
     // Not a stream after all: an ordinary answer that did not say so.
-    if (info.raw) { const plain = fromJson(info.raw); if (plain) return plain; }
+    if (info.raw) { const plain = fromJson(info.raw); if (plain) return finish(plain); }
   }
   // Nothing yet: once more without streaming.
   const second = await post(false);
@@ -210,7 +214,7 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
   if (!second.response.ok) throw failure(second.response.status, raw, key);
   const reply = fromJson(raw);
   if (!reply) throw Error('文字模型：接口没有返回内容（流式请求和普通请求都试过了）');
-  return reply;
+  return finish(reply);
 }
 
 /** Model ids the API lists (GET /models): for picking a model and checking the connection. Listing costs nothing. */
@@ -231,4 +235,17 @@ export async function listModels({text, key, fetch: send = globalThis.fetch}) {
   const list = Array.isArray(json?.data) ? json.data : Array.isArray(json?.models) ? json.models : Array.isArray(json) ? json : [];
   if (!list.length) throw Error('文字模型：' + byHand);
   return [...new Set(list.map(m => typeof m === 'string' ? m : m?.id || m?.name).filter(Boolean).map(String))].sort().slice(0, 500);
+}
+
+/** Only explicit upstream metadata; a model's self-description is never used as identification. */
+export function responseMetadata(json, meta = {}) {
+  const model = json?.model || json?.message?.model || json?.modelVersion;
+  if (typeof model === 'string') meta.reportedModel = model.slice(0, 200);
+  if (typeof json?.provider === 'string') meta.provider = json.provider.slice(0, 200);
+  const choice = json?.choices?.find(c => !c.index) || json?.choices?.[0];
+  const delta = choice?.delta || choice?.message;
+  const thought = delta?.reasoning_content || delta?.reasoning || json?.delta?.thinking ||
+    json?.candidates?.[0]?.content?.parts?.filter(p => p.thought).map(p => p.text || '').join('') || '';
+  if (typeof thought === 'string') meta.reasoning = ((meta.reasoning || '') + thought).slice(0, 100000);
+  return meta;
 }

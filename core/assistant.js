@@ -3,7 +3,7 @@
 import {DEFAULT_FORMAT, isPlaceholderRole} from './protocol.js';
 import {languageName} from './languages.js';
 
-export const ASSISTANT_LIMITS = Object.freeze({messages: 500, text: 100_000, entries: 50, entryText: 20_000, title: 80, presets: 100, tavernEntries: 500});
+export const ASSISTANT_LIMITS = Object.freeze({messages: 500, text: 100_000, entries: 50, entryText: 20_000, title: 80, presets: 100, tavernEntries: 500, variants: 20, attachments: 8, fileBytes: 10 * 1024 * 1024, totalBytes: 20 * 1024 * 1024});
 const PRESET_IDS = ['companion'];
 const record = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const safeKey = key => !['__proto__', 'prototype', 'constructor'].includes(key);
@@ -98,9 +98,47 @@ export function assistantId(id) {
 }
 export function assistantMessage(value, at = Date.now()) {
   if (!record(value) || !['user', 'assistant'].includes(value.role) || typeof value.text !== 'string') throw Error('助手消息格式无效');
-  if (!value.text.trim()) throw Error('请先填写消息');
+  const attachments = value.role === 'user' ? assistantAttachments(value.attachments) : [];
+  if (!value.text.trim() && !attachments.length) throw Error('请先填写消息');
   if (value.text.length > ASSISTANT_LIMITS.text) throw Error('助手单条消息不能超过 100000 字符');
-  return {id: crypto.randomUUID(), role: value.role, text: value.text.trim(), at};
+  return {id: crypto.randomUUID(), role: value.role, text: value.text.trim(), at,
+    ...(attachments.length ? {attachments} : {}), ...(value.role === 'assistant' && value.meta ? {meta: assistantMeta(value.meta)} : {})};
+}
+
+/** Only fields intended for display are retained; never persist request bodies, keys or raw responses. */
+export function assistantMeta(value = {}) {
+  return {elapsedMs: Math.max(0, Math.min(Number(value.elapsedMs) || 0, 86400000)),
+    requestedModel: text(value.requestedModel, 200), reportedModel: text(value.reportedModel, 200),
+    provider: text(value.provider, 200), reasoning: text(value.reasoning, ASSISTANT_LIMITS.text)};
+}
+export function assistantAttachments(value = []) {
+  if (!Array.isArray(value) || value.length > ASSISTANT_LIMITS.attachments) throw Error('每条消息最多附加 8 个文件');
+  let bytes = 0, chars = 0;
+  return value.map(file => {
+    if (!record(file) || !['image', 'text'].includes(file.kind) || typeof file.name !== 'string' || !file.name.trim() || file.name.length > 240 || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > ASSISTANT_LIMITS.fileBytes) throw Error('附件格式无效或超过 10 MB');
+    bytes += file.size;
+    if (bytes > ASSISTANT_LIMITS.totalBytes) throw Error('每条消息的附件合计不能超过 20 MB');
+    const item = {kind: file.kind, name: file.name, size: file.size};
+    if (file.kind === 'image') {
+      if (typeof file.data !== 'string' || !/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(file.data) || file.data.length > Math.ceil(ASSISTANT_LIMITS.fileBytes * 4 / 3) + 100) throw Error('图片附件格式无效');
+      item.data = file.data;
+    } else {
+      if (typeof file.text !== 'string' || !file.text.trim()) throw Error('附件里没有可读取的文字');
+      chars += file.text.length;
+      if (chars > ASSISTANT_LIMITS.text) throw Error('每条消息的附件文字合计不能超过 100000 字符');
+      item.text = file.text;
+    }
+    return item;
+  });
+}
+export function assistantHistory(messages, {textOnly = false} = {}) {
+  return messages.map(message => {
+    const files = assistantAttachments(message.attachments), body = [message.text,
+      ...files.filter(f => f.kind === 'text').map(f => `【用户附件：${f.name}】\n${f.text}\n【附件结束】`)].filter(Boolean).join('\n\n');
+    const images = files.filter(f => f.kind === 'image');
+    if (images.length && textOnly) throw Error('当前酒馆生成接口不支持助手图片附件，请使用聊天补全或自定义视觉模型');
+    return {role: message.role, content: images.length ? [{type: 'text', text: body || '请查看所附图片。'}, ...images.map(f => ({type: 'image_url', image_url: {url: f.data}}))] : body};
+  });
 }
 export function assertAssistantThread(thread) {
   if (!thread || thread.kind !== 'assistant') throw Error('这条助手会话已经不在了');

@@ -136,9 +136,12 @@ export async function buildAssistantContext(context, {prefix = [], history = [],
     return result;
   };
   const countMessage = async message => {
-    const content = typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? '');
+    const parts = Array.isArray(message?.content) ? message.content : [];
+    const content = typeof message?.content === 'string' ? message.content : parts.filter(p => p.type === 'text').map(p => p.text).join('\n');
+    // Reserve a conservative image budget instead of tokenizing base64 bytes as prose.
+    const imageBudget = parts.filter(p => p.type === 'image_url').length * 4096;
     const extra = message?.tool_calls ? JSON.stringify(message.tool_calls) : '';
-    return MESSAGE_OVERHEAD + await countText(content) + await countText(extra) + (message?.name ? 1 + await countText(message.name) : 0);
+    return MESSAGE_OVERHEAD + imageBudget + await countText(content) + await countText(extra) + (message?.name ? 1 + await countText(message.name) : 0);
   };
   let tokens = REPLY_OVERHEAD;
   for (const message of [...prefix, ...history]) tokens += await countMessage(message);

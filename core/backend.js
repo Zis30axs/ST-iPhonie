@@ -1475,29 +1475,74 @@ export class TTSBackend {
         this.emit('assistant', { threadId: saved.id });
         return saved;
     }
-    async appendAssistantMessage(id, value, expectedLastId) {
+    async appendAssistantMessage(id, value, expectedLastId, expectedRevision) {
         this.assertOpen();
         if (expectedLastId != null && (typeof expectedLastId !== 'string' || !expectedLastId.trim() || expectedLastId.length > 200)) throw Error('助手消息定位无效');
         const message = assistantMessage(value);
         const saved = await this.apps.change(assistantId(id), thread => {
             assertAssistantThread(thread);
+            if (expectedRevision !== undefined && (thread.revision || 0) !== expectedRevision) throw Error('助手会话已变化，这次回复没有写入');
             // Check and append share the same IndexedDB readwrite transaction, including across tabs.
             if (expectedLastId != null && thread.messages.at(-1)?.id !== expectedLastId) throw Error('助手会话已变化，这次回复没有写入');
             if (thread.messages.length >= ASSISTANT_LIMITS.messages) throw Error('这条助手会话已达到 500 条消息，请新建对话后继续');
             const now = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
             message.at = now;
-            if (message.role === 'user' && !thread.messages.some(item => item.role === 'user')) thread.title = message.text.replace(/\s+/g, ' ').slice(0, ASSISTANT_LIMITS.title);
+            if (message.role === 'user' && !thread.titleEdited && !thread.messages.some(item => item.role === 'user')) thread.title = (message.text || message.attachments?.[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, ASSISTANT_LIMITS.title);
             thread.messages.push(message);
+            thread.revision = (thread.revision || 0) + 1;
             thread.at = thread.updatedAt = now;
         });
         this.emit('assistant', { threadId: saved.id });
         return saved;
+    }
+    async mutateAssistantThread(id, mutate, {history = true} = {}) {
+        this.assertOpen();
+        const saved = await this.apps.change(assistantId(id), thread => {
+            assertAssistantThread(thread); mutate(thread);
+            if (history) thread.revision = (thread.revision || 0) + 1;
+            thread.at = thread.updatedAt = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
+        });
+        this.emit('assistant', { threadId: saved.id }); return saved;
+    }
+    async renameAssistantThread(id, title) {
+        if (typeof title !== 'string' || !title.trim() || title.trim().length > ASSISTANT_LIMITS.title) throw Error('会话名字请填写 1–80 个字符');
+        return this.mutateAssistantThread(id, thread => { thread.title = title.trim(); thread.titleEdited = true; }, {history: false});
+    }
+    async deleteAssistantMessage(id, messageId) {
+        return this.mutateAssistantThread(id, thread => {
+            const index = thread.messages.findIndex(m => m.id === messageId);
+            if (index < 0) throw Error('这条消息已经不在了');
+            thread.messages.splice(index, 1);
+        });
+    }
+    async selectAssistantVariant(id, messageId, selected) {
+        return this.mutateAssistantThread(id, thread => {
+            const message = thread.messages.find(m => m.id === messageId), variants = message?.variants;
+            if (message?.role !== 'assistant' || !Array.isArray(variants) || !Number.isInteger(selected) || !variants[selected]) throw Error('这个回复版本已经不在了');
+            message.selected = selected;
+            message.text = variants[selected].text; message.meta = variants[selected].meta; message.at = variants[selected].at;
+        });
+    }
+    async addAssistantVariant(id, messageId, value, expectedRevision) {
+        const result = assistantMessage({...value, role: 'assistant'});
+        return this.mutateAssistantThread(id, thread => {
+            if ((thread.revision || 0) !== expectedRevision) throw Error('助手会话已变化，这次回复没有写入');
+            const message = thread.messages.find(m => m.id === messageId);
+            if (message?.role !== 'assistant') throw Error('这条回复已经不在了');
+            const variants = message.variants || [{text: message.text, at: message.at, ...(message.meta ? {meta: message.meta} : {})}];
+            if (variants.length >= ASSISTANT_LIMITS.variants) throw Error('这条消息已有 20 个回复版本');
+            variants.push({text: result.text, at: result.at, meta: result.meta});
+            message.variants = variants; message.selected = variants.length - 1;
+            message.text = result.text; message.meta = result.meta; message.at = result.at;
+        });
     }
     async clearAssistantThread(id) {
         this.assertOpen();
         const saved = await this.apps.change(assistantId(id), thread => {
             assertAssistantThread(thread);
             thread.messages = [];
+            thread.revision = (thread.revision || 0) + 1;
+            thread.titleEdited = false;
             thread.title = '新对话';
             thread.at = thread.updatedAt = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
         });
@@ -1883,7 +1928,10 @@ export class TTSBackend {
             generatedPhotos: () => this.generatedPhotos().then(({ count, bytes, sources }) => ({ count, bytes, sources: Object.fromEntries(Object.entries(sources).map(([k, { ids, ...rest }]) => [k, rest])) })), deleteGeneratedPhotos: sources => this.deleteGeneratedPhotos(sources),
             saveMoments: patch => this.saveMoments(clone(patch)), saveCalls: patch => this.saveCalls(clone(patch)),
             saveAssistant: patch => this.saveAssistant(patch), assistantThreads: () => this.assistantThreads(), assistantThread: id => this.assistantThread(id),
-            newAssistantThread: () => this.newAssistantThread(), appendAssistantMessage: (id, value, expectedLastId) => this.appendAssistantMessage(id, value, expectedLastId),
+            newAssistantThread: () => this.newAssistantThread(), appendAssistantMessage: (id, value, expectedLastId, expectedRevision) => this.appendAssistantMessage(id, value, expectedLastId, expectedRevision),
+            renameAssistantThread: (id, title) => this.renameAssistantThread(id, title),
+            deleteAssistantMessage: (id, mid) => this.deleteAssistantMessage(id, mid),
+            selectAssistantVariant: (id, mid, selected) => this.selectAssistantVariant(id, mid, selected),
             deleteAssistantThread: id => this.deleteAssistantThread(id), clearAssistantThread: id => this.clearAssistantThread(id),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),
