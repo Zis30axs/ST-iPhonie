@@ -186,7 +186,7 @@ a{color:var(--accent-ink)}
 .assistant-conversation-title{font-size:10px;color:var(--ink2);text-align:center;overflow-wrap:anywhere;margin:0 0 16px}
 .assistant-who{display:flex;align-items:center;gap:5px;color:var(--ink2);font-size:11px;margin:0 3px 6px}
 .assistant-who svg{width:14px;height:14px;color:var(--accent-ink)}
-.assistant-bubble{background:var(--card);padding:13px;border:1px solid var(--line);border-radius:4px 17px 17px;line-height:1.7;overflow:hidden;min-width:0;font-size:13px;user-select:text;-webkit-user-select:text}
+.assistant-bubble{background:var(--card);color:var(--ink);padding:13px;border:1px solid var(--line);border-radius:4px 17px 17px;line-height:1.7;overflow:hidden;min-width:0;font-size:13px;user-select:text;-webkit-user-select:text}
 .assistant-prose{white-space:normal;overflow-wrap:anywhere}
 .assistant-prose:empty{display:none}
 .assistant-prose code{background:var(--card2);padding:1px 4px;border-radius:4px;font-size:.9em}
@@ -202,7 +202,7 @@ a{color:var(--accent-ink)}
 .assistant-html{margin:5px 0}
 .assistant-html-tools{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:11px;color:var(--ink2)}
 .assistant-html summary{cursor:pointer;font-size:11px;color:var(--ink2);padding:7px 0}
-.assistant-preview{display:block;border:1px solid var(--line);background:#fff;width:100%;height:320px;min-height:160px;resize:vertical;border-radius:9px;margin:6px 0}
+.assistant-preview{display:block;border:1px solid var(--line);background:var(--card);width:100%;height:320px;min-height:160px;resize:vertical;border-radius:9px;margin:6px 0}
 .assistant-wave{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;margin:0 3px;padding:3px 5px;border:0;background:transparent;color:var(--accent-ink);border-radius:8px;min-width:32px;min-height:30px;cursor:pointer}
 .assistant-wave:hover,.assistant-wave:focus-visible{background:var(--accent-soft)}
 .assistant-wave>span{display:inline-flex;align-items:center;justify-content:center;gap:3px;width:22px;height:20px}

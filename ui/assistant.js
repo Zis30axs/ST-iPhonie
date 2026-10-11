@@ -8,11 +8,12 @@ import {assistantMarkdown, assistantHTMLMarkdown} from './assistant-markdown.js'
 
 // Model HTML never enters the phone document. The preview has an opaque origin;
 // scripts can manipulate their own document, but cannot access the host or make API requests.
-export function assistantPreviewDocument(html, {auto = false, theme = {}} = {}) {
+export function assistantPreviewDocument(html, {auto = false, theme = {}, dark = false} = {}) {
   const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https:; img-src data: https:; font-src data: https:; media-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
   const themeCSS = Object.entries(theme).filter(([key, value]) => /^--[a-zA-Z0-9-]+$/.test(key) && /^[#(),.%\w\s-]+$/.test(value)).map(([key, value]) => `${key}:${value}`).join(';');
+  const themeSync = `<script>addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='assistant-theme')return;const root=document.documentElement;root.style.colorScheme=event.data.dark?'dark':'light';for(const [key,value] of Object.entries(event.data.theme||{})){if(/^--SmartTheme[A-Za-z]+Color$/.test(key)&&typeof value==='string'&&/^[#(),.%\\w\\s-]+$/.test(value))root.style.setProperty(key,value);}});</script>`;
   const sizing = auto ? `<script>(()=>{const send=()=>parent.postMessage({type:'assistant-html-size',height:Math.ceil(document.body.getBoundingClientRect().height+8)},'*');new ResizeObserver(send).observe(document.body);addEventListener('load',send);send();})();</script>` : '';
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${esc(policy)}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{color-scheme:light;${themeCSS}}body{margin:${auto ? 0 : 12}px;color:var(--SmartThemeBodyColor,#25314b);font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img,video,canvas,svg{max-width:100%}button,input,textarea,select{font:inherit}pre{white-space:pre-wrap}p{margin:.65em 0}p:first-child{margin-top:0}p:last-child{margin-bottom:0}h1,h2,h3,h4,h5,h6{line-height:1.4;margin:.9em 0 .45em}ul,ol{padding-left:1.5em;margin:.6em 0}li{margin:.25em 0}blockquote{margin:.6em 0;padding-left:1em;border-left:2px solid var(--SmartThemeQuoteColor,#7dadd6)}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid var(--SmartThemeBorderColor,#dce5ef)}</style></head><body>${String(html)}${sizing}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${esc(policy)}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{color-scheme:${dark ? 'dark' : 'light'};background:var(--SmartThemeChatTintColor,#fff);${themeCSS}}body{background:var(--SmartThemeChatTintColor,#fff);margin:${auto ? 0 : 12}px;color:var(--SmartThemeBodyColor,#25314b);font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img,video,canvas,svg{max-width:100%}button,input,textarea,select{font:inherit}pre{white-space:pre-wrap}p{margin:.65em 0}p:first-child{margin-top:0}p:last-child{margin-bottom:0}h1,h2,h3,h4,h5,h6{line-height:1.4;margin:.9em 0 .45em}ul,ol{padding-left:1.5em;margin:.6em 0}li{margin:.25em 0}blockquote{margin:.6em 0;padding-left:1em;border-left:2px solid var(--SmartThemeQuoteColor,#7dadd6)}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid var(--SmartThemeBorderColor,#dce5ef)}</style></head><body>${themeSync}${String(html)}${sizing}</body></html>`;
 }
 
 /** Keep every part of a mixed reply; only explicitly labelled HTML fences become previews. */
@@ -193,6 +194,18 @@ export function assistantApp(ctx) {
       return run({allowPaid: true});
     }
   }
+  function previewTheme() {
+    const style = win.getComputedStyle(v.root), color = name => style.getPropertyValue(name).trim();
+    const theme = {'--SmartThemeBodyColor': color('--ink') || '#25314b', '--SmartThemeEmColor': color('--ink2') || '#65718a', '--SmartThemeQuoteColor': color('--accent') || '#7dadd6', '--SmartThemeUnderlineColor': color('--accent-ink') || '#2d6392', '--SmartThemeBorderColor': color('--line') || '#dce5ef', '--SmartThemeBlurTintColor': color('--card') || '#ffffff', '--SmartThemeChatTintColor': color('--card') || '#ffffff'};
+    return {theme, dark: ctx.doc.documentElement.dataset.theme === 'dark'};
+  }
+  // Update the isolated document in place; changing srcdoc would replay the card's scripts.
+  const themeObserver = new win.MutationObserver(() => {
+    if (v.disposed) return;
+    const update = {type: 'assistant-theme', ...previewTheme()};
+    for (const frame of v.root.querySelectorAll('.assistant-preview')) frame.contentWindow?.postMessage(update, '*');
+  });
+  themeObserver.observe(ctx.doc.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-skin']});
   function mountPreviews() {
     for (const slot of v.root.querySelectorAll('[data-preview-mid]')) {
       if (slot.querySelector('iframe') || !slot.hasAttribute('data-auto') && !previews.has(`${slot.dataset.previewMid}:${slot.dataset.previewPart}`)) continue;
@@ -203,9 +216,9 @@ export function assistantApp(ctx) {
       frame.className = 'assistant-preview' + (part.auto ? ' assistant-auto-preview' : ''); frame.title = part.auto ? '助手正则美化' : '助手 HTML 交互预览';
       frame.setAttribute('sandbox', 'allow-scripts'); frame.setAttribute('referrerpolicy', 'no-referrer');
       frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; autoplay 'none'");
-      const style = win.getComputedStyle(v.root), color = name => style.getPropertyValue(name).trim();
-      const theme = {'--SmartThemeBodyColor': color('--ink') || '#25314b', '--SmartThemeEmColor': color('--ink2') || '#65718a', '--SmartThemeQuoteColor': color('--accent') || '#7dadd6', '--SmartThemeUnderlineColor': color('--accent-ink') || '#2d6392', '--SmartThemeBorderColor': color('--line') || '#dce5ef', '--SmartThemeBlurTintColor': color('--card') || '#ffffff', '--SmartThemeChatTintColor': color('--card') || '#ffffff'};
-      frame.srcdoc = assistantPreviewDocument(part.auto ? assistantHTMLMarkdown(part.text, ctx.doc) : part.text, {auto: part.auto, theme}); slot.append(frame);
+      frame.srcdoc = assistantPreviewDocument(part.auto ? assistantHTMLMarkdown(part.text, ctx.doc) : part.text, {auto: part.auto, ...previewTheme()});
+      frame.addEventListener('load', () => frame.contentWindow?.postMessage({type: 'assistant-theme', ...previewTheme()}, '*'));
+      slot.append(frame);
     }
   }
   const messageKey = (m, i, list) => JSON.stringify([m.role, m.text, m.role === 'assistant' ? displayText(m) : '', m.meta, m.selected, m.variants?.length, list[i - 1]?.role, editingMessage(m), editingMessage(m) && editing.saving]);
@@ -489,7 +502,7 @@ export function assistantApp(ctx) {
   v.showing = () => threadId;
   v.leave = () => { active = false; syncClock(false); closePreviews(); displayCache.clear(); };
   const dispose = v.dispose;
-  v.dispose = () => { for (const url of imageURLs.values()) win.URL.revokeObjectURL(url); imageURLs.clear(); active = false; syncClock(false); win.removeEventListener('message', resizePreview); composerObserver?.disconnect(); closePreviews(); displayCache.clear(); dispose(); };
+  v.dispose = () => { themeObserver.disconnect(); for (const url of imageURLs.values()) win.URL.revokeObjectURL(url); imageURLs.clear(); active = false; syncClock(false); win.removeEventListener('message', resizePreview); composerObserver?.disconnect(); closePreviews(); displayCache.clear(); dispose(); };
   render().catch(error => ctx.notify(error.message, {error: true}));
   return v;
 }
