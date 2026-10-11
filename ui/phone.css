@@ -187,7 +187,7 @@ a{color:var(--accent-ink)}
 .assistant-who{display:flex;align-items:center;gap:5px;color:var(--ink2);font-size:11px;margin:0 3px 6px}
 .assistant-who svg{width:14px;height:14px;color:var(--accent-ink)}
 .assistant-bubble{background:var(--card);padding:13px;border:1px solid var(--line);border-radius:4px 17px 17px;line-height:1.7;overflow:hidden;min-width:0;font-size:13px;user-select:text;-webkit-user-select:text}
-.assistant-prose{white-space:pre-wrap;overflow-wrap:anywhere}
+.assistant-prose{white-space:normal;overflow-wrap:anywhere}
 .assistant-prose:empty{display:none}
 .assistant-prose code{background:var(--card2);padding:1px 4px;border-radius:4px;font-size:.9em}
 .assistant-subheading{display:block;margin:4px 0}
@@ -2047,3 +2047,15 @@ button.gift-item[data-short]{opacity:.55}
 .assistant-beautified{margin:0}
 .assistant-live{margin:18px 0}
 .assistant-stream-status{display:block;color:var(--ink2);font-size:10px;margin-bottom:8px}
+
+.assistant-message.is-user .assistant-prose{white-space:pre-wrap}
+.assistant-prose p{margin:.65em 0}
+.assistant-prose>:first-child{margin-top:0}
+.assistant-prose>:last-child{margin-bottom:0}
+.assistant-prose h1,.assistant-prose h2,.assistant-prose h3,.assistant-prose h4,.assistant-prose h5,.assistant-prose h6{font-size:1.08em;line-height:1.5;margin:.9em 0 .45em}
+.assistant-prose ul,.assistant-prose ol{margin:.6em 0;padding-left:1.5em}
+.assistant-prose li{margin:.25em 0}
+.assistant-prose blockquote{margin:.6em 0;padding-left:1em;border-left:2px solid var(--accent)}
+.assistant-prose table{border-collapse:collapse;width:100%;font-size:.95em}
+.assistant-prose td,.assistant-prose th{padding:4px 7px;border:1px solid var(--line)}
+.assistant-prose pre{white-space:pre-wrap;overflow-wrap:anywhere}

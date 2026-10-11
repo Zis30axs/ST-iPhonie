@@ -2,6 +2,7 @@ import {createView, esc, btn, heading, field, select, toggle, copyText} from './
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
 import {assistantAttachments, assistantThoughts} from '../core/assistant.js';
 import {icon, glyph} from './icons.js';
+import {assistantMarkdown, assistantHTMLMarkdown} from './assistant-markdown.js';
 
 // Model HTML never enters the phone document. The preview has an opaque origin;
 // scripts can manipulate their own document, but cannot access the host or make API requests.
@@ -9,7 +10,7 @@ export function assistantPreviewDocument(html, {auto = false, theme = {}} = {}) 
   const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https:; img-src data: https:; font-src data: https:; media-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
   const themeCSS = Object.entries(theme).filter(([key, value]) => /^--[a-zA-Z0-9-]+$/.test(key) && /^[#(),.%\w\s-]+$/.test(value)).map(([key, value]) => `${key}:${value}`).join(';');
   const sizing = auto ? `<script>(()=>{const send=()=>parent.postMessage({type:'assistant-html-size',height:Math.ceil(document.body.getBoundingClientRect().height+8)},'*');new ResizeObserver(send).observe(document.body);addEventListener('load',send);send();})();</script>` : '';
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${esc(policy)}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{color-scheme:light;${themeCSS}}body{margin:${auto ? 0 : 12}px;color:var(--SmartThemeBodyColor,#25314b);font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img,video,canvas,svg{max-width:100%}button,input,textarea,select{font:inherit}pre{white-space:pre-wrap}</style></head><body>${String(html)}${sizing}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${esc(policy)}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{color-scheme:light;${themeCSS}}body{margin:${auto ? 0 : 12}px;color:var(--SmartThemeBodyColor,#25314b);font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img,video,canvas,svg{max-width:100%}button,input,textarea,select{font:inherit}pre{white-space:pre-wrap}p{margin:.65em 0}p:first-child{margin-top:0}p:last-child{margin-bottom:0}h1,h2,h3,h4,h5,h6{line-height:1.4;margin:.9em 0 .45em}ul,ol{padding-left:1.5em;margin:.6em 0}li{margin:.25em 0}blockquote{margin:.6em 0;padding-left:1em;border-left:2px solid var(--SmartThemeQuoteColor,#7dadd6)}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid var(--SmartThemeBorderColor,#dce5ef)}</style></head><body>${String(html)}${sizing}</body></html>`;
 }
 
 /** Keep every part of a mixed reply; only explicitly labelled HTML fences become previews. */
@@ -64,20 +65,17 @@ function partVoiceLines(api, part) {
   });
 }
 
-/** A small, escaped Markdown renderer: no generated links/images or raw tags in the parent. */
-function prose(text) {
-  return esc(text).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/^#{1,6}\s+(.+)$/gm, '<strong class="assistant-subheading">$1</strong>')
-    .replace(/^[ \t]{0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/gm, '<hr>').replace(/\n*<hr>\n*/g, '<hr>');
-}
+const prose = assistantMarkdown;
 
 /** Use parser offsets rather than a tag regex, so custom dialogue formats render too. */
 function inlineDialogue(part, lines, attrs, offset) {
   const utterance = (line, i) => `<span class="assistant-utterance">“${esc(line.translation || line.text)}”<button type="button" class="assistant-wave" data-action="voice-line" ${attrs} data-line="${offset + i}" aria-label="朗读 ${esc(line.role || '旁白')} 的台词" title="朗读 ${esc(line.role || '旁白')} 的台词"><span aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></button></span>`;
   if (part.kind === 'html') return lines.map(utterance).join('\n');
-  let out = '', at = 0;
-  lines.forEach((line, i) => { out += prose(part.text.slice(at, line.start)) + utterance(line, i); at = line.end; });
-  return out + prose(part.text.slice(at));
+  let out = '', at = 0, marker = 'IPHONIEVOICE';
+  while (part.text.includes(marker)) marker += 'X';
+  lines.forEach((line, i) => { out += part.text.slice(at, line.start) + `${marker}${i}END`; at = line.end; });
+  out = prose(out + part.text.slice(at));
+  return out.replace(new RegExp(marker + '(\\d+)END', 'g'), (_, i) => utterance(lines[Number(i)], Number(i)));
 }
 
 export function assistantApp(ctx) {
@@ -182,7 +180,7 @@ export function assistantApp(ctx) {
       frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; autoplay 'none'");
       const style = win.getComputedStyle(v.root), color = name => style.getPropertyValue(name).trim();
       const theme = {'--SmartThemeBodyColor': color('--ink') || '#25314b', '--SmartThemeEmColor': color('--ink2') || '#65718a', '--SmartThemeQuoteColor': color('--accent') || '#7dadd6', '--SmartThemeUnderlineColor': color('--accent-ink') || '#2d6392', '--SmartThemeBorderColor': color('--line') || '#dce5ef', '--SmartThemeBlurTintColor': color('--card') || '#ffffff', '--SmartThemeChatTintColor': color('--card') || '#ffffff'};
-      frame.srcdoc = assistantPreviewDocument(part.text, {auto: part.auto, theme}); slot.append(frame);
+      frame.srcdoc = assistantPreviewDocument(part.auto ? assistantHTMLMarkdown(part.text, ctx.doc) : part.text, {auto: part.auto, theme}); slot.append(frame);
     }
   }
   const messageKey = (m, i, list) => JSON.stringify([m.role, m.text, m.role === 'assistant' ? displayText(m) : '', m.meta, m.selected, m.variants?.length, list[i - 1]?.role, editingMessage(m), editingMessage(m) && editing.saving]);
