@@ -193,7 +193,8 @@ a{color:var(--accent-ink)}
 .assistant-subheading{display:block;margin:4px 0}
 .assistant-message.is-user{margin-left:28px}
 .assistant-message.is-user .assistant-who{justify-content:flex-end}
-.assistant-message.is-user .assistant-bubble{background:var(--accent-soft);border-color:var(--accent-soft);border-radius:17px 4px 17px 17px}
+.assistant-message.is-user .assistant-bubble{width:fit-content;max-width:100%;margin-left:auto;background:var(--accent-soft);border-color:var(--accent-soft);border-radius:17px 4px 17px 17px}
+.assistant-message.is-user .assistant-bubble:has(.assistant-edit){width:100%}
 .assistant-message-tools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:4px}
 .assistant-message-tools .text-button,.assistant-html-tools .text-button{font-size:10px;min-height:28px;padding:2px 4px;gap:4px}
 .assistant-message-tools svg,.assistant-html-tools svg{width:14px;height:14px}
