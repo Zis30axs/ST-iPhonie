@@ -91,15 +91,28 @@ export function assistantApp(ctx) {
     return files.length ? `<div class="assistant-attachments">${files.map((file, i) => `<div class="assistant-attachment">${file.kind === 'image' ? `<img src="${esc(file.data)}" alt="${esc(file.name)}" loading="lazy">` : icon('book')}<span>${esc(file.name)}</span>${removable ? btn('remove-file', icon('close'), 'icon-button', `data-file="${i}" aria-label="移除附件 ${esc(file.name)}"`) : ''}</div>`).join('')}</div>` : '';
   }
   function replyInfo(m) {
-    const meta = m.meta;
-    if (!meta) return '';
-    const rows = [
-      ...(Number.isFinite(meta.elapsedMs) ? [['耗时', (meta.elapsedMs / 1000).toFixed(1) + ' 秒']] : []),
-      ...(meta.requestedModel ? [['请求模型', meta.requestedModel]] : []),
-      ...(meta.reportedModel ? [['接口报告模型', meta.reportedModel]] : []),
-    ];
-    return rows.length ? `<div class="assistant-details" aria-label="回复详情"><dl>${rows.map(([name, value]) => `<dt>${name}</dt><dd>${esc(value)}</dd>`).join('')}</dl></div>` : '';
+    const meta = m.meta || {}, reported = meta.reportedModel?.trim(), model = reported || meta.requestedModel?.trim();
+    return `${Number.isFinite(meta.elapsedMs) ? `<span class="assistant-elapsed">· ${(meta.elapsedMs / 1000).toFixed(1)}s</span>` : ''}${model ? `<span class="assistant-model" title="${esc((reported ? '接口报告模型：' : '请求模型：') + model)}">· ${esc(model)}</span>` : ''}`;
   }
+  function resizeComposer() {
+    const box = v.root.querySelector('[data-assistant-draft]');
+    if (!box) return;
+    const messages = v.root.querySelector('.assistant-messages'), bottom = messages && messages.scrollHeight - messages.clientHeight - messages.scrollTop < 70;
+    const scroll = box.scrollTop, style = win.getComputedStyle(box);
+    const minimum = parseFloat(style.minHeight) || 36, maximum = parseFloat(style.maxHeight) || 116;
+    const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+    box.style.height = 'auto';
+    const needed = box.scrollHeight + border;
+    box.style.height = `${Math.min(maximum, Math.max(minimum, needed))}px`;
+    box.style.overflowY = needed > maximum ? 'auto' : 'hidden'; box.scrollTop = scroll;
+    if (bottom) messages.scrollTop = messages.scrollHeight;
+  }
+  let composerWidth = 0;
+  const composerObserver = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(entries => {
+    const width = entries[0]?.contentRect.width;
+    if (width > 0 && width !== composerWidth) { composerWidth = width; resizeComposer(); }
+  }) : null;
+  composerObserver?.observe(v.root);
   const editingMessage = m => editing?.threadId === threadId && editing.mid === m.id;
   function userBody(m, attrs) {
     if (!editingMessage(m)) return `<div class="assistant-prose">${esc(m.text)}</div>`;
@@ -109,7 +122,7 @@ export function assistantApp(ctx) {
     const attrs = `data-mid="${esc(m.id)}"`;
     if (m.role === 'user') return `<article class="assistant-message is-user" ${attrs}>${messages?.[index - 1]?.role === 'user' ? '' : '<span class="assistant-who">我</span>'}<div class="assistant-bubble">${userBody(m, attrs)}${attachmentHTML(m.attachments || [])}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('edit-message', icon('edit') + '编辑', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details></article>`;
     const parts = assistantParts(m.text), lines = assistantVoiceLines(api, m.text); let offset = 0;
-    return `<article class="assistant-message" ${attrs}><span class="assistant-who">${icon('star')}助手</span><div class="assistant-bubble">${m.meta?.reasoning?.trim() ? `<details class="assistant-reasoning" data-group="reasoning-${esc(m.id)}"><summary>思考内容</summary><div class="assistant-prose">${esc(m.meta.reasoning)}</div></details>` : ''}${parts.map((p, i) => {
+    return `<article class="assistant-message" ${attrs}><span class="assistant-who">${icon('star')}助手${replyInfo(m)}</span><div class="assistant-bubble">${m.meta?.reasoning?.trim() ? `<details class="assistant-reasoning" data-group="reasoning-${esc(m.id)}"><summary>思考内容</summary><div class="assistant-prose">${esc(m.meta.reasoning)}</div></details>` : ''}${parts.map((p, i) => {
       const spoken = partVoiceLines(api, p), rendered = inlineDialogue(p, spoken, attrs, offset); offset += spoken.length;
       if (p.kind === 'text') return `<div class="assistant-prose">${rendered}</div>`;
       if (p.kind === 'code') {
@@ -117,7 +130,7 @@ export function assistantApp(ctx) {
       }
       const key = `${m.id}:${i}`, shown = previews.has(key);
       return `<div class="assistant-html"><div class="assistant-html-tools"><span>HTML · 可交互</span>${btn('preview', shown ? '收起预览' : icon('eye') + '预览', 'text-button', `${attrs} data-part="${i}" aria-expanded="${shown}"`)}</div>${shown ? `<div data-preview-mid="${esc(m.id)}" data-preview-part="${i}"></div>` : ''}<details data-group="source-${esc(key)}"><summary>查看源码</summary><pre class="assistant-code"><code>${esc(p.text)}</code></pre></details></div>${spoken.length ? `<div class="assistant-prose">${rendered}</div>` : ''}`;
-    }).join('')}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${lines.length ? btn('voice-all', icon('wave') + '整条播放', 'text-button', attrs) : ''}${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('reroll', icon('refresh') + '重 roll', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div>${replyInfo(m)}</details>${(m.variants?.length || 1) > 1 ? `<div class="assistant-variants">${btn('variant', '‹', 'icon-button', `${attrs} data-selected="${(m.selected || 0) - 1}" aria-label="上一个回复" ${m.selected > 0 ? '' : 'disabled'}`)}<span>${(m.selected || 0) + 1} / ${m.variants.length}</span>${btn('variant', '›', 'icon-button', `${attrs} data-selected="${(m.selected || 0) + 1}" aria-label="下一个回复" ${(m.selected || 0) < m.variants.length - 1 ? '' : 'disabled'}`)}</div>` : ''}</article>`;
+    }).join('')}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${lines.length ? btn('voice-all', icon('wave') + '整条播放', 'text-button', attrs) : ''}${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('reroll', icon('refresh') + '重 roll', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details>${(m.variants?.length || 1) > 1 ? `<div class="assistant-variants">${btn('variant', '‹', 'icon-button', `${attrs} data-selected="${(m.selected || 0) - 1}" aria-label="上一个回复" ${m.selected > 0 ? '' : 'disabled'}`)}<span>${(m.selected || 0) + 1} / ${m.variants.length}</span>${btn('variant', '›', 'icon-button', `${attrs} data-selected="${(m.selected || 0) + 1}" aria-label="下一个回复" ${(m.selected || 0) < m.variants.length - 1 ? '' : 'disabled'}`)}</div>` : ''}</article>`;
   }
   function mountPreviews() {
     for (const slot of v.root.querySelectorAll('[data-preview-mid]')) {
@@ -179,8 +192,8 @@ export function assistantApp(ctx) {
     const selection = focused ? [previous.selectionStart, previous.selectionEnd] : null;
     const scroller = v.root.querySelector('.assistant-messages'), bottom = !scroller || scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 70;
     v.root.classList.add('assistant-chat-mode');
-    patchChat(`<div class="assistant-chat"><header class="assistant-header"><div><span class="eyebrow">Assistant</span><h1>助手</h1></div><div class="heading-actions">${btn('threads', icon('layers'), 'round-button', 'aria-label="会话记录"')}${btn('new', icon('add'), 'round-button', 'aria-label="新建会话"')}${btn('settings', icon('sliders'), 'round-button', 'aria-label="助手设置"')}</div></header><div class="assistant-context">${icon(state().readContext ? 'book' : 'bubble')}<span>${esc(contextCopy())}</span></div><div class="assistant-messages" data-keep-scroll="assistant-messages" aria-label="助手对话" role="log">${list.length ? `<p class="assistant-conversation-title">${esc(thread.title || '当前会话')}</p>` + list.map(messageHTML).join('') : `<div class="assistant-welcome"><span class="assistant-mascot">${glyph('assistant')}</span><h2>陪你聊聊，帮你想想</h2></div>`}${waiting ? `<div class="assistant-wait" role="status"><i></i><span>${saving ? '正在发送……' : '助手正在想……'}</span></div>` : ''}${error ? `<p class="assistant-error" role="alert">${esc(error)}</p>` : ''}${!waiting && error && last?.role === 'user' ? `<div class="assistant-retry">${btn('retry', icon('refresh') + '重新回复', 'secondary small')}</div>` : ''}</div><div class="assistant-composer"><div data-attachment-tray>${attachmentHTML(attachments(), true)}${fileReads.has(threadId) ? '<span class="hint">正在读取附件……</span>' : ''}</div><input type="file" data-assistant-files accept="${ASSISTANT_FILE_ACCEPT}" multiple hidden>${btn('attach', icon('add'), 'assistant-attach', `aria-label="附加文件" ${fileReads.has(threadId) || pending.get(threadId)?.kind === 'save' ? 'disabled' : ''}`)}<textarea data-assistant-draft aria-label="发给助手的消息" placeholder="想说点什么……" rows="2">${esc(draft())}</textarea>${waiting ? btn('cancel', icon('stop'), 'assistant-send', 'aria-label="停止回复"') : sendButton()}</div></div>`, list);
-    mountPreviews();
+    patchChat(`<div class="assistant-chat"><header class="assistant-header"><div><span class="eyebrow">Assistant</span><h1>助手</h1></div><div class="heading-actions">${btn('threads', icon('layers'), 'round-button', 'aria-label="会话记录"')}${btn('new', icon('add'), 'round-button', 'aria-label="新建会话"')}${btn('settings', icon('sliders'), 'round-button', 'aria-label="助手设置"')}</div></header><div class="assistant-context">${icon(state().readContext ? 'book' : 'bubble')}<span>${esc(contextCopy())}</span></div><div class="assistant-messages" data-keep-scroll="assistant-messages" aria-label="助手对话" role="log">${list.length ? `<p class="assistant-conversation-title">${esc(thread.title || '当前会话')}</p>` + list.map(messageHTML).join('') : `<div class="assistant-welcome"><span class="assistant-mascot">${glyph('assistant')}</span><h2>陪你聊聊，帮你想想</h2></div>`}${waiting ? `<div class="assistant-wait" role="status"><i></i><span>${saving ? '正在发送……' : '助手正在想……'}</span></div>` : ''}${error ? `<p class="assistant-error" role="alert">${esc(error)}</p>` : ''}${!waiting && error && last?.role === 'user' ? `<div class="assistant-retry">${btn('retry', icon('refresh') + '重新回复', 'secondary small')}</div>` : ''}</div><div class="assistant-composer"><div data-attachment-tray>${attachmentHTML(attachments(), true)}${fileReads.has(threadId) ? '<span class="hint">正在读取附件……</span>' : ''}</div><input type="file" data-assistant-files accept="${ASSISTANT_FILE_ACCEPT}" multiple hidden>${btn('attach', icon('add'), 'assistant-attach', `aria-label="附加文件" ${fileReads.has(threadId) || pending.get(threadId)?.kind === 'save' ? 'disabled' : ''}`)}<textarea data-assistant-draft aria-label="发给助手的消息" placeholder="想说点什么……" rows="1">${esc(draft())}</textarea>${waiting ? btn('cancel', icon('stop'), 'assistant-send', 'aria-label="停止回复"') : sendButton()}</div></div>`, list);
+    mountPreviews(); resizeComposer();
     for (const button of v.root.querySelectorAll('[data-action=reroll],[data-action=delete-message],[data-action=edit-message]')) button.disabled = waiting;
     const editSave = v.root.querySelector('[data-action=save-edit]'); if (editSave) editSave.disabled = waiting || !!editing?.saving;
     const next = v.root.querySelector('.assistant-messages'); if (bottom) next.scrollTop = next.scrollHeight;
@@ -274,7 +287,7 @@ export function assistantApp(ctx) {
   });
   v.on('input', '[data-edit-message]', el => { if (editing?.threadId === threadId) editing.text = el.value; });
   v.on('input', '[data-assistant-draft]', el => {
-    saveDraft(el.value); const button = v.root.querySelector('[data-action=send]'); if (button) { const template = ctx.doc.createElement('template'); template.innerHTML = sendButton(); button.replaceWith(template.content.firstElementChild); }
+    saveDraft(el.value); resizeComposer(); const button = v.root.querySelector('[data-action=send]'); if (button) { const template = ctx.doc.createElement('template'); template.innerHTML = sendButton(); button.replaceWith(template.content.firstElementChild); }
   });
   v.on('keydown', '[data-assistant-draft]', (el, event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); return send(); }
@@ -370,7 +383,7 @@ export function assistantApp(ctx) {
   v.showing = () => threadId;
   v.leave = closePreviews;
   const dispose = v.dispose;
-  v.dispose = () => { closePreviews(); dispose(); };
+  v.dispose = () => { composerObserver?.disconnect(); closePreviews(); dispose(); };
   render().catch(error => ctx.notify(error.message, {error: true}));
   return v;
 }

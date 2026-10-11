@@ -212,7 +212,7 @@ a{color:var(--accent-ink)}
 .assistant-error{padding:10px;background:var(--danger-soft);color:var(--danger);border-radius:10px;font-size:12px;overflow-wrap:anywhere;margin:8px 0}
 .assistant-retry{padding:6px 0;text-align:center}
 .assistant-composer{display:grid;grid-template-columns:30px minmax(0,1fr) 36px;gap:7px;align-items:center;background:var(--bg);border-top:1px solid var(--line);padding:10px 16px 24px;flex-shrink:0}
-.assistant-composer textarea{resize:none;min-width:0;width:100%;max-height:130px;background:var(--card);border:1px solid var(--line);border-radius:15px;padding:10px 12px;font-size:13px;line-height:1.5}
+.assistant-composer textarea{resize:none;min-width:0;width:100%;height:36px;min-height:36px;max-height:116px;overflow-y:hidden;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:7px 10px;font-size:13px;line-height:1.5}
 .assistant-send{display:grid;place-items:center;width:36px;height:36px;border-radius:13px;background:var(--accent-btn);color:var(--on-accent)}
 .assistant-send svg{width:19px;height:19px}
 .assistant-thread-row{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line);padding:5px 10px}
@@ -980,8 +980,9 @@ html[data-keyboard=true] *{animation:none!important;transition:none!important}
 .screen[data-wall-motion=off] .wall-motion,.screen[data-view=app] .wall-motion{display:none}
 @media (prefers-reduced-motion:reduce){.wall-motion,.call-motion{display:none}}
 /* 晴空 · 月白: clouds drifting across */
-.wm-cloud{left:0;top:var(--y);width:100%;height:calc(66px*var(--s));opacity:.8;background:radial-gradient(34% 48% at 18% 62%,#fff 0,#fff0 70%),radial-gradient(22% 44% at 27% 40%,#fff 0,#fff0 70%),radial-gradient(26% 38% at 9% 66%,#ffffffd6 0,#fff0 70%);animation:wm-drift var(--d) linear infinite}
-@keyframes wm-drift{from{transform:translateX(-45%)}to{transform:translateX(100%)}}
+/* Keep every gradient's transparent edge inside its box, so drifting clouds have no clipped vertical seam. */
+.wm-cloud{left:0;top:var(--y);width:100%;height:calc(66px*var(--s));opacity:.8;background:radial-gradient(34% 48% at 30% 62%,#fff 0,#fff0 70%),radial-gradient(22% 44% at 39% 40%,#fff 0,#fff0 70%),radial-gradient(26% 38% at 21% 66%,#ffffffd6 0,#fff0 70%);animation:wm-drift var(--d) linear infinite}
+@keyframes wm-drift{from{transform:translateX(-60%)}to{transform:translateX(100%)}}
 /* Night sky: twinkling stars and now and then a shooting star */
 .wm-star{left:var(--x);top:var(--y);width:calc(3px*var(--s));height:calc(3px*var(--s));border-radius:50%;background:#fff;box-shadow:0 0 6px #fff;animation:wm-twinkle var(--d) ease-in-out infinite}
 @keyframes wm-twinkle{0%,100%{opacity:.2;transform:scale(.7)}50%{opacity:1;transform:scale(1.15)}}
@@ -2020,9 +2021,10 @@ button.gift-item[data-short]{opacity:.55}
 .assistant-attachment button{flex-shrink:0;width:26px;height:26px}
 .assistant-variants{display:flex;align-items:center;justify-content:flex-end;gap:8px;color:var(--ink2);font-size:11px}
 .assistant-variants button{font-size:22px;width:30px;height:30px}
-.assistant-details{font-size:10px;color:var(--ink2);overflow-wrap:anywhere;padding:3px 4px 5px}
-.assistant-details dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 8px;margin:0;padding:0}
-.assistant-details dd{margin:0;user-select:text;-webkit-user-select:text}
+.assistant-elapsed{flex-shrink:0;font-size:10px}
+.assistant-model{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:400}
+.assistant-message:not(.is-user)>.assistant-who{white-space:nowrap}
+.assistant-message:not(.is-user)>.assistant-who>svg{flex-shrink:0}
 .assistant-reasoning{margin:0 0 7px;padding:0;background:transparent;border-radius:0;box-shadow:none;color:var(--ink2)}
 .assistant-reasoning>summary{display:inline-flex;min-height:26px;padding:0;font-size:11px;font-weight:500}
 .assistant-reasoning>summary:after{width:6px;height:6px;margin-left:6px}
