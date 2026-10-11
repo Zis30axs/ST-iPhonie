@@ -43,6 +43,7 @@ export interface GeneralSettings {
     defaultLanguage: string;
     /** Voice lines in the story and voice messages in the phone chat. Off: no voice rules are sent, tagged lines show only their translation. */
     voiceEnabled: boolean;
+    hideStoryWaves: boolean;
     cacheEnabled: boolean;
     floatingEnabled: boolean;
     waveformEnabled: boolean;

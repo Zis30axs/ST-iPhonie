@@ -1,4 +1,4 @@
-import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar} from './common.js';
+import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help} from './common.js';
 import {icon, wave, halo} from './icons.js';
 import {openAlbum} from './album-viewer.js';
 import {saveFile} from '../download.js';
@@ -217,7 +217,7 @@ export function listenApp(ctx) {
   async function render() {
     const ticket = ++epoch;
     latest = selected();
-    v.draw(heading('听取', btn('refresh', icon('refresh') + '刷新', 'chip-button'), 'Now Playing')
+    v.draw(heading('听取', help('点台词播放单句，也可以整条播放和导出。默认显示最新一条带语音的回复；在正文点过其他楼层的声波后，会显示选中的那一条。隐藏正文声波不影响这里播放。') + btn('refresh', icon('refresh') + '刷新', 'chip-button'), 'Now Playing')
       + `<div class="listen-stage"><div class="portrait"><span class="ring"></span><span class="ring"></span>${halo()}<span data-portrait></span></div><span class="chip emotion" data-emotion hidden></span><div class="visualizer" aria-hidden="true">${'<i></i>'.repeat(32)}</div></div>
         <div class="dialogue-box"><span class="plate" data-speaker-plate><span></span></span><span class="dialogue-engine" data-engine-label></span><p class="play-caption" data-playback-line aria-live="polite"></p><div class="dialogue-foot"><span data-playback-message></span><svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M1 3h12L7 12z"/></svg></div></div>
         <div class="actions" data-waiting hidden>${btn('configure', icon('mic') + '去给这个角色选音色', 'primary')}</div>
@@ -225,7 +225,7 @@ export function listenApp(ctx) {
         ${latest.lines.length
           ? groupTitle(`回复 #${latest.id}`, `<span class="title-tools">${btn('export-all', icon('download') + '导出', 'chip-button', 'aria-label="导出整条：把这条回复的台词拼成一个音频文件"')}${btn('play-all', icon('play', true) + '整条播放', 'chip-button')}</span>`)
             + `<div class="group">${latest.lines.map((l, i) => `<div class="dialogue-row" data-row="${i}" data-engine="${ctx.engineOf(l.role)}"><div><small>${esc(l.role)}</small><p>${esc(l.translation)}</p></div>${btn('play-line', wave, 'wave-button', `data-index="${i}" data-state="ungenerated" aria-label="朗读 ${esc(l.role)} 的台词"`)}</div>`).join('')}</div>`
-          : empty('等一句真正说出口的话', '回到聊天，点任意楼层的声波，就能在这里整条播放或导出；未选择时显示最新回复。')}`);
+          : empty('还没有可播放的台词')}`);
     v.onPlayback(api.status());
     for (let i = 0; i < latest.lines.length; i++) {
       const state = await api.lineState(latest.lines[i]);
@@ -255,7 +255,7 @@ export function listenApp(ctx) {
     if (q('[data-portrait]')) q('[data-portrait]').outerHTML = `<span data-portrait>${avatar(speaker || '听', engine, 106)}</span>`;
     if (q('[data-speaker-plate] span')) q('[data-speaker-plate] span').textContent = speaker || '听取';
     if (q('[data-engine-label]')) q('[data-engine-label]').textContent = engine === 'none' ? (speaker ? '未配置' : '') : engines[engine];
-    if (q('[data-playback-line]')) q('[data-playback-line]').textContent = state.line?.translation ? '“' + state.line.translation + '”' : '点下面的台词，或者按整条播放。';
+    if (q('[data-playback-line]')) q('[data-playback-line]').textContent = state.line?.translation ? '“' + state.line.translation + '”' : '';
     if (q('[data-playback-message]')) q('[data-playback-message]').textContent = state.message || (currentIndex >= 0 ? `${currentIndex + 1} / ${latest.lines.length}` : '等待播放');
     const emotion = q('[data-emotion]');
     if (emotion) { emotion.hidden = !state.line?.emotion; emotion.textContent = state.line?.emotion || ''; }
