@@ -335,6 +335,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     lockscreen.hidden = true;
     syncInert();
     if (!active) homeIn();
+    if (active && panelVisible && !doc.hidden) run(() => views.get(active)?.resume?.());
     if (active) $('.app-nav [data-system=back]').focus({preventScroll: true});
     else home.querySelector('.app-icon')?.focus({preventScroll: true});
   }
@@ -788,7 +789,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     }
   }, {signal});
   doc.addEventListener('pointerdown', () => delete doc.documentElement.dataset.keyboard, {signal});
-  doc.addEventListener('visibilitychange', () => { if (doc.hidden && active) views.get(active)?.leave?.(); animate(); }, {signal});
+  doc.addEventListener('visibilitychange', () => { if (doc.hidden && active) views.get(active)?.leave?.(); else if (active && !locked && panelVisible) run(() => views.get(active)?.resume?.()); animate(); }, {signal});
   media.addEventListener('change', theme, {signal});
   motion.addEventListener('change', animate, {signal});
 
@@ -875,6 +876,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     else if (takeDraw()) { /* opened from a chat picture */ }
     else if (takeThread()) { /* opened from a message card */ }
     else if (preferences?.lockOnOpen && !api.pendingRole()) lock();
+    else if (active && !locked && !doc.hidden) run(() => views.get(active)?.resume?.());
     animate();
   };
   function dispose() {

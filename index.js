@@ -247,6 +247,7 @@ function connect(source){
   editAssistantMessage:(id,mid,text,expectedText)=>{check();assistantHost.cancel(id);return api.editAssistantMessage(id,mid,text,expectedText);},
   deleteAssistantMessage:(id,mid)=>{check();assistantHost.cancel(id);return api.deleteAssistantMessage(id,mid);},
   selectAssistantVariant:(id,mid,selected)=>{check();assistantHost.cancel(id);return api.selectAssistantVariant(id,mid,selected);},
+  assistantProgress:id=>{check();return assistantHost.progress(id);},
   assistantBusy:id=>{check();return assistantHost.busy(id);},
   assistantCancel:id=>{check();assistantHost.cancel(id);},
   deleteAssistantThread:id=>{check();assistantHost.cancel(id);return api.deleteAssistantThread(id);},

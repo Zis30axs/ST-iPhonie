@@ -1,5 +1,5 @@
 // Independent conversations with the phone's text model. Nothing here writes to the tavern story or selects its preset.
-import {ASSISTANT_LIMITS, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer} from './core/assistant.js';
+import {ASSISTANT_LIMITS, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer, assistantThoughts} from './core/assistant.js';
 import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';
 import {tavernAssistantPresets, buildTavernAssistantMessages} from './assistant-presets.js';
@@ -36,10 +36,14 @@ async function completionSnapshot(ctx, presetName, load = loadCompletionModule) 
 }
 
 /** Uses the current connection, but passes a request-local preset and an independent abort signal. */
-export async function requestAssistantText(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule, details = false, reasoningFormat = assistantReasoningFormat(ctx.powerUserSettings?.reasoning), now} = {}) {
+export async function requestAssistantText(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule, details = false, reasoningFormat = assistantReasoningFormat(ctx.powerUserSettings?.reasoning), now, onProgress} = {}) {
   const text = activeText(settings.text), timer = assistantReasoningTimer(reasoningFormat, now);
+  const progress = (content, meta) => {
+    checkSignal(signal); timer.observe(content, meta.reasoning || '');
+    onProgress?.(content, {...meta, ...timer.metadata()});
+  };
   if (text.source === 'custom') {
-    const result = await customRequest({text, key: backend.textKeys.get(text.id) || '', prompt: messages, signal, details, onProgress: (content, meta) => timer.observe(content, meta.reasoning || '')});
+    const result = await customRequest({text, key: backend.textKeys.get(text.id) || '', prompt: messages, signal, details, onProgress: progress});
     if (details) Object.assign(result.meta, timer.metadata());
     return result;
   }
@@ -59,7 +63,7 @@ export async function requestAssistantText(ctx, backend, settings, messages, {pr
       const response = await fetch('/api/backends/chat-completions/generate', {method: 'POST', headers: ctx.getRequestHeaders(), cache: 'no-cache', body: JSON.stringify(payload), signal});
       if (!response.ok) throw failure(response.status, await response.text());
       const state = {reasoning: '', images: [], signature: '', toolSignatures: {}};
-      const info = {onChunk: raw => responseMetadata(raw, meta), onProgress: content => timer.observe(content, state.reasoning || meta.reasoning || ''), chunkText: raw => {
+      const info = {onChunk: raw => responseMetadata(raw, meta), onProgress: content => progress(content, {...meta, reasoning: state.reasoning || meta.reasoning || ''}), chunkText: raw => {
         if (raw?.choices?.[0]?.index > 0) return '';
         return module.getStreamingReply(raw, state, {chatCompletionSource: payload.chat_completion_source, overrideShowThoughts: true});
       }};
@@ -77,7 +81,7 @@ export async function requestAssistantText(ctx, backend, settings, messages, {pr
     const response = await service.sendRequest(payload, true, signal);
     if (typeof response !== 'function') return details ? {text: String(response?.content || ''), meta: {...meta, reasoning: response?.reasoning || ''}} : String(response?.content || '');
     let result = '';
-    for await (const chunk of response()) { checkSignal(signal); if (typeof chunk.text === 'string') result = chunk.text; if (details && typeof chunk.state?.reasoning === 'string') meta.reasoning = chunk.state.reasoning; if (details) timer.observe(result, meta.reasoning || ''); }
+    for await (const chunk of response()) { checkSignal(signal); if (typeof chunk.text === 'string') result = chunk.text; if (details && typeof chunk.state?.reasoning === 'string') meta.reasoning = chunk.state.reasoning; if (details) progress(result, meta); }
     return details ? {text: result, meta: {...meta, ...timer.metadata()}} : result;
   }
   // Older taverns expose generateRaw only. It has no request-local cancellation; its late answer is discarded.
@@ -165,8 +169,21 @@ export function createAssistantHost({context, settings, backend, presets = taver
         messages.splice(Math.max(1 + normal.length + reference.length + (reference.length ? 1 : 0), messages.length - rule.depth), 0, {role: rule.role, content: rule.content});
       }
       checkSignal(controller.signal);
-      const started = performance.now();
-      const result = await request(ctx, backend, s, messages, {presetName: chosen.name, signal: controller.signal, completion, loadCompletion, details: true, reasoningFormat});
+      const started = performance.now(), startedAt = Date.now();
+      job.progress = {id: crypto.randomUUID(), threadId: id, rerollId, startedAt, phase: 'waiting', text: '', meta: {reasoningFormat}};
+      let lastProgress = 0;
+      const onProgress = (content, metadata = {}) => {
+        if (controller.signal.aborted || closed || jobs.get(id) !== job || !job.progress) return;
+        const meta = assistantMeta({...metadata, reasoningFormat}), part = assistantThoughts(content, reasoningFormat);
+        const partialMarker = [reasoningFormat.prefix, '<think>', '<thinking>'].filter(Boolean).some(marker => content.trim() && marker.startsWith(content.trim()) && marker !== content.trim());
+        const phase = Number.isFinite(meta.reasoningMs) || part.text.trim() && !partialMarker ? 'responding' : meta.reasoning || part.reasoning || part.thinking ? 'thinking' : 'waiting';
+        const changed = phase !== job.progress.phase;
+        job.progress = {...job.progress, phase, text: content.slice(0, ASSISTANT_LIMITS.text), meta};
+        const stamp = performance.now();
+        if (changed || stamp - lastProgress >= 80) { lastProgress = stamp; backend.emit('assistant', {threadId: id, progress: true}); }
+      };
+      backend.emit('assistant', {threadId: id, progress: true});
+      const result = await request(ctx, backend, s, messages, {presetName: chosen.name, signal: controller.signal, completion, loadCompletion, details: true, reasoningFormat, onProgress});
       const answer = typeof result === 'string' ? result : String(result?.text || '');
       const meta = assistantMeta({...result?.meta, reasoningFormat, elapsedMs: performance.now() - started});
       checkSignal(controller.signal); checkOpen();
@@ -176,6 +193,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
       const current = await backend.assistantThread(id);
       checkSignal(controller.signal); checkOpen();
       if (!current || (current.revision || 0) !== revision || (!rerollId && current.messages.at(-1)?.id !== last.id)) throw Error('助手会话已变化，这次回复没有写入');
+      job.progress = null;
       if (rerollId) return await backend.addAssistantVariant(id, rerollId, {text: answer, meta}, revision);
       return await backend.appendAssistantMessage(id, {role: 'assistant', text: answer, meta}, last.id, revision);
     } catch (error) {
@@ -195,6 +213,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
       return regex.getRegexedString(text, placement, {isMarkdown: true, depth});
     },
     context: contextInfo, reply, reroll: (id, messageId) => reply(id, '', messageId),
+    progress: id => structuredClone(jobs.get(id)?.progress || null),
     busy: id => jobs.has(id),
     cancel(id) { jobs.get(id)?.controller.abort(); },
     close() { snapshots.close(); closed = true; for (const job of jobs.values()) job.controller.abort(); jobs.clear(); lastContext = null; },

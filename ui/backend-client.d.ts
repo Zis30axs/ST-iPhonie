@@ -116,8 +116,9 @@ export interface AssistantSettings {
     tavernPreset: string;
     /** Per-preset overrides; absent entries inherit the tavern preset's enabled state. */
     tavernEntries: Record<string, Record<string, boolean>>;
-    /** Recompute story references, including the latest reply, within the tavern token budget. Off by default. */
+    /** Use the last actual story request snapshot. Off by default. */
     readContext: boolean;
+    stream: boolean;
 }
 export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
 export interface AssistantMeta { elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; }
@@ -784,6 +785,7 @@ export interface BackendAPI extends BackendFacade {
     assistantReply(threadId: string, text?: string): Promise<AssistantThread>;
     assistantReroll(threadId: string, messageId: string): Promise<AssistantThread>;
     assistantReadFiles(files: File[]): Promise<AssistantAttachment[]>;
+    assistantProgress(threadId: string): {id: string; threadId: string; rerollId: string; startedAt: number; phase: 'waiting' | 'thinking' | 'responding'; text: string; meta: Partial<AssistantMeta>} | null;
     assistantBusy(threadId: string): boolean;
     assistantCancel(threadId: string): void;
     /** Omit lineIndex to play the whole message. Generation requires an explicit user action. */

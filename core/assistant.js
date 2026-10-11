@@ -11,7 +11,7 @@ const text = (value, max, fallback = '') => typeof value === 'string' ? value.sl
 const entry = (id, title, value) => ({id, title, text: value, enabled: true});
 
 export function defaultAssistant() {
-  return {source: 'builtin', activePreset: 'companion', readContext: false, tavernPreset: '', tavernEntries: {}, presets: [
+  return {source: 'builtin', activePreset: 'companion', stream: true, readContext: false, tavernPreset: '', tavernEntries: {}, presets: [
     {id: 'companion', name: '助手', entries: [
       entry('identity', '助手身份', '你是用户的聊天助手，可以陪用户闲聊、一起讨论想法，回答问题并提出具体建议。用自然、亲切的中文交流，按话题决定回复长短。'),
       entry('reference', '参考剧情', '用户可能提供正在创作的正文作为参考。讨论正文时区分已有内容与你的推测，指出依据；缺少上下文时坦诚说明，不假装知道。只在用户要求续写或扮演时这样做。'),
@@ -40,16 +40,17 @@ export function normalizeAssistant(value) {
     Object.fromEntries(Object.entries(entries).filter(([id, enabled]) => safeKey(id) && id.length <= 200 && typeof enabled === 'boolean').slice(0, ASSISTANT_LIMITS.tavernEntries)),
   ]));
   return {source: value.source === 'tavern' ? 'tavern' : 'builtin', activePreset: PRESET_IDS.includes(value.activePreset) ? value.activePreset : base.activePreset,
-    presets, tavernPreset: text(value.tavernPreset, 200), tavernEntries, readContext: value.readContext === true};
+    presets, tavernPreset: text(value.tavernPreset, 200), tavernEntries, stream: value.stream !== false, readContext: value.readContext === true};
 }
 
 /** User edits are validated before normalizing so invalid/oversized edits are never silently lost. */
 export function validateAssistantPatch(patch) {
   if (!record(patch)) throw Error('助手设置格式无效');
-  const allowed = ['source', 'activePreset', 'presets', 'tavernPreset', 'tavernEntries', 'readContext'];
+  const allowed = ['source', 'activePreset', 'presets', 'tavernPreset', 'tavernEntries', 'readContext', 'stream'];
   if (Object.keys(patch).some(key => !allowed.includes(key))) throw Error('助手设置包含不支持的字段');
   if ('source' in patch && !['builtin', 'tavern'].includes(patch.source)) throw Error('请选择助手预设来源');
   if ('activePreset' in patch && !PRESET_IDS.includes(patch.activePreset)) throw Error('请选择有效的助手预设');
+  if ('stream' in patch && typeof patch.stream !== 'boolean') throw Error('流式显示开关无效');
   if ('readContext' in patch && typeof patch.readContext !== 'boolean') throw Error('读取上下文开关无效');
   if ('tavernPreset' in patch && (typeof patch.tavernPreset !== 'string' || patch.tavernPreset.length > 200)) throw Error('酒馆预设名称无效');
   if ('presets' in patch) {
