@@ -265,7 +265,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (roleId && v.edit) v.edit(roleId);
     v.onPlayback?.(playback);
   }
-  function showHome() {
+  function showHome(immediate = false) {
     sheet?.close(null);
     if (locked) return;
     const leaving = active, was = stopCarry();
@@ -275,6 +275,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     screen.dataset.view = 'home';
     placeHome();
     syncInert();
+    if (immediate) { frame.hidden = true; today?.leave(); const pagesEl = $('.home-pages'); pagesEl.scrollLeft = pagesEl.clientWidth; homeIn(); return; }
     if (!leaving) { frame.hidden = true; today?.leave(); const pagesEl = $('.home-pages'); pagesEl.scrollTo({left: pagesEl.clientWidth, behavior: moving(win) ? 'smooth' : 'auto'}); return; }
     // Back into what it came out of, or its own icon on the page showing; else it sinks away in the middle.
     const target = [openedFrom, iconOf(leaving)].find(el => el?.isConnected && visible(within(el, frame)));
@@ -869,13 +870,15 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     return true;
   }
   win.stTtsOpenThread = () => run(takeThread);
-  win.stTtsPanelVisibility = visible => {
+  win.stTtsPanelVisibility = (visible, {preserveView = false} = {}) => {
+    const reopening = visible && !panelVisible;
     panelVisible = visible;
     if (visible) { callState(); run(refreshAvatars); floatingBar(); }
     if (!visible) { sheet?.close(null); if (active) views.get(active)?.leave?.(); }
     else if (takeDraw()) { /* opened from a chat picture */ }
     else if (takeThread()) { /* opened from a message card */ }
     else if (preferences?.lockOnOpen && !api.pendingRole()) lock();
+    else if (reopening && !preserveView && !preferences?.lockOnOpen && !api.pendingRole()) { unlock(); showHome(true); }
     else if (active && !locked && !doc.hidden) run(() => views.get(active)?.resume?.());
     animate();
   };
