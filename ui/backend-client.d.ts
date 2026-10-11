@@ -94,6 +94,7 @@ export interface Settings {
     chat: ChatSettings;
     moments: MomentsSettings;
     calls: CallsSettings;
+    assistant: AssistantSettings;
     sounds: SoundSettings;
     text: TextSettings;
     /** 向量模型 for 记忆 (key kept as KeyEngine 'embed'). */
@@ -104,6 +105,23 @@ export interface DrawParams {
     model: string; width: number; height: number; steps: number; scale: number;
     sampler: string; schedule: string; /** -1 picks a random seed. */ seed: number; cfgRescale: number; variety: boolean;
 }
+export type AssistantPresetId = 'companion';
+export interface AssistantPresetEntry { id: string; title: string; text: string; enabled: boolean; }
+export interface AssistantPreset { id: AssistantPresetId; name: string; entries: AssistantPresetEntry[]; }
+export interface AssistantSettings {
+    source: 'builtin' | 'tavern';
+    activePreset: AssistantPresetId;
+    presets: AssistantPreset[];
+    /** Saved Chat Completion preset ID; must be selected explicitly for source tavern. */
+    tavernPreset: string;
+    /** Per-preset overrides; absent entries inherit the tavern preset's enabled state. */
+    tavernEntries: Record<string, Record<string, boolean>>;
+    /** Recompute story references, including the latest reply, within the tavern token budget. Off by default. */
+    readContext: boolean;
+}
+export interface AssistantMessage { id: string; role: 'user' | 'assistant'; text: string; at: number; }
+export interface AssistantThread { id: string; kind: 'assistant'; title: string; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
+export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
 export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; }
 /** 绘图预设: rules injected into the chat request so the model writes <img> tags. */
@@ -426,6 +444,7 @@ export type BackendEvent =
     | ({ type: 'playback'; revision: number } & PlaybackSnapshot)
     | ({ type: 'audio-ready'; revision: number } & ReadyAudio)
     | { type: 'settings'; revision: number; state: Settings }
+    | { type: 'assistant'; revision: number; threadId?: string; settings?: boolean; deleted?: boolean; busy?: boolean; error?: string }
     | { type: 'keys'; revision: number; engine: Engine; configured: boolean }
     | { type: 'library'; revision: number; collection: LibraryCollection }
     | { type: 'phone'; revision: number; preferences: PhonePreferences }
@@ -609,6 +628,16 @@ export interface BackendFacade {
     /** Deletes the drawn photos of those sources (all when none); what showed them goes back to «not drawn». */
     deleteGeneratedPhotos(sources?: Array<'draw' | 'chat' | 'peek' | 'moments' | 'chatapp'>): Promise<number>;
     saveChatPreset(preset: Partial<ChatPreset> & { name: string }): ChatPreset;
+    /** Independent assistant settings; no conversation or model context is saved here. */
+    saveAssistant(patch: Partial<AssistantSettings>): AssistantSettings;
+    /** Most recently updated first, independent of the selected story/card. */
+    assistantThreads(): Promise<AssistantThreadSummary[]>;
+    assistantThread(id: string): Promise<AssistantThread | null>;
+    newAssistantThread(): Promise<AssistantThread>;
+    /** Rejects empty/oversized messages and threads already holding 500 messages. */
+    appendAssistantMessage(id: string, message: Pick<AssistantMessage, 'role' | 'text'>, expectedLastId?: string | null): Promise<AssistantThread>;
+    deleteAssistantThread(id: string): Promise<boolean>;
+    clearAssistantThread(id: string): Promise<AssistantThread>;
     /** 朋友圈 options. */
     saveCalls(patch: Partial<CallsSettings>): CallsSettings;
     /** 音效 options. */
@@ -739,6 +768,13 @@ export interface BackendAPI extends BackendFacade {
     /** Last selected story reply, falling back to the newest voiced reply. Revision changes with its chat/message/swipe.
      * Playback completion and stop keep the selection; editing, deleting or switching chats invalidates it. */
     currentDialogue(): LatestMessage & { revision: number };
+    /** Saved Chat Completion presets copied into the Assistant, without selecting them in the tavern. */
+    assistantPresets(): Promise<Array<{ id: string; name: string; entries: Array<{ id: string; title: string; text: string; enabled: boolean; role: MessageRole; marker: boolean; position: number; depth: number; order: number }> }>>;
+    assistantContext(): { available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } };
+    /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
+    assistantReply(threadId: string, text?: string): Promise<AssistantThread>;
+    assistantBusy(threadId: string): boolean;
+    assistantCancel(threadId: string): void;
     /** Omit lineIndex to play the whole message. Generation requires an explicit user action. */
     play(messageId: number, lineIndex?: number): void;
     /** Latest chat messages, newest first, for choosing where to insert a picture. */

@@ -14,6 +14,7 @@ import {forumApp} from './forum.js';
 import {peekApp} from './peek.js';
 import {chatApp} from './chat.js';
 import {soundsApp} from './sounds.js';
+import {assistantApp} from './assistant.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
@@ -21,7 +22,7 @@ import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js
 import {todayPage} from './today.js';
 
 // App factories, keyed by the ids in apps.js.
-const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp};
+const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp};
 const ACTIVE_PHASES = ['playing', 'paused', 'generating', 'waiting'];
 
 // Network and battery in the status bar come from the user's own device (where the browser tells them).
@@ -238,6 +239,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     unlock();
     const source = from || (!active && !home.hidden ? iconOf(name) : null);
     const was = stopCarry();
+    if (active && active !== name) views.get(active)?.leave?.();
     active = name;
     let v = views.get(name);
     if (!v) { v = FACTORIES[name](ctx); views.set(name, v); content.append(v.root); }
@@ -267,6 +269,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     sheet?.close(null);
     if (locked) return;
     const leaving = active, was = stopCarry();
+    if (leaving) views.get(leaving)?.leave?.();
     active = null;
     home.hidden = false;
     screen.dataset.view = 'home';
@@ -319,6 +322,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   function lock() {
     sheet?.close(null);
+    if (active) views.get(active)?.leave?.();
     locked = true;
     renderLock();
     lockscreen.hidden = false;
@@ -784,7 +788,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     }
   }, {signal});
   doc.addEventListener('pointerdown', () => delete doc.documentElement.dataset.keyboard, {signal});
-  doc.addEventListener('visibilitychange', animate, {signal});
+  doc.addEventListener('visibilitychange', () => { if (doc.hidden && active) views.get(active)?.leave?.(); animate(); }, {signal});
   media.addEventListener('change', theme, {signal});
   motion.addEventListener('change', animate, {signal});
 
@@ -805,6 +809,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     }
     if (event.type === 'audio-ready') views.get('listen')?.onPlayback?.(api.status());
     if (event.type === 'draw') views.get('draw')?.onDraw?.(event);
+    if (event.type === 'assistant') run(() => views.get('assistant')?.onAssistant?.(event));
     if (event.type === 'balance') run(() => views.get('engines')?.onBalance?.(event));
     if (event.type === 'chat') { run(() => views.get('chat')?.onChat?.(event)); countUnread(); if (event.incoming && !(active === 'chat' && views.get('chat')?.showing?.() === event.threadId)) notify(`${event.incoming.from}：${event.incoming.kind === 'text' ? event.incoming.text : '发来' + (event.incoming.count > 1 ? ` ${event.incoming.count} 条` : '一条') + '消息'}`.slice(0, 80)); }
     if (event.type === 'moments') { views.get('chat')?.onMoments?.(event); countMoments(); }
@@ -866,7 +871,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   win.stTtsPanelVisibility = visible => {
     panelVisible = visible;
     if (visible) { callState(); run(refreshAvatars); floatingBar(); }
-    if (!visible) sheet?.close(null);
+    if (!visible) { sheet?.close(null); if (active) views.get(active)?.leave?.(); }
     else if (takeDraw()) { /* opened from a chat picture */ }
     else if (takeThread()) { /* opened from a message card */ }
     else if (preferences?.lockOnOpen && !api.pendingRole()) lock();

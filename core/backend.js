@@ -1,5 +1,6 @@
 import { MomentStore } from './moments-store.js';
 import { AppStore } from './app-store.js';
+import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
 import { buildPeekRequest, cleanPeek, peekId } from './peek.js';
 import { languageCode } from './languages.js';
@@ -1450,6 +1451,68 @@ export class TTSBackend {
         await this.addSounds(add);
         return { added: add.length, skipped: pack.sounds.length - add.length, name: pack.name };
     }
+    // ---------- 助手 ----------
+    /** Assistant settings never contain chat history or the tavern's assembled request context. */
+    saveAssistant(patch) {
+        validateAssistantPatch(patch);
+        const next = this.getState();
+        next.assistant = normalizeAssistant({ ...next.assistant, ...clone(patch) });
+        const result = this.save(next).assistant;
+        this.emit('assistant', { settings: true });
+        return result;
+    }
+    /** Assistant conversations belong to this account, independently of the open story/card. */
+    async assistantThreads() { this.assertOpen(); return (await this.apps.list('assistant')).map(assistantSummary); }
+    async assistantThread(id) {
+        this.assertOpen();
+        const thread = await this.apps.get(assistantId(id));
+        return thread?.kind === 'assistant' ? assertAssistantThread(thread) : null;
+    }
+    async newAssistantThread() {
+        this.assertOpen();
+        const now = Date.now(), thread = { id: 'assistant:' + crypto.randomUUID(), kind: 'assistant', title: '新对话', createdAt: now, updatedAt: now, at: now, messages: [] };
+        const [saved] = await this.apps.put([thread]);
+        this.emit('assistant', { threadId: saved.id });
+        return saved;
+    }
+    async appendAssistantMessage(id, value, expectedLastId) {
+        this.assertOpen();
+        if (expectedLastId != null && (typeof expectedLastId !== 'string' || !expectedLastId.trim() || expectedLastId.length > 200)) throw Error('助手消息定位无效');
+        const message = assistantMessage(value);
+        const saved = await this.apps.change(assistantId(id), thread => {
+            assertAssistantThread(thread);
+            // Check and append share the same IndexedDB readwrite transaction, including across tabs.
+            if (expectedLastId != null && thread.messages.at(-1)?.id !== expectedLastId) throw Error('助手会话已变化，这次回复没有写入');
+            if (thread.messages.length >= ASSISTANT_LIMITS.messages) throw Error('这条助手会话已达到 500 条消息，请新建对话后继续');
+            const now = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
+            message.at = now;
+            if (message.role === 'user' && !thread.messages.some(item => item.role === 'user')) thread.title = message.text.replace(/\s+/g, ' ').slice(0, ASSISTANT_LIMITS.title);
+            thread.messages.push(message);
+            thread.at = thread.updatedAt = now;
+        });
+        this.emit('assistant', { threadId: saved.id });
+        return saved;
+    }
+    async clearAssistantThread(id) {
+        this.assertOpen();
+        const saved = await this.apps.change(assistantId(id), thread => {
+            assertAssistantThread(thread);
+            thread.messages = [];
+            thread.title = '新对话';
+            thread.at = thread.updatedAt = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
+        });
+        this.emit('assistant', { threadId: saved.id });
+        return saved;
+    }
+    async deleteAssistantThread(id) {
+        this.assertOpen();
+        const threadId = assistantId(id), thread = await this.apps.get(threadId);
+        if (!thread) return false;
+        assertAssistantThread(thread);
+        await this.apps.remove(threadId);
+        this.emit('assistant', { threadId, deleted: true });
+        return true;
+    }
     // ---------- 朋友圈 ----------
     /** Moments options: {auto, every, dailyMax, images, replyToMe}. */
     saveMoments(patch) {
@@ -1819,6 +1882,9 @@ export class TTSBackend {
             getPhone: () => this.getPhone(), savePhone: patch => this.savePhone(patch), libraryStats: () => this.library.stats(),
             generatedPhotos: () => this.generatedPhotos().then(({ count, bytes, sources }) => ({ count, bytes, sources: Object.fromEntries(Object.entries(sources).map(([k, { ids, ...rest }]) => [k, rest])) })), deleteGeneratedPhotos: sources => this.deleteGeneratedPhotos(sources),
             saveMoments: patch => this.saveMoments(clone(patch)), saveCalls: patch => this.saveCalls(clone(patch)),
+            saveAssistant: patch => this.saveAssistant(patch), assistantThreads: () => this.assistantThreads(), assistantThread: id => this.assistantThread(id),
+            newAssistantThread: () => this.newAssistantThread(), appendAssistantMessage: (id, value, expectedLastId) => this.appendAssistantMessage(id, value, expectedLastId),
+            deleteAssistantThread: id => this.deleteAssistantThread(id), clearAssistantThread: id => this.clearAssistantThread(id),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),
             saveText: patch => this.saveText(clone(patch)), setTextKey: (id, key) => this.setTextKey(id, key), clearTextKey: id => this.clearTextKey(id), textKeyHint: id => this.textKeyHint(id), textModels: draft => this.textModels(clone(draft || {})),
