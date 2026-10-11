@@ -22,9 +22,24 @@ export function assistantParts(text) {
   }
   if (at < value.length) parts.push({kind: 'text', text: value.slice(at)});
   if (!parts.length) parts.push({kind: 'text', text: value});
-  // Raw fragments/documents work too; unknown tags such as <tts> stay plain text.
-  for (const part of parts) if (part.kind === 'text' && /<(?:!doctype\s+html|html|head|body|div|section|article|button|script|style|form|table|canvas|svg|p|span|h[1-6]|ul|ol|details|a|img)\b/i.test(part.text)) part.kind = 'html';
-  return parts;
+  // <content> is a story envelope, even when prose inside contains HTML-looking tags.
+  // Only a real HTML root or an explicitly labelled HTML fence gets the interactive preview.
+  const expanded = []; let story = false;
+  for (const part of parts) {
+    if (part.kind === 'html' && /^\s*<content\b/i.test(part.text)) part.kind = 'text';
+    if (part.kind !== 'text') { expanded.push(part); continue; }
+    const wrapper = /`[^`\n]*`|<\/?content\b[^>]*>/gi;
+    let cursor = 0, found;
+    while ((found = wrapper.exec(part.text))) {
+      if (found[0].startsWith('`')) continue;
+      if (found.index > cursor) expanded.push({kind: 'text', text: part.text.slice(cursor, found.index), ...(story ? {story: true} : {})});
+      story = !found[0].startsWith('</'); cursor = wrapper.lastIndex;
+    }
+    if (cursor < part.text.length) expanded.push({kind: 'text', text: part.text.slice(cursor), ...(story ? {story: true} : {})});
+  }
+  for (const part of expanded) if (part.kind === 'text' && !part.story && /^\s*<(?:!doctype\s+html|html|head|body|div|section|article|button|script|style|form|table|canvas|svg|p|span|h[1-6]|ul|ol|details|a|img)\b/i.test(part.text)) part.kind = 'html';
+
+  return expanded;
 }
 
 export function assistantVoiceLines(api, text) {
@@ -119,19 +134,20 @@ export function assistantApp(ctx) {
     if (!editingMessage(m)) return `<div class="assistant-prose">${esc(m.text)}</div>`;
     return `<div class="assistant-edit"><textarea data-edit-message aria-label="编辑已发送消息" rows="3" maxlength="100000" ${editing.saving ? 'disabled' : ''}>${esc(editing.text)}</textarea><div class="assistant-message-tools">${btn('save-edit', editing.saving ? '保存中' : '保存', 'text-button', `${attrs} ${editing.saving ? 'disabled' : ''}`)}${btn('cancel-edit', '取消', 'text-button', `${attrs} ${editing.saving ? 'disabled' : ''}`)}</div></div>`;
   }
+  const thoughtsFor = m => assistantThoughts(m.text, m.meta?.reasoningFormat || api.assistantReasoningFormat?.());
   function displayText(m) {
-    const text = m.role === 'assistant' ? assistantThoughts(m.text).text : m.text;
+    const text = m.role === 'assistant' ? thoughtsFor(m).text : m.text;
     const depth = Math.max(0, (thread?.messages.length || 1) - 1 - (thread?.messages.findIndex(row => row.id === m.id) ?? 0));
-    const key = JSON.stringify([threadId, m.id, m.text, m.role, depth]);
+    const key = JSON.stringify([threadId, m.id, m.text, text, m.role, depth]);
     if (displayCache.get(m.id)?.key !== key) displayCache.set(m.id, {key, text: api.assistantDisplay ? api.assistantDisplay(text, m.role, depth) : text});
     return displayCache.get(m.id).text;
   }
   function messageHTML(m, index, messages) {
     const attrs = `data-mid="${esc(m.id)}"`;
     if (m.role === 'user') return `<article class="assistant-message is-user" ${attrs}>${messages?.[index - 1]?.role === 'user' ? '' : '<span class="assistant-who">我</span>'}<div class="assistant-bubble">${userBody(m, attrs)}${attachmentHTML(m.attachments || [])}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('edit-message', icon('edit') + '编辑', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details></article>`;
-    const visible = displayText(m), thoughts = assistantThoughts(m.text), reasoning = [m.meta?.reasoning?.trim(), thoughts.reasoning].filter(Boolean).filter((value, i, all) => all.indexOf(value) === i).join('\n\n');
+    const visible = displayText(m), thoughts = thoughtsFor(m), reasoning = [m.meta?.reasoning?.trim(), thoughts.reasoning].filter(Boolean).filter((value, i, all) => all.indexOf(value) === i).join('\n\n');
     const parts = assistantParts(visible), lines = assistantVoiceLines(api, visible); let offset = 0;
-    return `<article class="assistant-message" ${attrs}><span class="assistant-who">${icon('star')}助手${replyInfo(m)}</span><div class="assistant-bubble">${reasoning ? `<details class="assistant-reasoning" data-group="reasoning-${esc(m.id)}"><summary>思考内容</summary><div class="assistant-prose">${esc(reasoning)}</div></details>` : ''}${parts.map((p, i) => {
+    return `<article class="assistant-message" ${attrs}><span class="assistant-who">${icon('star')}助手${replyInfo(m)}</span><div class="assistant-bubble">${reasoning ? `<details class="assistant-reasoning" data-group="reasoning-${esc(m.id)}"><summary${Number.isFinite(m.meta?.reasoningMs) ? ' title="从请求开始到推理结束的流式观测时间"' : ''}>${Number.isFinite(m.meta?.reasoningMs) ? `思考了 ${(m.meta.reasoningMs / 1000).toFixed(1)} 秒` : '思考内容'}</summary><div class="assistant-prose">${prose(reasoning)}</div></details>` : ''}${parts.map((p, i) => {
       const spoken = partVoiceLines(api, p), rendered = inlineDialogue(p, spoken, attrs, offset); offset += spoken.length;
       if (p.kind === 'text') return `<div class="assistant-prose">${rendered}</div>`;
       if (p.kind === 'code') {

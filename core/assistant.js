@@ -109,7 +109,9 @@ export function assistantMessage(value, at = Date.now()) {
 export function assistantMeta(value = {}) {
   return {elapsedMs: Math.max(0, Math.min(Number(value.elapsedMs) || 0, 86400000)),
     requestedModel: text(value.requestedModel, 200), reportedModel: text(value.reportedModel, 200),
-    provider: text(value.provider, 200), reasoning: text(value.reasoning, ASSISTANT_LIMITS.text)};
+    provider: text(value.provider, 200), reasoning: text(value.reasoning, ASSISTANT_LIMITS.text),
+    ...(Number.isFinite(value.reasoningMs) && value.reasoningMs >= 0 ? {reasoningMs: Math.min(value.reasoningMs, 86400000)} : {}),
+    ...(value.reasoningFormat ? {reasoningFormat: assistantReasoningFormat(value.reasoningFormat)} : {})};
 }
 export function assistantAttachments(value = []) {
   if (!Array.isArray(value) || value.length > ASSISTANT_LIMITS.attachments) throw Error('每条消息最多附加 8 个文件');
@@ -132,21 +134,50 @@ export function assistantAttachments(value = []) {
   });
 }
 /** Separate returned thought tags; fenced/inline code examples remain literal. Raw saved text is untouched. */
-export function assistantThoughts(value) {
+export function assistantReasoningFormat(value = {}) {
+  return {prefix: text(value?.prefix, 2000), suffix: text(value?.suffix, 2000)};
+}
+export function assistantThoughts(value, format = {}) {
   const thoughts = [], protectedCode = [];
-  let body = String(value || '').replace(/(```[^]*?```|~~~[^]*?~~~|`[^`\n]*`)/g, code => {
+  let raw = String(value || ''), thinking = false;
+  // Like ST's strict parser: the configured literal delimiter starts at the beginning of the reply.
+  const {prefix, suffix} = assistantReasoningFormat(format);
+  const prefixAt = prefix ? raw.indexOf(prefix) : -1;
+  if (prefix && suffix && prefixAt >= 0 && !raw.slice(0, prefixAt).trim()) {
+    const start = prefixAt + prefix.length, end = raw.indexOf(suffix, start);
+    const reason = raw.slice(start, end < 0 ? undefined : end).trim();
+    if (reason) thoughts.push(reason);
+    thinking = end < 0; raw = end < 0 ? '' : raw.slice(end + suffix.length);
+  }
+  let body = raw.replace(/(```[^]*?```|~~~[^]*?~~~|`[^`\n]*`)/g, code => {
     protectedCode.push(code); return `\u0000CODE${protectedCode.length - 1}\u0000`;
   });
   body = body.replace(/<(think|thinking)\b[^>]*>([^]*?)(?:<\/\1\s*>|$)/gi, (_, tag, content) => {
-    if (content.trim()) thoughts.push(content.trim()); return '';
+    if (content.trim()) thoughts.push(content.trim());
+    if (!new RegExp('</' + tag + '\\s*>$', 'i').test(_)) thinking = true;
+    return '';
   });
   const restore = text => text.replace(/\u0000CODE(\d+)\u0000/g, (_, i) => protectedCode[Number(i)] || '');
-  return {text: restore(body), reasoning: thoughts.map(restore).join('\n\n')};
+  return {text: restore(body), reasoning: thoughts.map(restore).join('\n\n'), thinking};
+}
+
+/** Observed streaming time, not a fabricated duration for old/non-streaming responses. */
+export function assistantReasoningTimer(format, now = () => performance.now()) {
+  const started = now(); let seen = false, duration;
+  return {
+    observe(content, nativeReasoning = '') {
+      if (duration !== undefined) return;
+      const part = assistantThoughts(content, format), hasThought = !!(nativeReasoning.trim() || part.reasoning.trim());
+      if (seen && (part.text.trim() || part.reasoning && !part.thinking)) duration = Math.max(0, now() - started);
+      if (hasThought && !part.text.trim()) seen = true;
+    },
+    metadata() { return duration === undefined ? {} : {reasoningMs: duration}; },
+  };
 }
 
 export function assistantHistory(messages, {textOnly = false} = {}) {
   return messages.map(message => {
-    const files = assistantAttachments(message.attachments), body = [message.role === 'assistant' ? assistantThoughts(message.text).text : message.text,
+    const files = assistantAttachments(message.attachments), body = [message.role === 'assistant' ? assistantThoughts(message.text, message.meta?.reasoningFormat).text : message.text,
       ...files.filter(f => f.kind === 'text').map(f => `【用户附件：${f.name}】\n${f.text}\n【附件结束】`)].filter(Boolean).join('\n\n');
     const images = files.filter(f => f.kind === 'image');
     if (images.length && textOnly) throw Error('当前酒馆生成接口不支持助手图片附件，请使用聊天补全或自定义视觉模型');
@@ -161,5 +192,5 @@ export function assertAssistantThread(thread) {
 export function assistantSummary(thread) {
   assertAssistantThread(thread);
   const {messages, ...summary} = thread;
-  return {...summary, messageCount: messages.length, preview: (messages.at(-1)?.role === 'assistant' ? assistantThoughts(messages.at(-1)?.text).text : String(messages.at(-1)?.text || '')).replace(/\s+/g, ' ').slice(0, 120)};
+  return {...summary, messageCount: messages.length, preview: (messages.at(-1)?.role === 'assistant' ? assistantThoughts(messages.at(-1)?.text, messages.at(-1)?.meta?.reasoningFormat).text : String(messages.at(-1)?.text || '')).replace(/\s+/g, ' ').slice(0, 120)};
 }

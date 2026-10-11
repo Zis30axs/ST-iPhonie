@@ -1,5 +1,5 @@
 // Independent conversations with the phone's text model. Nothing here writes to the tavern story or selects its preset.
-import {ASSISTANT_LIMITS, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta} from './core/assistant.js';
+import {ASSISTANT_LIMITS, buildAssistantPrompt, normalizeAssistant, assistantHistory, assistantMeta, assistantReasoningFormat, assistantReasoningTimer} from './core/assistant.js';
 import {activeText, customRequest, streamText, responseMetadata, failure, replyText} from './core/llm.js';
 import {modelRules} from './core/state.js';
 import {tavernAssistantPresets, buildTavernAssistantMessages} from './assistant-presets.js';
@@ -36,9 +36,13 @@ async function completionSnapshot(ctx, presetName, load = loadCompletionModule) 
 }
 
 /** Uses the current connection, but passes a request-local preset and an independent abort signal. */
-export async function requestAssistantText(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule, details = false} = {}) {
-  const text = activeText(settings.text);
-  if (text.source === 'custom') return customRequest({text, key: backend.textKeys.get(text.id) || '', prompt: messages, signal, details});
+export async function requestAssistantText(ctx, backend, settings, messages, {presetName = '', signal, completion, loadCompletion = loadCompletionModule, details = false, reasoningFormat = assistantReasoningFormat(ctx.powerUserSettings?.reasoning), now} = {}) {
+  const text = activeText(settings.text), timer = assistantReasoningTimer(reasoningFormat, now);
+  if (text.source === 'custom') {
+    const result = await customRequest({text, key: backend.textKeys.get(text.id) || '', prompt: messages, signal, details, onProgress: (content, meta) => timer.observe(content, meta.reasoning || '')});
+    if (details) Object.assign(result.meta, timer.metadata());
+    return result;
+  }
   const service = ctx.ChatCompletionService;
   if (hasCompletionService(ctx)) {
     const snapshot = completion || await completionSnapshot(ctx, presetName, loadCompletion);
@@ -55,7 +59,7 @@ export async function requestAssistantText(ctx, backend, settings, messages, {pr
       const response = await fetch('/api/backends/chat-completions/generate', {method: 'POST', headers: ctx.getRequestHeaders(), cache: 'no-cache', body: JSON.stringify(payload), signal});
       if (!response.ok) throw failure(response.status, await response.text());
       const state = {reasoning: '', images: [], signature: '', toolSignatures: {}};
-      const info = {onChunk: raw => responseMetadata(raw, meta), chunkText: raw => {
+      const info = {onChunk: raw => responseMetadata(raw, meta), onProgress: content => timer.observe(content, state.reasoning || meta.reasoning || ''), chunkText: raw => {
         if (raw?.choices?.[0]?.index > 0) return '';
         return module.getStreamingReply(raw, state, {chatCompletionSource: payload.chat_completion_source, overrideShowThoughts: true});
       }};
@@ -68,13 +72,13 @@ export async function requestAssistantText(ctx, backend, settings, messages, {pr
       }
       checkSignal(signal);
       if (state.reasoning) meta.reasoning = state.reasoning;
-      return {text: answer, meta};
+      return {text: answer, meta: {...meta, ...timer.metadata()}};
     }
     const response = await service.sendRequest(payload, true, signal);
     if (typeof response !== 'function') return details ? {text: String(response?.content || ''), meta: {...meta, reasoning: response?.reasoning || ''}} : String(response?.content || '');
     let result = '';
-    for await (const chunk of response()) { checkSignal(signal); if (typeof chunk.text === 'string') result = chunk.text; if (details && typeof chunk.state?.reasoning === 'string') meta.reasoning = chunk.state.reasoning; }
-    return details ? {text: result, meta} : result;
+    for await (const chunk of response()) { checkSignal(signal); if (typeof chunk.text === 'string') result = chunk.text; if (details && typeof chunk.state?.reasoning === 'string') meta.reasoning = chunk.state.reasoning; if (details) timer.observe(result, meta.reasoning || ''); }
+    return details ? {text: result, meta: {...meta, ...timer.metadata()}} : result;
   }
   // Older taverns expose generateRaw only. It has no request-local cancellation; its late answer is discarded.
   checkSignal(signal);
@@ -119,7 +123,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
     jobs.set(id, job);
     backend.emit('assistant', {threadId: id, busy: true});
     try {
-      const ctx = context(), s = structuredClone(settings());
+      const ctx = context(), s = structuredClone(settings()), reasoningFormat = assistantReasoningFormat(ctx.powerUserSettings?.reasoning);
       s.assistant = normalizeAssistant(s.assistant);
       if (s.assistant.readContext && ctx.streamingProcessor && !ctx.streamingProcessor.isFinished) throw Error('正文正在生成，请等正文完成后再读取上下文');
       const capturedCC = structuredClone(ctx.chatCompletionSettings || {});
@@ -142,7 +146,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
       checkSignal(controller.signal);
       const rules = chosen.rules.filter(r => r.content.trim());
       const prefix = [{role: 'system', content: IDENTITY}, ...rules.map(({role, content}) => ({role, content}))];
-      const history = assistantHistory(historyMessages, {textOnly: activeText(s.text).source === 'tavern' && !hasCompletionService(ctx)});
+      const history = assistantHistory(historyMessages.map(m => m.role === 'assistant' && !m.meta?.reasoningFormat ? {...m, meta: {...m.meta, reasoningFormat}} : m), {textOnly: activeText(s.text).source === 'tavern' && !hasCompletionService(ctx)});
       let reference = [];
       if (s.assistant.readContext) {
         const active = context().streamingProcessor;
@@ -162,9 +166,9 @@ export function createAssistantHost({context, settings, backend, presets = taver
       }
       checkSignal(controller.signal);
       const started = performance.now();
-      const result = await request(ctx, backend, s, messages, {presetName: chosen.name, signal: controller.signal, completion, loadCompletion, details: true});
+      const result = await request(ctx, backend, s, messages, {presetName: chosen.name, signal: controller.signal, completion, loadCompletion, details: true, reasoningFormat});
       const answer = typeof result === 'string' ? result : String(result?.text || '');
-      const meta = assistantMeta({...result?.meta, elapsedMs: performance.now() - started});
+      const meta = assistantMeta({...result?.meta, reasoningFormat, elapsedMs: performance.now() - started});
       checkSignal(controller.signal); checkOpen();
       if (!answer.trim()) throw Error('助手这次没有返回内容，可以重试');
       if (answer.length > ASSISTANT_LIMITS.text) throw Error('助手回复超过保存上限，请缩短回复要求后重试');
@@ -184,6 +188,7 @@ export function createAssistantHost({context, settings, backend, presets = taver
   }
   return {
     presets: () => { checkOpen(); return presets(context()); },
+    reasoningFormat: () => assistantReasoningFormat(context()?.powerUserSettings?.reasoning),
     display: (text, role, depth) => {
       if (!regex?.getRegexedString) return text;
       const placement = role === 'user' ? regex.regex_placement.USER_INPUT : regex.regex_placement.AI_OUTPUT;

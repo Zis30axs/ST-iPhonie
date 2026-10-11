@@ -105,6 +105,7 @@ export async function streamText(response, info = {}) {
     if (choice?.finish_reason) info.finish = choice.finish_reason;
     info.onChunk?.(json);
     text += info.chunkText ? info.chunkText(json) : chunkText(json);
+    info.onProgress?.(text);
   };
   const end = () => { info.raw = events ? '' : raw.trim(); return text; };
   if (!reader) { for (const block of (await response.text()).split(/\r?\n\r?\n/)) take(block); return end(); }
@@ -150,7 +151,7 @@ const thoughtOnly = finish => Error(finish === 'length'
 // like "cannot connect". Chatting itself is allowed from web pages.
 const ARK = /volces\.com|volcengine/i;
 const ARK_MODEL = '火山方舟没有模型列表：在「模型」里直接填推理接入点 ID（ep- 开头）或模型名（比如 doubao-seed-1-6-250615），在火山方舟控制台的「在线推理」或「开通管理」里能看到';
-export async function customRequest({text, key, prompt, responseLength, fetch: send = globalThis.fetch, signal, details = false}) {
+export async function customRequest({text, key, prompt, responseLength, fetch: send = globalThis.fetch, signal, details = false, onProgress}) {
   const base = apiBase(text.url), body = chatBody(text, prompt, responseLength);
   const meta = {requestedModel: text.model};
   const finish = answer => details ? {text: answer, meta} : answer;
@@ -201,7 +202,7 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
     const reply = fromJson(await first.read(() => first.response.text()));
     if (reply) return finish(reply);
   } else {
-    const info = details ? {onChunk: json => responseMetadata(json, meta)} : {};
+    const info = details ? {onChunk: json => responseMetadata(json, meta), onProgress: content => onProgress?.(content, meta)} : {};
     const reply = await first.read(alive => streamText(first.response, Object.assign(info, {alive})));
     if (reply.trim()) return finish(reply);
     if (info.thought) throw thoughtOnly(info.finish);

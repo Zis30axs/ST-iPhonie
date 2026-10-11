@@ -238,6 +238,7 @@ function connect(source){
   latest:()=>{check();const snap=latestMessage();return {id:snap?.id??-1,lines:snap?parsed(snap.raw).lines:[]};},
   currentDialogue:()=>{check();return currentDialogue();},
   assistantPresets:()=>{check();return assistantHost.presets();},
+  assistantReasoningFormat:()=>{check();return assistantHost.reasoningFormat();},
   assistantDisplay:(text,role,depth)=>{check();return assistantHost.display(text,role,depth);},
   assistantContext:()=>{check();return assistantHost.context();},
   assistantReply:(id,text)=>{check();return assistantHost.reply(id,text);},

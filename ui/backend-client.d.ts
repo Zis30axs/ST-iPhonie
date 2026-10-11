@@ -120,7 +120,7 @@ export interface AssistantSettings {
     readContext: boolean;
 }
 export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
-export interface AssistantMeta { elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; }
+export interface AssistantMeta { elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; }
 export interface AssistantVariant { text: string; at: number; meta?: AssistantMeta; }
 export interface AssistantMessage extends AssistantVariant { id: string; role: 'user' | 'assistant'; attachments?: AssistantAttachment[]; editedAt?: number; variants?: AssistantVariant[]; selected?: number; }
 export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
@@ -777,6 +777,7 @@ export interface BackendAPI extends BackendFacade {
     currentDialogue(): LatestMessage & { revision: number };
     /** Saved Chat Completion presets copied into the Assistant, without selecting them in the tavern. */
     assistantPresets(): Promise<Array<{ id: string; name: string; entries: Array<{ id: string; title: string; text: string; enabled: boolean; role: MessageRole; marker: boolean; position: number; depth: number; order: number }> }>>;
+    assistantReasoningFormat(): {prefix: string; suffix: string};
     assistantDisplay(text: string, role: string, depth: number): string;
     assistantContext(): { available: boolean; count: number; label: string; reason?: string; last?: { included: number; total: number; tokens: number; budget: number; truncated: boolean } };
     /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
