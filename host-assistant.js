@@ -11,22 +11,12 @@ const IMAGE_COLLABORATION = '助手可以调用用户在手机绘图 App 中配�
 // 智能界面: small native pieces of UI the model may put in a reply (like ChatGPT's visual answers), drawn by the phone
 // with its own theme. Only when they make the answer clearer; the reply text stays the main thing.
 export const ASSISTANT_VISUALS = ['【智能界面】',
-  '你的回答可以像 ChatGPT 的可视化回答那样带上能点、能看的界面：在回复里插入一个 ```ui 代码块（语言名就写 ui），里面是一个 JSON 对象，或者几个对象组成的数组，手机会把它画成原生界面。',
-  '什么时候用：只要能让回答更直观、更好玩，日常聊天也可以用——给建议或推荐时用卡片，比较几样东西用对比表，教人做事用步骤，列清单用勾选清单，讲经过用时间线，说数字用数据卡或条形图，出小测验、小游戏用 quiz，想问用户几件事用表单；回答完有明显的下一步时，在最后放一个 choices，给两到四个用户可能想接着说的话。只有一两句话就能说清、或者纯粹在安慰陪聊时不用。一条回复最多三个界面块，正文照常写，界面是补充不是替代。',
-  '可用的类型（字段名照写）：',
-  '{"type":"choices","title":"标题(可省)","options":["选项1","选项2"]}  按钮，点了就把选项作为用户的话发出去',
-  '{"type":"cards","title":"标题","items":[{"title":"卡片标题","text":"一两句说明","tags":["标签"],"send":"点卡片时发出去的话(可省)"}]}  横向滑动的卡片',
-  '{"type":"compare","title":"标题","columns":["","A","B"],"rows":[["项目","…","…"]]}  对比表',
-  '{"type":"steps","title":"标题","items":["第一步","第二步"]}  步骤',
-  '{"type":"checklist","title":"标题","items":["要做的事1","要做的事2"]}  可以打勾的清单',
-  '{"type":"timeline","title":"标题","items":[{"time":"时间或阶段","text":"发生了什么"}]}  时间线',
-  '{"type":"stats","title":"标题","items":[{"label":"名字","value":"数字或短词","note":"小字说明(可省)"}]}  数据卡',
-  '{"type":"bars","title":"标题","unit":"单位","items":[{"label":"名字","value":3}]}  条形图（value 是数字）',
-  '{"type":"quiz","question":"问题","options":["A","B","C"],"answer":0,"explain":"解析"}  小测验，answer 是正确选项的序号（从 0 开始），用户点了才揭晓',
-  '{"type":"form","title":"标题","fields":[{"label":"问题","options":["选项1","选项2"]},{"label":"问题","placeholder":"提示"}],"submit":"按钮文字"}  一次问几件事，提交后整理成一条消息发出去',
-  '{"type":"tip","tone":"info 或 warn","text":"一句提醒"}',
-  '例子：\n```ui\n[{"type":"cards","title":"三个方向","items":[{"title":"甜一点","text":"多写日常小互动","send":"往甜的方向写"},{"title":"虐一点","text":"让误会再拖一拖","send":"往虐的方向写"}]},{"type":"choices","options":["都不要，换个思路","展开说说第一个"]}]\n```',
-  'JSON 必须合法：英文双引号、没有注释、最后一项后面不加逗号；界面里的文字用中文。出图块不要放进 ```ui 里，直接写在正文里。'].join('\n');
+  '你可以像 ChatGPT 的 Intelligent UI 那样，在回答里直接做出能用的界面——不是固定模板，而是按这一次的需要现做一个小工具：小游戏（2048、记忆翻牌、猜谜、文字冒险的地图）、计算器（AA 分账、预算、倒计时）、拖动滑块就会变的图解或图表、能切换标签的资料面板、可以打勾的清单、互动小测验、角色档案卡……做什么、长什么样都由你决定。',
+  '什么时候做：默认还是用文字回答。只有当界面明显比文字好用、好玩时才做——用户想玩、想算、想调参数看变化、要浏览或比较一大堆信息、要一步步操作，或者用户主动要界面。闲聊、安慰、普通问答、写文章和剧情不做；不要每条回复都做，也不要为了做而在结尾加一排选项。',
+  '怎么做：写一个 ```html 代码块，放一个完整、能独立运行的小部件（HTML、CSS、JS 全写在里面；不引用外部脚本、图片或网络，不用 alert/prompt/confirm、localStorage）。它会直接嵌在回答里运行，高度自动。按手机宽度（约 340px）设计，按钮够大、方便手指点；动画用 CSS transform/opacity。配色用这些变量，日夜主题会自动跟着变：var(--ink) 文字、var(--muted) 次要文字、var(--card) 底色、var(--accent) 强调色、var(--accent-ink) 深一点的强调色、var(--line) 边框。界面要自己就能玩完：状态放在 JS 里，游戏有分数和重新开始，计算即时更新。',
+  '需要把用户在界面里做的选择交回给你继续聊时（比如冒险游戏选了一条路、问卷填完了），在 JS 里调用 iphonie.send(\'一句话\')，这句话会作为用户的消息发出并让你接着回复；界面里自己能处理的变化不用发。',
+  '很简单的展示也可以用轻量写法：```ui 代码块里写 JSON，类型有 choices(options)、cards(items: title/text/tags/send)、compare(columns/rows)、steps(items)、checklist(items)、timeline(items: time/text)、stats(items: label/value/note)、bars(items: label/value)、quiz(question/options/answer/explain)、form(fields: label/options 或 placeholder)、tip(text/tone)。',
+  '界面前后照常用文字说明它是什么、怎么玩。出图块不要放进代码块。'].join('\n');
 const cancelled = () => Object.assign(new Error('已取消助手回复'), {name: 'AbortError'});
 const checkSignal = signal => { if (signal?.aborted) throw cancelled(); };
 const loadCompletionModule = () => import('/scripts/openai.js');
