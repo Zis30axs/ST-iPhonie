@@ -2160,3 +2160,28 @@ button.aui-card:active{transform:scale(.98)}
 .friend-ico{flex:none;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(145deg,#ffb36b,#ff8a3d);color:#fff}
 .friend-ico svg{width:22px;height:22px}
 .list-row .friend-badge{flex:none;margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;display:grid;place-items:center;font-size:12px;font-style:normal}
+.assistant-image-wrap{position:relative;display:block;max-width:100%}
+.assistant-image-wrap .assistant-image{width:100%}
+.assistant-redraw{position:absolute;right:8px;bottom:8px;width:34px;height:34px;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(20,24,34,.55);color:#fff;cursor:pointer;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.assistant-redraw svg{width:17px;height:17px}
+.assistant-redraw:active{transform:scale(.92)}
+.assistant-redraw:disabled{opacity:.4;cursor:default}
+.aui-check-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:13px;line-height:1.5;cursor:pointer}
+.aui-check-row input{margin-top:3px;accent-color:var(--accent-btn);flex:none}
+.aui-check-row:has(input:checked) span{color:var(--ink2);text-decoration:line-through}
+.aui-timeline ol{margin:0;padding:0 0 0 14px;list-style:none;border-left:2px solid var(--accent-soft);display:grid;gap:10px}
+.aui-timeline li{position:relative;display:grid;gap:2px;font-size:13px;line-height:1.5}
+.aui-timeline li::before{content:"";position:absolute;left:-19px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--accent-btn);box-shadow:0 0 0 3px var(--card2)}
+.aui-timeline b{font-size:12px;color:var(--accent-ink)}
+.aui-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px}
+.aui-stat{display:grid;gap:2px;padding:10px;border-radius:12px;background:var(--card);border:1px solid var(--line);min-width:0}
+.aui-stat b{font-size:20px;line-height:1.2;color:var(--accent-ink);overflow-wrap:anywhere}
+.aui-stat span{font-size:12px;color:var(--ink)}
+.aui-stat small{font-size:11px;color:var(--ink2)}
+.aui-quiz-options{display:grid;gap:6px}
+.aui-quiz-options .aui-chip{border-radius:12px;justify-content:flex-start}
+.aui-quiz-options .aui-chip:disabled{cursor:default;opacity:.75}
+.aui-quiz-options .aui-chip[data-right]{opacity:1;background:#dff6e5;border-color:#5cc07a;color:#1d6b35}
+.aui-quiz-options .aui-chip[data-wrong]{opacity:1;background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
+:root[data-theme=dark] .aui-quiz-options .aui-chip[data-right]{background:#173d25;color:#9be3b0;border-color:#3f9a5c}
+.aui-explain{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--ink2)}

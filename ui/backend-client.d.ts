@@ -797,6 +797,8 @@ export interface BackendAPI extends BackendFacade {
     /** Appends a user message then replies. Omit text to retry a pending user message without duplicating it. */
     assistantReply(threadId: string, text?: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
     assistantReroll(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
+    /** 重新绘制 a reply's picture from the same 出图块; its words stay (a new version of the reply). */
+    assistantRedraw(threadId: string, messageId: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
     assistantReadFiles(files: File[]): Promise<AssistantAttachment[]>;
     assistantProgress(threadId: string): {id: string; threadId: string; rerollId: string; startedAt: number; phase: 'waiting' | 'thinking' | 'responding' | 'prompting' | 'drawing'; text: string; meta: Partial<AssistantMeta>} | null;
     assistantBusy(threadId: string): boolean;

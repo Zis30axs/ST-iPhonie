@@ -263,6 +263,7 @@ function connect(source){
   assistantContext:()=>{check();return assistantHost.context();},
   assistantReply:(id,text,options)=>{check();return assistantHost.reply(id,text,options);},
   assistantReroll:(id,mid,options)=>{check();return assistantHost.reroll(id,mid,options);},
+  assistantRedraw:(id,mid,options)=>{check();return assistantHost.redraw(id,mid,options);},
   assistantReadFiles:files=>{check();return readAssistantFiles(files);},
   editAssistantMessage:(id,mid,text,expectedText)=>{check();assistantHost.cancel(id);return api.editAssistantMessage(id,mid,text,expectedText);},
   deleteAssistantMessage:(id,mid)=>{check();assistantHost.cancel(id);return api.deleteAssistantMessage(id,mid);},

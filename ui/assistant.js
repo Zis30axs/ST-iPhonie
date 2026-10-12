@@ -25,7 +25,7 @@ export function assistantParts(text, {beautified = false} = {}) {
   while ((match = fences.exec(value))) {
     if (match.index > at) parts.push({kind: 'text', text: value.slice(at, match.index)});
     const language = match[1].trim(), only = parsePictures(match[2]).filter(t => t.spec);
-    const kind = /^html?$/i.test(language) ? 'html' : /^ui$/i.test(language) ? 'ui' : only.length === 1 && !match[2].slice(0, only[0].start).trim() && !match[2].slice(only[0].end).trim() ? 'picture' : 'code';
+    const kind = /^html?$/i.test(language) ? 'html' : /^(?:ui|json\s*ui|ui\s*json|ui-?json|intelligent[-\s]?ui)$/i.test(language) || (/^(?:json|json5|javascript|js)?$/i.test(language) && looksVisual(match[2])) ? 'ui' : only.length === 1 && !match[2].slice(0, only[0].start).trim() && !match[2].slice(only[0].end).trim() ? 'picture' : 'code';
     parts.push({kind, language, text: kind === 'ui' || kind === 'picture' ? match[2].trim() : match[2]});
     at = fences.lastIndex;
   }
@@ -99,6 +99,23 @@ function inlineDialogue(part, lines, attrs, offset) {
 }
 
 // ---------- 出图块 cards and 智能界面 ----------
+const VISUAL_TYPES = ['choices', 'cards', 'compare', 'steps', 'checklist', 'timeline', 'stats', 'bars', 'quiz', 'form', 'tip'];
+/**
+ * A ```ui block's JSON, forgiving what models often get wrong: “curly” quotes as delimiters, // comments on their own
+ * line, a comma before } or ], several objects one after another instead of an array. null when still unreadable.
+ */
+export function looseVisual(raw) {
+  const text = String(raw || '').trim();
+  const tries = [text];
+  const fixed = text.replace(/^\s*\/\/.*$/gm, '').replace(/,\s*([}\]])/g, '$1');
+  tries.push(fixed, fixed.replace(/[“”]/g, '"'), '[' + fixed.replace(/}\s*\n\s*{/g, '},{') + ']', '[' + fixed.replace(/[“”]/g, '"').replace(/}\s*\n\s*{/g, '},{') + ']');
+  for (const attempt of tries) { try { return JSON.parse(attempt); } catch { /* next */ } }
+  return null;
+}
+function looksVisual(raw) {
+  const value = looseVisual(raw);
+  return (Array.isArray(value) ? value : [value]).some(x => x && typeof x === 'object' && VISUAL_TYPES.includes(x.type));
+}
 const str = (value, max = 200) => typeof value === 'string' ? value.trim().slice(0, max) : Number.isFinite(value) ? String(value) : '';
 const list = (value, max) => Array.isArray(value) ? value.slice(0, max) : [];
 const SIZE_NAMES = {竖: '竖图', 横: '横图', 方: '方图', portrait: '竖图', landscape: '横图', square: '方图'};
@@ -150,6 +167,23 @@ function visualPiece(x, attrs, key) {
           : `<input type="text" maxlength="200" placeholder="${esc(str(f.placeholder, 60))}" aria-label="${esc(label)}">`}</div>`;
       }).join('')}<div class="aui-tools">${btn('ui-form', esc(str(x.submit, 20) || '发送'), 'aui-go', attrs)}</div></div>`;
     }
+    case 'checklist': {
+      const items = list(x.items, 15).map(i => str(typeof i === 'object' && i ? i.text || i.title : i, 160)).filter(Boolean);
+      return items.length ? `<div class="aui aui-check">${title}${items.map(i => `<label class="aui-check-row"><input type="checkbox"><span>${esc(i)}</span></label>`).join('')}</div>` : '';
+    }
+    case 'timeline': {
+      const items = list(x.items, 12).filter(i => i && (str(i.text, 200) || str(i.title, 80)));
+      return items.length ? `<div class="aui aui-timeline">${title}<ol>${items.map(i => `<li><b>${esc(str(i.time, 30) || str(i.title, 30))}</b><span>${esc(str(i.text, 200) || (str(i.time, 30) ? str(i.title, 80) : ''))}</span></li>`).join('')}</ol></div>` : '';
+    }
+    case 'stats': {
+      const items = list(x.items, 6).filter(i => i && str(i.label, 20) && str(i.value, 20));
+      return items.length ? `<div class="aui aui-stats-wrap">${title}<div class="aui-stats">${items.map(i => `<div class="aui-stat"><b>${esc(str(i.value, 20))}</b><span>${esc(str(i.label, 20))}</span>${str(i.note, 40) ? `<small>${esc(str(i.note, 40))}</small>` : ''}</div>`).join('')}</div></div>` : '';
+    }
+    case 'quiz': {
+      const options = list(x.options, 6).map(o => str(o, 80)).filter(Boolean), answer = Number(x.answer);
+      if (!str(x.question, 200) || options.length < 2) return '';
+      return `<div class="aui aui-quiz" data-answer="${Number.isInteger(answer) && answer >= 0 && answer < options.length ? answer : -1}"><p class="aui-title">${esc(str(x.question, 200))}</p><div class="aui-quiz-options">${options.map((o, n) => `<button type="button" class="aui-chip" data-action="ui-quiz" data-n="${n}">${esc(o)}</button>`).join('')}</div>${str(x.explain, 300) ? `<p class="aui-explain" hidden>${esc(str(x.explain, 300))}</p>` : ''}</div>`;
+    }
     case 'bars': {
       const items = list(x.items, 12).filter(i => i && str(i.label, 30) && Number.isFinite(Number(i.value)));
       if (!items.length) return '';
@@ -165,9 +199,9 @@ function visualPiece(x, attrs, key) {
 }
 /** A ```ui block as native pieces; anything unreadable stays a code block. */
 export function assistantVisualHTML(raw, attrs = '', key = '') {
-  let value;
-  try { value = JSON.parse(String(raw)); } catch { return `<pre class="assistant-code"><code>${esc(raw)}</code></pre>`; }
-  const html = (Array.isArray(value) ? value : [value]).filter(x => x && typeof x === 'object').slice(0, 4).map((x, i) => visualPiece(x, attrs, `${key}-${i}`)).join('');
+  const value = looseVisual(raw);
+  if (!value) return `<pre class="assistant-code"><code>${esc(raw)}</code></pre>`;
+  const html = (Array.isArray(value) ? value : [value]).filter(x => x && typeof x === 'object').slice(0, 5).map((x, i) => visualPiece(x, attrs, `${key}-${i}`)).join('');
   return html ? `<div class="assistant-ui">${html}</div>` : `<pre class="assistant-code"><code>${esc(raw)}</code></pre>`;
 }
 /** While a reply streams in: a ```ui block or an 出图块 still being written shows as a placeholder, not half a card. */
@@ -258,7 +292,7 @@ export function assistantApp(ctx) {
     }
     return assistantParts(visible, options);
   }
-  const imageButton = (m, attrs) => `<button class="assistant-image" data-action="image" ${attrs} data-image-photo="${esc(m.meta.image.photoId)}" aria-label="查看生成的图片">正在读取图片…</button>`;
+  const imageButton = (m, attrs) => `<div class="assistant-image-wrap"><button class="assistant-image" data-action="image" ${attrs} data-image-photo="${esc(m.meta.image.photoId)}" aria-label="查看生成的图片">正在读取图片…</button>${btn('redraw', icon('refresh'), 'assistant-redraw', `${attrs} aria-label="重新绘制这张图" title="重新绘制这张图（说明文字不变）"`)}</div>`;
   const voiceFor = m => partsFor(m).flatMap(part => partVoiceLines(api, part));
   function messageHTML(m, index, messages) {
     const attrs = `data-mid="${esc(m.id)}"`;
@@ -422,7 +456,7 @@ export function assistantApp(ctx) {
     v.root.classList.add('assistant-chat-mode');
     patchChat(`<div class="assistant-chat"><header class="assistant-header"><div><span class="eyebrow">Assistant</span><h1>助手</h1></div><div class="heading-actions">${btn('threads', icon('layers'), 'round-button', 'aria-label="会话记录"')}${btn('new', icon('add'), 'round-button', 'aria-label="新建会话"')}${btn('settings', icon('sliders'), 'round-button', 'aria-label="助手设置"')}</div></header><div class="assistant-context">${icon(state().readContext ? 'book' : 'bubble')}<span>${esc(contextCopy())}</span></div><div class="assistant-messages" data-keep-scroll="assistant-messages" aria-label="助手对话" role="log">${list.length ? `<p class="assistant-conversation-title">${esc(thread.title || '当前会话')}</p>` + list.map(messageHTML).join('') : `<div class="assistant-welcome"><span class="assistant-mascot">${glyph('assistant')}</span><h2>陪你聊聊，帮你想想</h2></div>`}${progress ? liveHTML(progress) : waiting ? `<div class="assistant-wait" role="status"><i></i><span>${saving ? '正在发送……' : '正在准备回复……'}</span></div>` : ''}${error ? `<p class="assistant-error" role="alert">${esc(error)}</p>` : ''}${!waiting && error && last?.role === 'user' ? `<div class="assistant-retry">${btn('retry', icon('refresh') + '重新回复', 'secondary small')}</div>` : ''}</div><div class="assistant-composer"><div data-attachment-tray>${attachmentHTML(attachments(), true)}${fileReads.has(threadId) ? '<span class="hint">正在读取附件……</span>' : ''}</div><input type="file" data-assistant-files accept="${ASSISTANT_FILE_ACCEPT}" multiple hidden><details class="assistant-add-menu"><summary class="assistant-attach" aria-label="添加" title="添加">${icon('add')}</summary><div class="assistant-add-options">${btn('attach', icon('book') + '添加附件', 'text-button', `aria-label="附加文件" ${fileReads.has(threadId) || pending.get(threadId)?.kind === 'save' ? 'disabled' : ''}`)}${btn('draw-image', icon('image') + '生图', 'text-button')}</div></details><textarea data-assistant-draft aria-label="发给助手的消息" placeholder="想说点什么……" rows="1">${esc(draft())}</textarea>${waiting ? btn('cancel', icon('stop'), 'assistant-send', 'aria-label="停止回复"') : sendButton()}</div></div>`, list);
     mountCodeCopies(); mountPreviews(); mountImages(); resizeComposer();
-    for (const button of v.root.querySelectorAll('[data-action=reroll],[data-action=delete-message],[data-action=edit-message]')) button.disabled = waiting;
+    for (const button of v.root.querySelectorAll('[data-action=reroll],[data-action=redraw],[data-action=delete-message],[data-action=edit-message]')) button.disabled = waiting;
     const editSave = v.root.querySelector('[data-action=save-edit]'); if (editSave) editSave.disabled = waiting || !!editing?.saving;
     const next = v.root.querySelector('.assistant-messages'); if (bottom) next.scrollTop = next.scrollHeight;
     if (focused) { const box = v.root.querySelector('[data-assistant-draft]'); box.focus({preventScroll: true}); box.setSelectionRange(...selection); }
@@ -512,6 +546,14 @@ export function assistantApp(ctx) {
     catch (error) { if (error.name !== 'AbortError') errors.set(id, error.message); }
     finally { if (pending.get(id) === job) pending.delete(id); if (!v.disposed) await render(); }
   }
+  async function redraw(message) {
+    if (!message?.meta?.image || busy(threadId)) return;
+    closePreviews();
+    const id = threadId, job = {kind: 'reply'}; pending.set(id, job); errors.delete(id); drawChat();
+    try { await replyWithCost(options => { if (job.cancelled) throw Object.assign(Error('已取消'), {name: 'AbortError'}); return api.assistantRedraw(id, message.id, options); }); }
+    catch (error) { if (error.name !== 'AbortError') errors.set(id, error.message); }
+    finally { if (pending.get(id) === job) pending.delete(id); if (!v.disposed) await render(); }
+  }
   async function reroll(message) {
     if (!message || busy(threadId)) return;
     closePreviews();
@@ -567,6 +609,17 @@ export function assistantApp(ctx) {
       }
       case 'remove-file': fileDrafts.set(threadId, attachments().filter((_, i) => i !== Number(el.dataset.file))); drawChat(); return;
       case 'reroll': return reroll(message);
+      case 'redraw': return redraw(message);
+      case 'ui-quiz': {
+        const quiz = el.closest('.aui-quiz');
+        if (!quiz || quiz.dataset.done) return;
+        quiz.dataset.done = '1';
+        const right = Number(quiz.dataset.answer);
+        for (const b of quiz.querySelectorAll('[data-action=ui-quiz]')) { b.disabled = true; if (Number(b.dataset.n) === right) b.dataset.right = ''; }
+        if (Number(el.dataset.n) !== right && right >= 0) el.dataset.wrong = '';
+        const explain = quiz.querySelector('.aui-explain'); if (explain) explain.hidden = false;
+        return;
+      }
       case 'variant': if (message && !busy(threadId)) { closePreviews(); await api.selectAssistantVariant(threadId, message.id, Number(el.dataset.selected)); await render(); } return;
       case 'edit-message':
         if (message?.role !== 'user' || busy(threadId)) return;
