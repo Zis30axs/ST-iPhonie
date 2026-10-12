@@ -204,11 +204,12 @@ export function createAssistantHost({context, settings, backend, presets = taver
       checkSignal(controller.signal);
       // 「帮我画……」 gets an 出图块 card first; the picture is drawn on 画这张, or on a go-ahead right after a card (that
       // card, as written). A go-ahead after a talk without a card still writes one and draws it.
-      const wants = !rerollId && assistantWantsImage(historyMessages), confirming = wants && assistantConfirmsImage(historyMessages);
+      // 重 roll answers the same turn again by the same rules: 「帮我画」 gets a new card, a go-ahead draws again.
+      const wants = !oldImage && assistantWantsImage(historyMessages), confirming = wants && assistantConfirmsImage(historyMessages);
       const shown = confirming ? historyMessages.findLast(m => m.role === 'assistant') : null;
       const card = shown && !shown.meta?.image ? parsePictures(assistantThoughts(shown.text, shown.meta?.reasoningFormat).text).filter(t => t.spec).at(-1) : null;
       const cardText = card ? assistantThoughts(shown.text, shown.meta?.reasoningFormat).text.slice(card.start, card.end) : '';
-      const drawing = !!oldImage || !!cardText || (rerollId ? !!thread.messages[targetIndex].meta?.image : confirming);
+      const drawing = !!oldImage || !!cardText || confirming;
       const proposing = wants && !drawing;
       checkSignal(controller.signal);
       if (drawing) {

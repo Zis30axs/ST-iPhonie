@@ -25,7 +25,7 @@ export function assistantParts(text, {beautified = false} = {}) {
   while ((match = fences.exec(value))) {
     if (match.index > at) parts.push({kind: 'text', text: value.slice(at, match.index)});
     const language = match[1].trim(), only = parsePictures(match[2]).filter(t => t.spec);
-    const kind = /^html?$/i.test(language) ? 'html' : /^(?:ui|json\s*ui|ui\s*json|ui-?json|intelligent[-\s]?ui)$/i.test(language) || (/^(?:json|json5|javascript|js)?$/i.test(language) && looksVisual(match[2])) ? 'ui' : only.length === 1 && !match[2].slice(0, only[0].start).trim() && !match[2].slice(only[0].end).trim() ? 'picture' : 'code';
+    const kind = /^html?$/i.test(language) ? 'html' : visualFence(language, match[2]) ? 'ui' : only.length === 1 && !match[2].slice(0, only[0].start).trim() && !match[2].slice(only[0].end).trim() ? 'picture' : 'code';
     parts.push({kind, language, text: kind === 'ui' || kind === 'picture' ? match[2].trim() : match[2]});
     at = fences.lastIndex;
   }
@@ -111,6 +111,21 @@ export function looseVisual(raw) {
   tries.push(fixed, fixed.replace(/[“”]/g, '"'), '[' + fixed.replace(/}\s*\n\s*{/g, '},{') + ']', '[' + fixed.replace(/[“”]/g, '"').replace(/}\s*\n\s*{/g, '},{') + ']');
   for (const attempt of tries) { try { return JSON.parse(attempt); } catch { /* next */ } }
   return null;
+}
+const visualFence = (language, body) => /^(?:ui|json\s*ui|ui\s*json|ui-?json|intelligent[-\s]?ui)$/i.test(language.trim()) || (/^(?:json|json5|javascript|js)?$/i.test(language.trim()) && looksVisual(body));
+/**
+ * The tavern's display regex (beautifying cards, quote bubbles…) is meant for prose: run over a ```ui block or an
+ * 出图块 it breaks them (a quote rule wrapping every "…" in a <span>). They are set aside while it runs.
+ */
+export function shieldVisuals(text, display) {
+  const kept = [];
+  let marker = 'IPHONIEKEEP';
+  while (String(text).includes(marker)) marker += 'X';
+  const hold = value => { kept.push(value); return `${marker}${kept.length - 1}END`; };
+  let out = String(text).replace(/```([^\n`]*)\n([\s\S]*?)```/g, (all, language, body) => visualFence(language, body) ? hold(all) : all);
+  for (const t of parsePictures(out).filter(t => t.spec).reverse()) out = out.slice(0, t.start) + hold(out.slice(t.start, t.end)) + out.slice(t.end);
+  if (!kept.length) return display(text);
+  return String(display(out)).replace(new RegExp(marker + '(\\d+)END', 'g'), (all, i) => kept[Number(i)] ?? all);
 }
 function looksVisual(raw) {
   const value = looseVisual(raw);
@@ -279,7 +294,7 @@ export function assistantApp(ctx) {
     const text = m.role === 'assistant' ? thoughtsFor(m).text : m.text;
     const depth = Math.max(0, (thread?.messages.length || 1) - 1 - (thread?.messages.findIndex(row => row.id === m.id) ?? 0));
     const key = JSON.stringify([threadId, m.id, m.text, text, m.role, depth]);
-    if (displayCache.get(m.id)?.key !== key) displayCache.set(m.id, {key, text: api.assistantDisplay ? api.assistantDisplay(text, m.role, depth) : text});
+    if (displayCache.get(m.id)?.key !== key) displayCache.set(m.id, {key, text: api.assistantDisplay ? (m.role === 'assistant' ? shieldVisuals(text, value => api.assistantDisplay(value, m.role, depth)) : api.assistantDisplay(text, m.role, depth)) : text});
     return displayCache.get(m.id).text;
   }
   function partsFor(m) {
