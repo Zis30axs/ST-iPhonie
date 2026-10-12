@@ -2,7 +2,7 @@ import {createView, esc, btn, heading, field, select, toggle, copyText} from './
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction} from '../download.js';
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
-import {assistantAttachments, assistantThoughts} from '../core/assistant.js';
+import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, assistantAttachments, assistantThoughts} from '../core/assistant.js';
 import {icon, glyph} from './icons.js';
 import {assistantMarkdown, assistantHTMLMarkdown} from './assistant-markdown.js';
 
@@ -151,8 +151,15 @@ export function assistantApp(ctx) {
   }
   function partsFor(m) {
     const visible = displayText(m);
-    return assistantParts(visible, {beautified: visible !== thoughtsFor(m).text});
+    const options = {beautified: visible !== thoughtsFor(m).text};
+    if (m.meta?.image && options.beautified && visible.includes(ASSISTANT_IMAGE_SLOT)) return assistantParts(visible.replaceAll(ASSISTANT_IMAGE_SLOT, ''), options);
+    if (m.meta?.image && visible.includes(ASSISTANT_IMAGE_SLOT)) {
+      const at = visible.indexOf(ASSISTANT_IMAGE_SLOT);
+      return [...assistantParts(visible.slice(0, at), options), {kind: 'image', text: ''}, ...assistantParts(visible.slice(at + ASSISTANT_IMAGE_SLOT.length), options)];
+    }
+    return assistantParts(visible, options);
   }
+  const imageButton = (m, attrs) => `<button class="assistant-image" data-action="image" ${attrs} data-image-photo="${esc(m.meta.image.photoId)}" aria-label="查看生成的图片">正在读取图片…</button>`;
   const voiceFor = m => partsFor(m).flatMap(part => partVoiceLines(api, part));
   function messageHTML(m, index, messages) {
     const attrs = `data-mid="${esc(m.id)}"`;
@@ -160,6 +167,7 @@ export function assistantApp(ctx) {
     const visible = displayText(m), thoughts = thoughtsFor(m), reasoning = [m.meta?.reasoning?.trim(), thoughts.reasoning].filter(Boolean).filter((value, i, all) => all.indexOf(value) === i).join('\n\n');
     const parts = partsFor(m), lines = voiceFor(m); let offset = 0;
     return `<article class="assistant-message" ${attrs}><span class="assistant-who">${icon('star')}助手${replyInfo(m)}</span><div class="assistant-bubble">${reasoning ? `<details class="assistant-reasoning" data-group="reasoning-${esc(m.id)}"><summary${Number.isFinite(m.meta?.reasoningMs) ? ' title="从请求开始到推理结束的流式观测时间"' : ''}>${Number.isFinite(m.meta?.reasoningMs) ? `思考了 ${(m.meta.reasoningMs / 1000).toFixed(1)} 秒` : '思考内容'}</summary><div class="assistant-prose">${prose(reasoning)}</div></details>` : ''}${parts.map((p, i) => {
+      if (p.kind === 'image') return imageButton(m, attrs);
       const spoken = partVoiceLines(api, p), rendered = inlineDialogue(p, spoken, attrs, offset); offset += spoken.length;
       if (p.kind === 'text') return `<div class="assistant-prose">${rendered}</div>`;
       if (p.kind === 'code') {
@@ -167,7 +175,7 @@ export function assistantApp(ctx) {
       }
       const key = `${m.id}:${i}`;
       return `<div class="assistant-html${p.auto ? ' assistant-beautified' : ''}"><div data-preview-mid="${esc(m.id)}" data-preview-part="${i}" data-auto></div>${p.auto ? '' : `<details data-group="source-${esc(key)}"><summary>查看源码</summary><pre class="assistant-code"><code>${esc(p.text)}</code></pre></details>`}</div>${spoken.length ? `<div class="assistant-prose">${rendered}</div>` : ''}`;
-    }).join('')}${m.meta?.image ? `<button class="assistant-image" data-action="image" ${attrs} data-image-photo="${esc(m.meta.image.photoId)}" aria-label="查看生成的图片">正在读取图片…</button>` : ''}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${lines.length ? btn('voice-all', icon('wave') + '整条播放', 'text-button', attrs) : ''}${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('reroll', icon('refresh') + '重 roll', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details>${(m.variants?.length || 1) > 1 ? `<div class="assistant-variants">${btn('variant', '‹', 'icon-button', `${attrs} data-selected="${(m.selected || 0) - 1}" aria-label="上一个回复" ${m.selected > 0 ? '' : 'disabled'}`)}<span>${(m.selected || 0) + 1} / ${m.variants.length}</span>${btn('variant', '›', 'icon-button', `${attrs} data-selected="${(m.selected || 0) + 1}" aria-label="下一个回复" ${(m.selected || 0) < m.variants.length - 1 ? '' : 'disabled'}`)}</div>` : ''}</article>`;
+    }).join('')}${m.meta?.image && !parts.some(p => p.kind === 'image') ? imageButton(m, attrs) : ''}</div><details class="assistant-actions" data-group="actions-${esc(m.id)}"><summary aria-label="消息操作" title="消息操作">${icon('more')}</summary><div class="assistant-message-tools">${lines.length ? btn('voice-all', icon('wave') + '整条播放', 'text-button', attrs) : ''}${btn('copy', icon('copy') + '复制原文', 'text-button', attrs)}${btn('reroll', icon('refresh') + '重 roll', 'text-button', attrs)}${btn('delete-message', icon('trash') + '删除', 'text-button', attrs)}</div></details>${(m.variants?.length || 1) > 1 ? `<div class="assistant-variants">${btn('variant', '‹', 'icon-button', `${attrs} data-selected="${(m.selected || 0) - 1}" aria-label="上一个回复" ${m.selected > 0 ? '' : 'disabled'}`)}<span>${(m.selected || 0) + 1} / ${m.variants.length}</span>${btn('variant', '›', 'icon-button', `${attrs} data-selected="${(m.selected || 0) + 1}" aria-label="下一个回复" ${(m.selected || 0) < m.variants.length - 1 ? '' : 'disabled'}`)}</div>` : ''}</article>`;
   }
   function mountImages() {
     for (const slot of v.root.querySelectorAll('[data-image-photo]')) {
@@ -203,6 +211,16 @@ export function assistantApp(ctx) {
     for (const frame of v.root.querySelectorAll('.assistant-preview')) frame.contentWindow?.postMessage(update, '*');
   });
   themeObserver.observe(ctx.doc.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-skin']});
+  function mountCodeCopies() {
+    for (const pre of v.root.querySelectorAll('.assistant-messages pre')) {
+      if (!pre.querySelector(':scope > code') || pre.parentElement.classList.contains('assistant-code-block')) continue;
+      const block = ctx.doc.createElement('div'); block.className = 'assistant-code-block';
+      const button = ctx.doc.createElement('button'); button.type = 'button'; button.className = 'assistant-code-copy';
+      button.dataset.action = 'copy-code'; button.setAttribute('aria-label', '复制代码块'); button.title = '复制代码块';
+      button.innerHTML = icon('copy') + '<span>复制</span>';
+      pre.before(block); block.append(button, pre);
+    }
+  }
   function mountPreviews() {
     for (const slot of v.root.querySelectorAll('[data-preview-mid]')) {
       if (slot.querySelector('iframe')) continue;
@@ -263,7 +281,12 @@ export function assistantApp(ctx) {
   function liveHTML(progress) {
     if (!progress) return '';
     const elapsed = Math.max(0, Date.now() - progress.startedAt), meta = progress.meta || {};
-    if (['prompting', 'drawing'].includes(progress.phase)) return `<article class="assistant-live"><span class="assistant-who">${icon('star')}助手</span><div class="assistant-bubble" role="status">${progress.phase === 'prompting' ? '正在整理绘图提示词' : '正在生成图片'} · ${(elapsed / 1000).toFixed(1)} 秒</div></article>`;
+    if (['prompting', 'drawing'].includes(progress.phase)) {
+      const label = `<span role="status">${progress.phase === 'prompting' ? '正在整理绘图提示词' : '正在生成图片'} · ${(elapsed / 1000).toFixed(1)} 秒</span>`;
+      const chunks = progress.text?.split(ASSISTANT_IMAGE_SLOT);
+      const content = progress.phase === 'drawing' && chunks?.length === 2 ? `<div class="assistant-prose">${prose(chunks[0])}</div><div class="assistant-image-pending">${label}</div><div class="assistant-prose">${prose(chunks[1])}</div>` : label;
+      return `<article class="assistant-live"><span class="assistant-who">${icon('star')}助手</span><div class="assistant-bubble">${content}</div></article>`;
+    }
     const part = assistantThoughts(progress.text, meta.reasoningFormat), show = state().stream !== false;
     const reason = [meta.reasoning, part.reasoning].filter(Boolean).filter((s, i, all) => all.indexOf(s) === i).join('\n\n');
     const phase = progress.phase, seconds = ((phase === 'responding' && Number.isFinite(meta.reasoningMs) ? meta.reasoningMs : elapsed) / 1000).toFixed(1);
@@ -294,7 +317,7 @@ export function assistantApp(ctx) {
     const scroller = v.root.querySelector('.assistant-messages'), bottom = !scroller || scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 70;
     v.root.classList.add('assistant-chat-mode');
     patchChat(`<div class="assistant-chat"><header class="assistant-header"><div><span class="eyebrow">Assistant</span><h1>助手</h1></div><div class="heading-actions">${btn('threads', icon('layers'), 'round-button', 'aria-label="会话记录"')}${btn('new', icon('add'), 'round-button', 'aria-label="新建会话"')}${btn('settings', icon('sliders'), 'round-button', 'aria-label="助手设置"')}</div></header><div class="assistant-context">${icon(state().readContext ? 'book' : 'bubble')}<span>${esc(contextCopy())}</span></div><div class="assistant-messages" data-keep-scroll="assistant-messages" aria-label="助手对话" role="log">${list.length ? `<p class="assistant-conversation-title">${esc(thread.title || '当前会话')}</p>` + list.map(messageHTML).join('') : `<div class="assistant-welcome"><span class="assistant-mascot">${glyph('assistant')}</span><h2>陪你聊聊，帮你想想</h2></div>`}${progress ? liveHTML(progress) : waiting ? `<div class="assistant-wait" role="status"><i></i><span>${saving ? '正在发送……' : '正在准备回复……'}</span></div>` : ''}${error ? `<p class="assistant-error" role="alert">${esc(error)}</p>` : ''}${!waiting && error && last?.role === 'user' ? `<div class="assistant-retry">${btn('retry', icon('refresh') + '重新回复', 'secondary small')}</div>` : ''}</div><div class="assistant-composer"><div data-attachment-tray>${attachmentHTML(attachments(), true)}${fileReads.has(threadId) ? '<span class="hint">正在读取附件……</span>' : ''}</div><input type="file" data-assistant-files accept="${ASSISTANT_FILE_ACCEPT}" multiple hidden><details class="assistant-add-menu"><summary class="assistant-attach" aria-label="添加" title="添加">${icon('add')}</summary><div class="assistant-add-options">${btn('attach', icon('book') + '添加附件', 'text-button', `aria-label="附加文件" ${fileReads.has(threadId) || pending.get(threadId)?.kind === 'save' ? 'disabled' : ''}`)}${btn('draw-image', icon('image') + '生图', 'text-button')}</div></details><textarea data-assistant-draft aria-label="发给助手的消息" placeholder="想说点什么……" rows="1">${esc(draft())}</textarea>${waiting ? btn('cancel', icon('stop'), 'assistant-send', 'aria-label="停止回复"') : sendButton()}</div></div>`, list);
-    mountPreviews(); mountImages(); resizeComposer();
+    mountCodeCopies(); mountPreviews(); mountImages(); resizeComposer();
     for (const button of v.root.querySelectorAll('[data-action=reroll],[data-action=delete-message],[data-action=edit-message]')) button.disabled = waiting;
     const editSave = v.root.querySelector('[data-action=save-edit]'); if (editSave) editSave.disabled = waiting || !!editing?.saving;
     const next = v.root.querySelector('.assistant-messages'); if (bottom) next.scrollTop = next.scrollHeight;
@@ -321,9 +344,9 @@ export function assistantApp(ctx) {
     const s = settings || state(), built = s.presets?.find(p => p.id === s.activePreset), external = tavern.find(p => p.id === s.tavernPreset);
     const entries = s.source === 'tavern' ? external?.entries || [] : built?.entries || [];
     v.root.classList.remove('assistant-chat-mode');
-    v.draw(heading('助手设置', btn('save-settings', settingsSaving ? '保存中' : '完成', 'primary small', settingsSaving ? 'disabled' : ''), 'Assistant') + `<p class="hint">这里的选择只用于助手。</p><div class="group">${field('预设来源', select('source', s.source, [['builtin', '默认助手'], ['tavern', '酒馆预设']]))}${s.source === 'tavern' ? field('酒馆预设', select('tavernPreset', s.tavernPreset, [['', '选择一个预设'], ...tavern.map(p => [p.id, p.name])])) : ''}${toggle('stream', '流式显示', s.stream !== false, '开启后边生成边显示；关闭后等待完整回复。思考状态仍实时更新。')}${toggle('readContext', '读取正文上下文', s.readContext)}${s.readContext ? `<p class="hint">${esc(contextCopy(s))}</p><p class="hint">使用最近一次正文请求的完整快照，保留当次正则、预设与注入；不含随后生成的回复。刷新或切换正文后，请先发送一次正文。</p>` : '<p class="hint">只带助手提示词和这个会话，不读取正文。</p>'}</div>${s.source === 'tavern' && tavernLoading ? '<p class="hint" role="status">正在读取酒馆预设……</p>' : ''}${s.source === 'tavern' && tavernError ? `<p class="assistant-error" role="alert">${esc(tavernError)}</p>${btn('reload-presets', '重新读取', 'secondary small')}` : ''}<div class="group-title"><span>${s.source === 'tavern' ? '预设条目' : '助手提示词'}</span><small>${entries.length} 条</small></div><div class="assistant-entries">${entries.map(entry => {
+    v.draw(heading('助手设置', btn('save-settings', settingsSaving ? '保存中' : '完成', 'primary small', settingsSaving ? 'disabled' : ''), 'Assistant') + `<p class="hint">这里的选择只用于助手。</p><div class="group">${field('预设来源', select('source', s.source, [['builtin', '助手预设'], ['tavern', '酒馆预设']]))}${s.source === 'tavern' ? field('酒馆预设', select('tavernPreset', s.tavernPreset, [['', '选择一个预设'], ...tavern.map(p => [p.id, p.name])])) : field('助手预设', select('activePreset', s.activePreset, s.presets.map(p => [p.id, p.name]))) + `<div class="assistant-preset-tools">${btn('new-preset', '新建', 'text-button')}${btn('copy-preset', '另存为新预设', 'text-button')}${built?.id !== 'companion' ? btn('delete-preset', '删除预设', 'text-button') : ''}</div>${field('预设名称', `<input data-preset-name value="${esc(built?.name || '')}" maxlength="80" aria-label="预设名称">`)}`}${toggle('stream', '流式显示', s.stream !== false, '开启后边生成边显示；关闭后等待完整回复。思考状态仍实时更新。')}${toggle('readContext', '读取正文上下文', s.readContext)}${s.readContext ? `<p class="hint">${esc(contextCopy(s))}</p><p class="hint">使用最近一次正文请求的完整快照，保留当次正则、预设与注入；不含随后生成的回复。刷新或切换正文后，请先发送一次正文。</p>` : '<p class="hint">只带助手提示词和这个会话，不读取正文。</p>'}</div>${s.source === 'tavern' && tavernLoading ? '<p class="hint" role="status">正在读取酒馆预设……</p>' : ''}${s.source === 'tavern' && tavernError ? `<p class="assistant-error" role="alert">${esc(tavernError)}</p>${btn('reload-presets', '重新读取', 'secondary small')}` : ''}<div class="group-title"><span>${s.source === 'tavern' ? '预设条目' : '助手提示词'}</span><small>${entries.length} 条</small>${s.source === 'builtin' ? btn('add-entry', icon('add'), 'text-button', 'aria-label="添加条目"') : ''}</div><div class="assistant-entries">${entries.map(entry => {
       const enabled = s.source === 'tavern' ? s.tavernEntries?.[s.tavernPreset]?.[entry.id] ?? entry.enabled !== false : entry.enabled !== false;
-      return `<details class="group assistant-entry" data-group="entry-${esc(entry.id)}"><summary><span>${esc(entry.title || entry.id)}${entry.marker ? '<small> · 上下文位置</small>' : ''}</span><input class="switch" type="checkbox" data-entry="${esc(entry.id)}" aria-label="启用 ${esc(entry.title || entry.id)}" ${enabled ? 'checked' : ''}></summary>${s.source === 'builtin' ? `<textarea data-entry-text="${esc(entry.id)}" aria-label="${esc(entry.title || entry.id)}的内容" rows="6">${esc(entry.text)}</textarea>` : `<pre class="assistant-code">${esc(entry.text || (entry.marker ? '正文快照完整保留当次发送内容，不由此处的条目开关裁剪。' : '这个条目没有文字内容。'))}</pre>`}</details>`;
+      return `<details class="group assistant-entry" data-group="entry-${esc(entry.id)}"><summary><span>${esc(entry.title || entry.id)}${entry.marker ? '<small> · 上下文位置</small>' : ''}</span><input class="switch" type="checkbox" data-entry="${esc(entry.id)}" aria-label="启用 ${esc(entry.title || entry.id)}" ${enabled ? 'checked' : ''}></summary>${s.source === 'builtin' ? `<div class="assistant-entry-edit"><input data-entry-title="${esc(entry.id)}" value="${esc(entry.title)}" maxlength="100" aria-label="条目名称">${btn('delete-entry', icon('trash'), 'text-button', `data-entry-id="${esc(entry.id)}" aria-label="删除条目"`)}</div><textarea data-entry-text="${esc(entry.id)}" aria-label="${esc(entry.title || entry.id)}的内容" rows="6">${esc(entry.text)}</textarea>` : `<pre class="assistant-code">${esc(entry.text || (entry.marker ? '正文快照完整保留当次发送内容，不由此处的条目开关裁剪。' : '这个条目没有文字内容。'))}</pre>`}</details>`;
     }).join('')}</div>`);
   }
   async function loadPresets() {
@@ -394,6 +417,8 @@ export function assistantApp(ctx) {
   v.on('keydown', '[data-assistant-draft]', (el, event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); return send(); }
   });
+  v.on('input', '[data-preset-name]', el => { const p = settings?.presets.find(p => p.id === settings.activePreset); if (p) p.name = el.value; });
+  v.on('input', '[data-entry-title]', el => { const entry = settings?.presets.find(p => p.id === settings.activePreset)?.entries.find(e => e.id === el.dataset.entryTitle); if (entry) entry.title = el.value; });
   v.on('input', '[data-entry-text]', el => {
     const p = settings.presets.find(p => p.id === settings.activePreset), entry = p?.entries.find(e => e.id === el.dataset.entryText);
     if (entry) entry.text = el.value;
@@ -459,6 +484,31 @@ export function assistantApp(ctx) {
         api.assistantCancel?.(id); await api.deleteAssistantThread(id); saveDraft('', id); fileDrafts.delete(id); errors.delete(id);
         if (id === threadId) { threadId = null; thread = null; } return render();
       }
+      case 'new-preset':
+      case 'copy-preset': {
+        if (!settings || settings.source !== 'builtin') return;
+        if (settings.presets.length >= ASSISTANT_LIMITS.presets) { ctx.notify('最多保存 100 套助手预设'); return; }
+        const current = settings.presets.find(p => p.id === settings.activePreset);
+        const preset = {id: win.crypto.randomUUID(), name: action === 'copy-preset' ? `${current.name} 副本`.slice(0, 80) : '新预设', entries: action === 'copy-preset' ? structuredClone(current.entries) : []};
+        const saved = state().presets?.find(p => p.id === current.id);
+        if (action === 'copy-preset' && saved) settings.presets = settings.presets.map(p => p.id === current.id ? structuredClone(saved) : p);
+        settings.presets.push(preset); settings.activePreset = preset.id; drawSettings(); v.root.querySelector('[data-preset-name]')?.focus(); return;
+      }
+      case 'delete-preset': {
+        if (!settings || settings.source !== 'builtin' || settings.activePreset === 'companion') return;
+        if (!await ctx.confirm('删除这套助手预设？', '会话记录会保留。')) return;
+        settings.presets = settings.presets.filter(p => p.id !== settings.activePreset); settings.activePreset = 'companion'; drawSettings(); return;
+      }
+      case 'add-entry': {
+        const preset = settings?.source === 'builtin' && settings.presets.find(p => p.id === settings.activePreset); if (!preset) return;
+        if (preset.entries.length >= ASSISTANT_LIMITS.entries) { ctx.notify('每套预设最多 50 个条目'); return; }
+        const entry = {id: win.crypto.randomUUID(), title: '新条目', text: '', enabled: true}; preset.entries.push(entry); drawSettings();
+        const box = v.root.querySelector(`[data-entry-text="${entry.id}"]`); box.closest('details').open = true; box.focus(); return;
+      }
+      case 'delete-entry': {
+        const preset = settings?.source === 'builtin' && settings.presets.find(p => p.id === settings.activePreset); if (!preset) return;
+        preset.entries = preset.entries.filter(e => e.id !== el.dataset.entryId); drawSettings(); return;
+      }
       case 'settings': closePreviews(); settings = structuredClone(state()); mode = 'settings'; drawSettings(); return loadPresets();
       case 'reload-presets': return loadPresets();
       case 'save-settings':
@@ -466,7 +516,14 @@ export function assistantApp(ctx) {
         settingsSaving = true;
         try { await api.saveAssistant(settings); settings = null; mode = 'chat'; await render(); }
         finally { settingsSaving = false; } return;
-      case 'copy': if (message && await copyText(win, message.text)) ctx.notify('原文已复制'); else ctx.notify('没能复制，请展开源码后手动选取'); return;
+      case 'copy-code': {
+        const code = el.closest('.assistant-code-block')?.querySelector('pre > code');
+        if (!code) return;
+        const copied = await copyText(win, code.textContent);
+        ctx.notify(copied ? '代码块已复制' : '没能复制，请长按代码手动选取');
+        return;
+      }
+      case 'copy': if (message && await copyText(win, message.meta?.image ? message.text.replaceAll(ASSISTANT_IMAGE_SLOT, '【图片】') : message.text)) ctx.notify('原文已复制'); else ctx.notify('没能复制，请展开源码后手动选取'); return;
       case 'voice-all': if (message?.role === 'assistant') return api.speak(voiceFor(message)); return;
       case 'voice-line': {
         if (message?.role !== 'assistant') return;

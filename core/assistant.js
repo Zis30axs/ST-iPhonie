@@ -4,7 +4,8 @@ import {DEFAULT_FORMAT, isPlaceholderRole} from './protocol.js';
 import {languageName} from './languages.js';
 
 export const ASSISTANT_LIMITS = Object.freeze({messages: 500, text: 100_000, entries: 50, entryText: 20_000, title: 80, presets: 100, tavernEntries: 500, variants: 20, attachments: 8, fileBytes: 10 * 1024 * 1024, totalBytes: 20 * 1024 * 1024});
-const PRESET_IDS = ['companion'];
+const presetId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(id) && !['__proto__','constructor','prototype'].includes(id);
+export const ASSISTANT_IMAGE_SLOT = '[[assistant-image]]';
 const record = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const safeKey = key => !['__proto__', 'prototype', 'constructor'].includes(key);
 const text = (value, max, fallback = '') => typeof value === 'string' ? value.slice(0, max) : fallback;
@@ -14,6 +15,7 @@ export function defaultAssistant() {
   return {source: 'builtin', activePreset: 'companion', stream: true, readContext: false, tavernPreset: '', tavernEntries: {}, presets: [
     {id: 'companion', name: '助手', entries: [
       entry('identity', '助手身份', '你是用户的聊天助手，可以陪用户闲聊、一起讨论想法，回答问题并提出具体建议。用自然、亲切的中文交流，按话题决定回复长短。'),
+      entry('drawing', '生图协作', '和用户一起讨论画面、构图、风格与提示词。只讨论能力或方案时先回答，不直接生成。用户明确要求画图或确认方案后，可以在回复中插入图片，并用自然的文字承接前后内容；不要只回复图片已生成。根据已生成图片的提示词继续讨论，不假装看到了没有提供给你的图片像素。'),
       entry('reference', '参考剧情', '用户可能提供正在创作的正文作为参考。讨论正文时区分已有内容与你的推测，指出依据；缺少上下文时坦诚说明，不假装知道。只在用户要求续写或扮演时这样做。'),
       entry('format', '语音样例格式', '只有用户要求生成语音台词或试听样例时，才使用以下规则；平时自然聊天即可。每句完整使用当前格式：{{语音格式}}。填写实际角色名、情绪、完整译文和完整原文，不保留占位符。译文与原文表达同一句话，不概括、不漏译。旁白不加语音标签。'),
       entry('speakers', '语音样例角色', '仅供用户要求语音样例时参考。可试听的已配置角色：\n{{角色列表}}\n默认语言：{{语言}}。使用列表里的实际角色名，并遵守各角色的语言。没有配置角色时，先请用户在「角色」中配置音色，不虚构一个可试听角色。'),
@@ -26,20 +28,22 @@ export function normalizeAssistant(value) {
   const base = defaultAssistant();
   if (!record(value)) return base;
   const saved = Array.isArray(value.presets) ? value.presets : [];
-  const presets = base.presets.map(preset => {
+  const candidates = [base.presets[0], ...saved.filter(p => record(p) && presetId(p.id) && p.id !== 'companion')].slice(0, ASSISTANT_LIMITS.presets);
+  const presetSeen = new Set();
+  const presets = candidates.filter(p => !presetSeen.has(p.id) && presetSeen.add(p.id)).map(preset => {
     const own = saved.find(p => record(p) && p.id === preset.id);
     if (!own) return preset;
     const seen = new Set();
     const entries = Array.isArray(own.entries) ? own.entries.slice(0, ASSISTANT_LIMITS.entries).filter(record).map((item, i) => ({
       id: text(item.id, 100).trim() || `entry-${i}`, title: text(item.title, 100, '规则'),
       text: text(item.text, ASSISTANT_LIMITS.entryText), enabled: item.enabled !== false,
-    })).filter(item => !seen.has(item.id) && seen.add(item.id)) : preset.entries;
-    return {id: preset.id, name: text(own.name, 80).trim() || preset.name, entries};
+    })).filter(item => !seen.has(item.id) && seen.add(item.id)) : preset.entries || [];
+    return {id: preset.id, name: text(own.name, 80).trim() || preset.name || '助手预设', entries};
   });
   const tavernEntries = Object.fromEntries(Object.entries(record(value.tavernEntries) ? value.tavernEntries : {}).filter(([name, entries]) => safeKey(name) && name.length <= 200 && record(entries)).slice(0, ASSISTANT_LIMITS.presets).map(([name, entries]) => [name,
     Object.fromEntries(Object.entries(entries).filter(([id, enabled]) => safeKey(id) && id.length <= 200 && typeof enabled === 'boolean').slice(0, ASSISTANT_LIMITS.tavernEntries)),
   ]));
-  return {source: value.source === 'tavern' ? 'tavern' : 'builtin', activePreset: PRESET_IDS.includes(value.activePreset) ? value.activePreset : base.activePreset,
+  return {source: value.source === 'tavern' ? 'tavern' : 'builtin', activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : base.activePreset,
     presets, tavernPreset: text(value.tavernPreset, 200), tavernEntries, stream: value.stream !== false, readContext: value.readContext === true};
 }
 
@@ -49,15 +53,15 @@ export function validateAssistantPatch(patch) {
   const allowed = ['source', 'activePreset', 'presets', 'tavernPreset', 'tavernEntries', 'readContext', 'stream'];
   if (Object.keys(patch).some(key => !allowed.includes(key))) throw Error('助手设置包含不支持的字段');
   if ('source' in patch && !['builtin', 'tavern'].includes(patch.source)) throw Error('请选择助手预设来源');
-  if ('activePreset' in patch && !PRESET_IDS.includes(patch.activePreset)) throw Error('请选择有效的助手预设');
+  if ('activePreset' in patch && !presetId(patch.activePreset)) throw Error('请选择有效的助手预设');
   if ('stream' in patch && typeof patch.stream !== 'boolean') throw Error('流式显示开关无效');
   if ('readContext' in patch && typeof patch.readContext !== 'boolean') throw Error('读取上下文开关无效');
   if ('tavernPreset' in patch && (typeof patch.tavernPreset !== 'string' || patch.tavernPreset.length > 200)) throw Error('酒馆预设名称无效');
   if ('presets' in patch) {
-    if (!Array.isArray(patch.presets) || patch.presets.length > PRESET_IDS.length) throw Error('助手预设列表无效');
+    if (!Array.isArray(patch.presets) || patch.presets.length + (patch.presets.some(p => p?.id === 'companion') ? 0 : 1) > ASSISTANT_LIMITS.presets) throw Error('助手预设列表无效');
     const seen = new Set();
     for (const preset of patch.presets) {
-      if (!record(preset) || !PRESET_IDS.includes(preset.id) || seen.has(preset.id)) throw Error('助手预设 ID 无效或重复');
+      if (!record(preset) || !presetId(preset.id) || seen.has(preset.id)) throw Error('助手预设 ID 无效或重复');
       seen.add(preset.id);
       if (typeof preset.name !== 'string' || !preset.name.trim() || preset.name.length > 80) throw Error('助手预设名称无效');
       if (!Array.isArray(preset.entries) || preset.entries.length > ASSISTANT_LIMITS.entries) throw Error('助手预设条目过多或格式无效');
@@ -179,7 +183,7 @@ export function assistantReasoningTimer(format, now = () => performance.now()) {
 
 export function assistantHistory(messages, {textOnly = false} = {}) {
   return messages.map(message => {
-    const files = assistantAttachments(message.attachments), body = [message.role === 'assistant' ? assistantThoughts(message.text, message.meta?.reasoningFormat).text : message.text,
+    const files = assistantAttachments(message.attachments), body = [message.role === 'assistant' ? assistantThoughts(message.text, message.meta?.reasoningFormat).text.replaceAll(ASSISTANT_IMAGE_SLOT, message.meta?.image ? '【图片见下方提示词记录】' : ASSISTANT_IMAGE_SLOT) : message.text,
       ...(message.meta?.image ? [`【已生成图片：${message.meta.image.prompt}】`] : []),
       ...files.filter(f => f.kind === 'text').map(f => `【用户附件：${f.name}】\n${f.text}\n【附件结束】`)].filter(Boolean).join('\n\n');
     const images = files.filter(f => f.kind === 'image');
@@ -195,7 +199,7 @@ export function assertAssistantThread(thread) {
 export function assistantSummary(thread) {
   assertAssistantThread(thread);
   const {messages, ...summary} = thread;
-  return {...summary, messageCount: messages.length, preview: (messages.at(-1)?.role === 'assistant' ? assistantThoughts(messages.at(-1)?.text, messages.at(-1)?.meta?.reasoningFormat).text : String(messages.at(-1)?.text || '')).replace(/\s+/g, ' ').slice(0, 120)};
+  return {...summary, messageCount: messages.length, preview: (messages.at(-1)?.role === 'assistant' ? assistantThoughts(messages.at(-1)?.text, messages.at(-1)?.meta?.reasoningFormat).text : String(messages.at(-1)?.text || '')).replaceAll(ASSISTANT_IMAGE_SLOT, '【图片】').replace(/\s+/g, ' ').slice(0, 120)};
 }
 
 /** Explicit drawing requests only; examples, questions about capability and negative instructions stay chat. */
@@ -204,6 +208,10 @@ export function assistantWantsImage(messages) {
   // All consecutive messages form one user turn. A later cancellation wins over an earlier drawing request.
   for (let i = messages.length - 1; i >= 0 && messages[i].role === 'user'; i--) {
     const raw = messages[i].text.trim();
+    if (/(?:先|暂时)(?:别|不要|不)(?:急着)?(?:画|生图|生成)|只(?:想)?(?:讨论|聊|要提示词)/u.test(raw)) return false;
+    const earlier = messages.slice(0, i).slice(-6);
+    const imageContext = earlier.some(m => m.meta?.image || /生图|画一|绘图|构图|生成.{0,4}(?:图片|图像)|帮我画/.test(m.text || ''));
+    if (imageContext && /^(?:(?:好[的啊呀]?|可以|嗯|那|就|请)[，,、！!。\s]*)*(?:按(?:这个|那个|刚才|上面|你说的|我们讨论的)(?:方案|想法)?(?:来)?(?:画|生成|生图)|开始(?:画|生成|生图)|画吧|生成吧|可以画了)[吧啊呀。！!\s]*$/u.test(raw)) return true;
     if (/^(?:不要|别|不用|先不|暂时不)(?:再|帮我|给我)?(?:画|生图|生成|绘制)|^(?:算了|先聊聊|取消生图)/u.test(raw)) return false;
     if (/(?:能不能|可以|会|怎么|如何).{0,8}(?:生图|画图|生成图片)[？?]?$/u.test(raw)) continue;
     if (/^(?:(?:请|麻烦|现在|再|给我|帮我|帮忙|为我|替我)\s*)*(?:画(?!风|面|师|质|作|法)|生图[：:\s]|生成(?:一[张幅个]|图片|图像|照片|插画)|绘制|draw\s|generate\s+(?:an?\s+)?image)/iu.test(raw)) return true;

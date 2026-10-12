@@ -199,6 +199,12 @@ a{color:var(--accent-ink)}
 .assistant-message-tools .text-button,.assistant-html-tools .text-button{font-size:10px;min-height:28px;padding:2px 4px;gap:4px}
 .assistant-message-tools svg,.assistant-html-tools svg{width:14px;height:14px}
 .assistant-code{margin:6px 0;padding:10px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:9px;background:var(--card2);color:var(--ink2);font:11px/1.6 ui-monospace,Consolas,monospace;max-height:350px;overflow:auto;user-select:text;-webkit-user-select:text}
+.assistant-code-block{margin:6px 0;border-radius:9px;background:var(--card2);overflow:hidden;min-width:0;display:flow-root}
+.assistant-code-copy{display:flex;align-items:center;justify-content:center;gap:4px;margin:3px 5px 0 auto;padding:3px 7px;min-height:28px;border:0;border-radius:6px;background:transparent;color:var(--accent-ink);font:inherit;font-size:10px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.assistant-code-copy svg{width:13px;height:13px}
+.assistant-code-copy:hover,.assistant-code-copy:focus-visible{background:var(--accent-soft)}
+.assistant-code-block>pre{margin:0;padding:6px 10px 10px;max-height:350px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 ui-monospace,Consolas,monospace;color:var(--ink2);user-select:text;-webkit-user-select:text}
+.assistant-code-block>pre>code{padding:0;background:transparent;border-radius:0;font:inherit;color:inherit}
 .assistant-html{margin:5px 0}
 .assistant-html-tools{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:11px;color:var(--ink2)}
 .assistant-html>details{background:transparent;border:0;border-radius:0;box-shadow:none;margin:4px 0 0;padding:0}
@@ -2081,3 +2087,9 @@ button.gift-item[data-short]{opacity:.55}
 .assistant-image img{display:block;width:auto;max-width:100%;max-height:460px;object-fit:contain}
 
 .assistant-composer .assistant-add-menu>summary::after{display:none}
+
+.assistant-preset-tools,.assistant-entry-edit{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px}
+.assistant-preset-tools .text-button{font-size:11px;min-height:30px}
+.assistant-entry-edit input{flex:1;min-width:0}
+
+.assistant-image-pending{margin:10px 0;padding:24px 12px;border:1px dashed var(--line);border-radius:12px;background:var(--card2);color:var(--ink2);text-align:center;font-size:12px}

@@ -1462,7 +1462,9 @@ export class TTSBackend {
     saveAssistant(patch) {
         validateAssistantPatch(patch);
         const next = this.getState();
-        next.assistant = normalizeAssistant({ ...next.assistant, ...clone(patch) });
+        const proposed = { ...next.assistant, ...clone(patch) };
+        if (proposed.activePreset !== 'companion' && !proposed.presets.some(p => p.id === proposed.activePreset)) throw Error('请选择存在的助手预设');
+        next.assistant = normalizeAssistant(proposed);
         const result = this.save(next).assistant;
         this.emit('assistant', { settings: true });
         return result;
