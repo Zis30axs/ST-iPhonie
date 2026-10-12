@@ -2,9 +2,9 @@
 // (generateRaw): the prompt carries the chat preset, each contact's persona or character card, the user's persona,
 // recent story messages and the chat history. Nothing is written into the story unless the user brings a chat
 // into it; that text is injected once, into the next story reply.
-import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneBlocks} from './core/chat.js';
+import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneBlocks, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs} from './core/draw.js';
+import {pictureInputs, photoCast} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 
 export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}}) {
@@ -39,6 +39,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       const ctx = context();
       const thread = await backend.chats.get(threadId);
       if (!thread) throw Error('这段聊天已不存在');
+      if (thread.friend?.by === 'me') throw Error(`你已经删除了${thread.members[0]}，在「联系人 → 新的朋友」里加回来才能聊天`);
+      if (thread.friend?.by === 'them') throw Error(`${thread.members[0]}已经把你删了，先发送好友申请`);
       const s = settings(), preset = activeChatPreset(s.chat), people = members(thread), voiceFormat = backend.voiceFormat(), user = userName();
       // Voice switched off: nobody sends voice messages.
       if (s.general.voiceEnabled === false) for (const p of people) p.voice = false;
@@ -71,9 +73,12 @@ export function createChatHost({context, settings, backend, notice, memory = nul
    */
   async function settle(threadId, items) {
     const thread = await backend.chats.get(threadId), taken = new Set(), out = [], posts = [];
-    let calling = null;
+    let calling = null, cutting = false;
     let latest = thread;
     for (const item of items) {
+      // 「[删除好友]」: the contact deletes the user (private chats only; the user finds out on their next message).
+      if (item.kind === 'unfriend') { if (thread.type === 'dm') cutting = true; continue; }
+      if (item.kind === 'befriend' || item.kind === 'refuse') continue;
       // 「[朋友圈] …」: posted to 朋友圈 while chatting, not a chat message.
       if (item.kind === 'moment') { posts.push({author: item.from, text: item.text, source: 'chat', space: thread?.space || backend.cardKey()}); continue; }
       // 「[打电话] …」: the contact calls right after this reply (private chats only; one call).
@@ -93,7 +98,8 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       out.push({from: item.from, kind: 'notice', target: 'me', text: {opened: '领取了{对方}的红包', accepted: gift ? '收下了{对方}的礼物' : '收下了{对方}的转账', returned: gift ? '退还了{对方}的礼物' : '退还了{对方}的转账'}[state]});
     }
     if (posts.length) await backend.momentsMutate(() => backend.moments.add(posts)).catch(() => {});
-    const saved = out.length ? await backend.chats.append(threadId, out) : latest;
+    let saved = out.length ? await backend.chats.append(threadId, out) : latest;
+    if (cutting) { saved = await backend.chats.update(threadId, {friend: {by: 'them', at: Date.now(), requests: []}}); calling = null; refreshCuts(); }
     if (calling) setTimeout(() => onCall(calling.from, calling.reason), 1200);
     return saved;
   }
@@ -134,9 +140,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const set = patch => backend.chatMutate(threadId, () => backend.chats.updateMessage(threadId, messageId, patch));
     if (!backend.drawReady()) { await set({imageState: 'failed', imageNote: backend.drawMissing()}); return null; }
     try {
-      // The sender's saved look only when the photo shows a person (a selfie), not a view or a meal.
-      const person = /(\d+(?:girl|boy|other)s?|solo|selfie|portrait|upper body|cowboy shot)/i.test(m.imageTags);
-      const input = pictureInputs(settings(), {prompt: m.imageTags, characters: person ? [m.from] : []}, '');
+      // The saved looks of who the photo shows: the people its description names, else the sender (a selfie).
+      const cast = photoCast({text: m.text, tags: m.imageTags, owner: m.from, names: [...settings().routes.map(r => r.name), userName()]});
+      const input = pictureInputs(settings(), {prompt: m.imageTags, characters: cast}, '');
       await set({imageState: 'waiting', imageNote: ''});
       const result = await backend.generateImage({...input, allowPaid, name: `聊天-${m.from}`, key: `chat-photo:${messageId}`, label: `聊天 · ${m.from}`});
       await set({photoId: result.photoId, imageState: 'done', imageNote: ''});
@@ -147,13 +153,63 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     }
   }
 
+  // ---------- 删好友 ----------
+  /** 发送好友申请 to someone who deleted the user: they decide (one model request). {accepted, thread}. */
+  function askFriend(threadId, text) {
+    if (busy.has(threadId)) return busy.get(threadId);
+    const job = (async () => {
+      const ctx = context(), said = String(text || '').trim().slice(0, 100) || `我是${userName()}`;
+      const thread = await backend.chats.get(threadId);
+      if (!thread) throw Error('这段聊天已不存在');
+      if (thread.friend?.by !== 'them') throw Error('TA 还是你的好友');
+      const name = thread.members[0], s = settings(), preset = activeChatPreset(s.chat), people = members(thread), user = userName();
+      await backend.chatMutate(threadId, () => backend.chats.append(threadId, [{from: 'me', kind: 'system', text: `你发送了好友申请：「${said}」`}], {read: true}));
+      backend.emit('chat', {threadId, typing: true});
+      const recent = story(preset);
+      const remembered = memory ? (await memory.contextFor(thread, {query: said}).catch(() => ({text: ''}))).text : '';
+      const prompt = buildChatRequest({preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat: '', memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: s.chat.stickers || [], asking: said});
+      const reply = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
+      const items = parseChatReply(reply, {members: people.map(p => ({...p, voice: false})), user, voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []});
+      const yes = items.findIndex(i => i.kind === 'befriend'), no = items.find(i => i.kind === 'refuse');
+      if (yes < 0 || (no && items.indexOf(no) < yes)) {
+        const saved = await backend.chatMutate(threadId, () => backend.chats.append(threadId, [{from: 'me', kind: 'system', text: `${name}没有通过你的好友申请${no?.text ? '：' + no.text : ''}`}], {read: true}));
+        return {accepted: false, thread: saved};
+      }
+      await backend.chats.update(threadId, {friend: null});
+      await backend.chats.append(threadId, [{from: 'me', kind: 'system', text: `${name}通过了你的好友申请，现在可以开始聊天了`}], {read: true});
+      const rest = items.slice(yes + 1).filter(i => !['befriend', 'refuse', 'unfriend'].includes(i.kind));
+      const saved = rest.length ? await backend.chatMutate(threadId, () => settle(threadId, rest)) : await backend.chats.get(threadId);
+      refreshCuts();
+      backend.emit('chat', {threadId, friend: true});
+      return {accepted: true, thread: saved};
+    })().finally(() => { busy.delete(threadId); backend.emit('chat', {threadId, typing: false}); });
+    busy.set(threadId, job);
+    return job;
+  }
+  // Who is not friends with whom on the phone (every card's), for the story: kept here because inject() cannot wait.
+  let cuts = [], cutsLoaded = false;
+  function refreshCuts() {
+    Promise.resolve().then(() => backend.chats.list()).then(list => { cutsLoaded = true; cuts = list.filter(t => t.type === 'dm' && t.friend).map(t => ({name: t.members[0], by: t.friend.by, space: t.space || ''})); }).catch(() => {});
+  }
+  refreshCuts();
+  backend.subscribe?.(event => { if (event?.type === 'chat' && event.friend) refreshCuts(); });
+  /** The story knows who deleted whom on the phone (a 冷战 shows in the story too). */
+  function friendsPlan() {
+    if (!cutsLoaded) refreshCuts();
+    const here = backend.here?.(), user = userName(), list = cuts.filter(c => inSpace(c, here));
+    if (!list.length) return [];
+    const mine = list.filter(c => c.by === 'me').map(c => c.name), theirs = list.filter(c => c.by === 'them').map(c => c.name);
+    const text = ['【手机上的好友关系】', mine.length ? `${user}在手机上把${mine.join('、')}删了好友：TA 们发不了消息给${user}，只能发好友申请。` : '', theirs.length ? `${theirs.join('、')}在手机上把${user}删了好友：${user}发的消息会被拒收。` : ''].filter(Boolean).join(' ');
+    return [{key: 'sttts.entry.friends', text, position: 1, depth: 2, role: 0}];
+  }
+
   // ---------- 主动发消息 ----------
   /** The 正文 rule for the story request while 主动发消息 is on: who can text, and how (<phone>). */
   function storyPlan() {
-    const s = settings();
-    if (!s.chat.proactive?.on) return [];
+    const s = settings(), friends = friendsPlan();
+    if (!s.chat.proactive?.on) return friends;
     const text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name)});
-    return text ? [{key: 'sttts.entry.phone', text, position: 1, depth: 0, role: 0}] : [];
+    return [...(text ? [{key: 'sttts.entry.phone', text, position: 1, depth: 0, role: 0}] : []), ...friends];
   }
   const SENT_KEY = 'sttts.phoneSent', DAY_KEY = 'sttts.phoneDay';
   const hash = text => { let h = 0; for (const c of String(text)) h = (h * 31 + c.codePointAt(0)) | 0; return (h >>> 0).toString(36); };
@@ -201,7 +257,18 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         const byName = new Map();
         for (const item of items) if (contacts.some(c => c.name === item.from)) byName.set(item.from, [...(byName.get(item.from) || []), item]);
         for (const [name, list] of byName) {
-          try { const thread = await dmWith(name); const n = await arrive(thread.id, list); if (n) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); } } catch { /* a failed delivery is not worth interrupting the story */ }
+          try {
+            const thread = await dmWith(name);
+            // Deleted by the user: what they send waits as 好友申请.
+            if (thread.friend?.by === 'me') {
+              const texts = list.filter(i => ['text', 'voice'].includes(i.kind)).map(i => i.translation || i.text).filter(Boolean);
+              if (texts.length) { await backend.friendRequest(thread.id, texts.join(' ')); sent += 1; notice(`${name} 请求添加你为好友：${texts.join(' ').slice(0, 40)}`); }
+              continue;
+            }
+            // They had deleted the user and text again: they added the user back.
+            if (thread.friend?.by === 'them') { await backend.chats.update(thread.id, {friend: null}); await backend.chats.append(thread.id, [{from: 'me', kind: 'system', text: `${name}重新添加了你为好友`}]); refreshCuts(); }
+            const n = await arrive(thread.id, list); if (n) { sent += n; notice(`${name} 给你发来 ${n} 条消息`); }
+          } catch { /* a failed delivery is not worth interrupting the story */ }
         }
       }
     }
@@ -212,7 +279,9 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     try { const saved = JSON.parse(localStorage.getItem(DAY_KEY) || 'null'); if (saved?.day === day.day) day = saved; } catch { /* this session only */ }
     if (day.n >= o.dailyMax) return;
     // The card's own character first, else someone from the 角色 App.
-    const roles = backend.contacts().filter(c => c.source === 'role'), now = ctx?.name2;
+    // Not someone who is not friends with the user right now (either way).
+    const apart = new Set((await backend.threads()).filter(t => t.type === 'dm' && t.friend).map(t => t.members[0]));
+    const roles = backend.contacts().filter(c => c.source === 'role' && !apart.has(c.name)), now = ctx?.name2;
     const name = roles.find(c => c.name === now)?.name || roles[Math.floor(Math.random() * roles.length)]?.name;
     if (!name) return;
     try {
@@ -226,7 +295,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
 
   return {
-    reply, bring, bringPlan, drawPhoto, storyPlan, storyReplied,
+    reply, bring, bringPlan, drawPhoto, storyPlan, storyReplied, askFriend,
     typing: threadId => busy.has(threadId),
     pendingBring: () => pending && {threadId: pending.threadId, name: pending.name, count: pending.count},
     cancelBring: () => { const threadId = pending?.threadId; pending = null; if (threadId) backend.emit('chat', {threadId, bring: false}); }

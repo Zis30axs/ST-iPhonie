@@ -4,7 +4,7 @@
 import {esc, btn, empty, avatar, field, textArea, input, toggle, help} from './common.js';
 import {icon} from './icons.js';
 import {openImageViewer} from '../image-viewer.js';
-import {downloadAction} from '../download.js';
+import {downloadAction, shareAction} from '../download.js';
 
 const SEEN_KEY = 'st-iphonie-moments-seen';
 /** When the user last looked at 动态 (per browser; only for the dots). */
@@ -167,7 +167,7 @@ export function momentsPanel(ctx, {v, frame, me, visible}) {
       case 'm-post-menu': if (await ctx.confirm('删除这条动态？', '点赞和评论会一起删除，配图还留在相册里。')) { await api.deleteMoment(id); await render(); } return true;
       case 'view-photo': {
         const img = el.querySelector('img');
-        if (img?.src && target) openImageViewer({doc: ctx.doc, src: img.src, alt: img.alt, from: img, actions: [downloadAction(ctx.doc, async () => ({source: (await api.getPhoto(target.photoId)).blob, name: `动态 · ${nameOf(target.author)}`}), ctx.notify)]});
+        if (img?.src && target) openImageViewer({doc: ctx.doc, src: img.src, alt: img.alt, from: img, actions: [downloadAction(ctx.doc, async () => ({source: (await api.getPhoto(target.photoId)).blob, name: `动态 · ${nameOf(target.author)}`}), ctx.notify), shareAction(ctx.doc, async () => ({source: (await api.getPhoto(target.photoId)).blob, name: `动态 · ${nameOf(target.author)}`}), ctx.notify)]});
         return true;
       }
       case 'draw-image': {

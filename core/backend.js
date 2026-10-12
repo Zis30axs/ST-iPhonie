@@ -1689,6 +1689,50 @@ export class TTSBackend {
         this.emit('chat', { threadId });
         return result;
     }
+    // ---------- 删好友 ----------
+    /** The private chat with `name` on this card (made when there is none yet). */
+    async dmThread(name) {
+        const here = (await this.threads()).find(t => t.type === 'dm' && t.members.length === 1 && t.members[0] === name);
+        return here || this.chats.create({ type: 'dm', members: [name], space: this.cardKey() });
+    }
+    /** The user deletes a contact: the chat is put away (kept), and what they send meanwhile becomes 好友申请. */
+    async unfriend(name) {
+        this.assertOpen();
+        if (!this.contacts().some(c => c.name === name)) throw Error(`联系人里没有「${name}」`);
+        const thread = await this.dmThread(name);
+        const saved = await this.chats.update(thread.id, { friend: { by: 'me', at: Date.now(), requests: [] }, pinned: false });
+        this.emit('chat', { threadId: thread.id, friend: true });
+        return saved;
+    }
+    /** Adds a deleted contact back: the chat comes back, with the 好友申请 they sent in it. */
+    async refriend(threadId) {
+        this.assertOpen();
+        const thread = await this.chats.get(threadId);
+        if (thread?.friend?.by !== 'me') throw Error('TA 已经是你的好友了');
+        const name = thread.members[0], requests = thread.friend.requests || [];
+        await this.chats.append(threadId, [{ from: 'me', kind: 'system', text: `你已添加了${name}，现在可以开始聊天了` }, ...requests.map(r => ({ from: name, kind: 'text', text: r.text }))], { read: true });
+        const saved = await this.chats.update(threadId, { friend: null });
+        this.emit('chat', { threadId, friend: true });
+        return saved;
+    }
+    /** What a deleted contact sends arrives as 好友申请 (kept until the user adds them back). */
+    async friendRequest(threadId, texts) {
+        this.assertOpen();
+        const saved = await this.chats.addRequest(threadId, texts);
+        this.emit('chat', { threadId, friend: true, request: true });
+        return saved;
+    }
+    /** The user's messages to someone who deleted them: sent, then refused with the usual note. */
+    async appendChat(id, messages, options) {
+        const thread = await this.chats.get(id);
+        let saved = await this.chats.append(id, messages, options);
+        if (thread?.friend?.by === 'them' && messages.some(m => m?.from === 'me' && m.kind !== 'system')) {
+            const name = thread.members[0];
+            saved = await this.chats.append(id, [{ from: 'me', kind: 'system', text: `消息已发出，但被对方拒收了。${name}开启了好友验证，你还不是TA的好友。请先发送好友申请，对方通过后才能聊天。` }], { read: true });
+        }
+        this.emit('chat', { threadId: id });
+        return saved;
+    }
     /** Plays one voice message through the normal player (cache, favourites and the island all work). */
     speak(line) {
         const lines = (Array.isArray(line) ? line : [line]).filter(l => l?.role && l.text);
@@ -1994,7 +2038,8 @@ export class TTSBackend {
             saveEmbed: patch => this.saveEmbed(clone(patch)), embedReady: () => this.embedReady(), embedModels: draft => this.embedModels(clone(draft || {})),
             gptModels: () => this.gptModels(),
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
-            appendChat: (id, messages, options) => this.chatMutate(id, () => this.chats.append(id, clone(messages), clone(options || {}))),
+            appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
+            unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId),
             deleteChatMessages: (id, ids) => this.chatMutate(id, () => this.chats.removeMessages(id, clone(ids))),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
             markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),

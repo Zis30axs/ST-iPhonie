@@ -4,7 +4,7 @@
 import {buildMomentsRequest, parseMoments, storyLines, MOMENTS_LIMITS} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs} from './core/draw.js';
+import {pictureInputs, photoCast} from './core/draw.js';
 
 export function createMomentsHost({context, settings, backend, notice, memory = null}) {
   // 记忆: what each of them talked about with the user in private (written-up layers only).
@@ -92,9 +92,9 @@ export function createMomentsHost({context, settings, backend, notice, memory = 
     const set = patch => backend.momentsMutate(() => backend.moments.setImage(postId, patch));
     if (!backend.drawReady()) { await set({imageState: 'failed', imageNote: backend.drawMissing()}); return null; }
     try {
-      // The poster's saved look is used only when the picture shows a person (a selfie), not for a view or a meal.
-      const person = /(\d+(?:girl|boy|other)s?|solo|selfie|portrait|upper body|cowboy shot)/i.test(post.imageTags);
-      const input = pictureInputs(settings(), {prompt: post.imageTags, characters: person ? [post.author] : []}, '');
+      // The saved looks of who the picture shows: the people the post names, else the poster (a selfie).
+      const cast = photoCast({text: post.text, tags: post.imageTags, owner: post.author, names: [...settings().routes.map(r => r.name), userName()]});
+      const input = pictureInputs(settings(), {prompt: post.imageTags, characters: cast}, '');
       await set({imageState: 'waiting', imageNote: ''});
       const result = await backend.generateImage({...input, allowPaid, name: `朋友圈-${post.author}`, key: `moments:${postId}`, label: `朋友圈 · ${post.author}`});
       await set({photoId: result.photoId, imageState: 'done', imageNote: ''});

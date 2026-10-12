@@ -61,6 +61,7 @@ const infoHTML = info => Array.isArray(info)
  * action unless it returns false.
  */
 export function openImageViewer({doc = document, src, alt = '', actions = [], from = null, info = null, gallery = null, caption = ''}) {
+  actions = actions.filter(Boolean);
   const win = doc.defaultView;
   if (!doc.getElementById(STYLE_ID)) {
     const style = doc.createElement('style');

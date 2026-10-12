@@ -15,7 +15,7 @@
 import {defaultDrawParams, normalizeDrawParams, guardParams, relayUrl, NAI_MODEL_NAMES} from './novelai.js';
 import {tokenBudget, counterNow, estimateTokens, countField, tagCost} from './tokens.js';
 import {strength as vibeStrength} from './vibes.js';
-import {DRAW_ENGINES, defaultGpt, normalizeGpt, defaultComfy, normalizeComfy} from './image-engines.js';
+import {DRAW_ENGINES, DRAW_ENGINE_NAMES, defaultGpt, normalizeGpt, defaultComfy, normalizeComfy} from './image-engines.js';
 import {escapeHTML, isPlaceholderRole} from './protocol.js';
 
 const BLOCK = ['<img>', '画幅：竖 / 横 / 方', '场景：英文 tag', '角色：名字｜这一刻的 tag｜不要出现的 tag｜站位（画面里每个人单独一行，每一行都以「角色：」开头）', '新外貌：名字｜固定外貌 tag（只在名单外的新角色第一次出现时写）', '</img>'];
@@ -462,6 +462,25 @@ function ruleText(settings, p, format, contract, only = null) {
   return {entries, fill, tail: fill(contract(count)) + (budget ? '\n\n' + budget : '')};
 }
 /**
+ * What the 助手 needs to write pictures the way this plugin draws them: the engine and 画风 in use, the user's own
+ * 绘图预设 rules for that engine (without 「挑画面」, which is about picking moments of a reply), the 出图块 format
+ * and the NovelAI length budget. A block written this way draws exactly like one in the story.
+ */
+export function assistantDrawGuide(settings) {
+  const draw = settings.draw, p = activePreset(draw);
+  if (!draw || !p) return '';
+  const engine = draw.engine || 'nai', style = activeStyle(draw) || {};
+  const {entries, fill} = ruleText(settings, {...p, count: 1}, PIC_TAG_FORMAT, () => '');
+  const budget = budgetText(settings);
+  return ['【绘图】',
+    `现在用 ${DRAW_ENGINE_NAMES[engine] || engine} 画图，画风预设「${style.name || '默认画风'}」：画师串、固定正面和固定负面 tag 插件会自己加在最前面，你不用写。`,
+    '和用户讨论提示词、或者给出一个可以直接画的方案时，把画面写成下面这种出图块（<img> 开头、</img> 结尾，一块就是一张图）；用户在出图块卡片上点「画这张」就会按它生成。只是聊想法、还没定下画面时不用写出图块；同一个画面不要重复写两块。',
+    ...entries.filter(e => e.id !== 'pick').map(e => fill(e.text)),
+    ['【出图块格式】', '严格照这个格式写并闭合：', PIC_TAG_FORMAT, `已登记角色的名字只能从名单里选，一字不差。名单（括号里是性别）：${castList(settings)}。他们的固定外貌插件会按名字补上。`].join('\n'),
+    budget].filter(Boolean).join('\n\n');
+}
+
+/**
  * 【tag 长度】 for NovelAI: how much of the model's prompt budget is left for what the model writes, so it can write
  * long, detailed pictures without NovelAI cutting the end off. Counted with the real tokenizer once it has loaded
  * (core/tokens.js), estimated before that.
@@ -830,6 +849,21 @@ export function pictureRoles(settings, tag, text = '') {
   const before = String(text).slice(Math.max(0, (tag.start ?? 0) - 600), tag.start ?? undefined).toLowerCase();
   const seen = roles.map(r => [r, before.lastIndexOf(r.name.toLowerCase())]).filter(([, at]) => at >= 0).sort((a, b) => b[1] - a[1]).map(([r]) => r);
   return seen.slice(0, peopleCount(tag.prompt) || 1);
+}
+
+/**
+ * Who a phone photo (查手机相册, a chat photo, a 朋友圈 picture) shows, as names for pictureInputs: nobody when its tags
+ * show no person (a view, a meal); the people its description names (registered roles, the user); the owner too when
+ * it is a selfie or a photo together, or when nobody else is named. names: everyone who could be in it.
+ */
+export function photoCast({text = '', tags = '', owner = '', names = []}) {
+  if (!/(\d+(?:girl|boy|other)s?|solo|selfie|portrait|upper body|cowboy shot)/i.test(tags)) return [];
+  const said = String(text);
+  const others = [...new Set(names)].filter(n => n && n !== '我' && n !== owner && !sameName(n, owner))
+    .map(n => [n, said.indexOf(n)]).filter(([, at]) => at >= 0).sort((a, b) => a[1] - b[1]).map(([n]) => n);
+  const self = !others.length || (owner && said.includes(owner)) || /自拍|合照|合影|我们|我和|和我|selfie/i.test(said + ' ' + tags);
+  const cast = [...(self && owner ? [owner] : []), ...others], n = peopleCount(tags);
+  return n ? cast.slice(0, n) : cast;
 }
 
 /** 站位 A1–E5 (column A–E left to right, row 1–5 top to bottom) as NovelAI's 5×5 grid index; -1 when not given. */

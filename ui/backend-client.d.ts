@@ -120,6 +120,8 @@ export interface AssistantSettings {
     /** Use the last actual story request snapshot. Off by default. */
     readContext: boolean;
     stream: boolean;
+    /** 智能界面: the model may add small native UI (choices, cards, tables, forms) to replies. */
+    visuals: boolean;
 }
 export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
 export interface AssistantMeta { image?: {photoId: string; prompt: string}; elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; }
@@ -282,7 +284,9 @@ export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; 
     /** call: who called (from), how it ended, how long it lasted, what was said and a missed call's voice message. */
     dir?: 'in' | 'out'; duration?: number; lines?: CallLine[]; voicemail?: Omit<CallLine, 'from'>[]; }
 /** pinned: 置顶. muted: 免打扰 (its unread messages do not count toward the badge). */
-export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; }
+/** 删好友 on a private chat: by 'me' the user deleted the contact (their messages wait as requests); by 'them' the contact deleted the user. */
+export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; }
+export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; }
 /** streak: 聊天火花, days in a row both sides wrote. */
 export interface ChatThreadSummary extends Omit<ChatThread, 'messages'> { count: number; last: ChatMessage | null; streak: number; }
 export type ChatMessageInput = Omit<ChatMessage, 'id' | 'at'>;
@@ -756,6 +760,10 @@ export interface BackendFacade {
     memoryForget(threadId: string): Promise<void>;
     /** read: the chat is on screen, so new replies do not count as unread. */
     appendChat(id: string, messages: ChatMessageInput[], options?: { read?: boolean }): Promise<ChatThread>;
+    /** 删除好友: the chat is put away and later messages from them arrive as 好友申请. */
+    unfriend(name: string): Promise<ChatThread>;
+    /** Adds a deleted contact back, with their 好友申请 as messages. */
+    refriend(threadId: string): Promise<ChatThread>;
     deleteChatMessages(id: string, ids: string[]): Promise<ChatThread>;
     /** {state, openedBy} for a red packet or transfer, or {recall: true} to withdraw a message. */
     updateChatMessage(id: string, messageId: string, patch: { state?: string; openedBy?: string; recall?: boolean }): Promise<ChatThread>;
@@ -793,6 +801,8 @@ export interface BackendAPI extends BackendFacade {
     assistantProgress(threadId: string): {id: string; threadId: string; rerollId: string; startedAt: number; phase: 'waiting' | 'thinking' | 'responding' | 'prompting' | 'drawing'; text: string; meta: Partial<AssistantMeta>} | null;
     assistantBusy(threadId: string): boolean;
     assistantCancel(threadId: string): void;
+    /** 画这张 on an 出图块 card in a reply: draws it as written, into a new reply. */
+    assistantDrawBlock(threadId: string, block: string, options?: {allowPaid?: boolean}): Promise<AssistantThread>;
     /** Omit lineIndex to play the whole message. Generation requires an explicit user action. */
     play(messageId: number, lineIndex?: number): void;
     /** Latest chat messages, newest first, for choosing where to insert a picture. */
@@ -822,6 +832,8 @@ export interface BackendAPI extends BackendFacade {
     chatCancelBring(): void;
     /** True while a reply for this chat is being generated. */
     chatTyping(threadId: string): boolean;
+    /** 发送好友申请 to a contact who deleted the user: the contact decides (one model request). */
+    chatAskFriend(threadId: string, text: string): Promise<{ accepted: boolean; thread: ChatThread }>;
     /** New 朋友圈 posts from the characters (one model request). */
     momentsRefresh(): Promise<MomentPost[]>;
     /** Friends react to the user's post. */

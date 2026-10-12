@@ -1,10 +1,11 @@
 import {createView, esc, btn, heading, field, select, toggle, copyText} from './common.js';
 import {openImageViewer} from '../image-viewer.js';
-import {downloadAction} from '../download.js';
+import {downloadAction, shareAction} from '../download.js';
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
 import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, assistantAttachments, assistantThoughts} from '../core/assistant.js';
 import {icon, glyph} from './icons.js';
 import {assistantMarkdown, assistantHTMLMarkdown} from './assistant-markdown.js';
+import {parsePictures} from '../core/draw.js';
 
 // Model HTML never enters the phone document. The preview has an opaque origin;
 // scripts can manipulate their own document, but cannot access the host or make API requests.
@@ -23,7 +24,9 @@ export function assistantParts(text, {beautified = false} = {}) {
   let at = 0, match;
   while ((match = fences.exec(value))) {
     if (match.index > at) parts.push({kind: 'text', text: value.slice(at, match.index)});
-    parts.push({kind: /^html?$/i.test(match[1].trim()) ? 'html' : 'code', language: match[1].trim(), text: match[2]});
+    const language = match[1].trim(), only = parsePictures(match[2]).filter(t => t.spec);
+    const kind = /^html?$/i.test(language) ? 'html' : /^ui$/i.test(language) ? 'ui' : only.length === 1 && !match[2].slice(0, only[0].start).trim() && !match[2].slice(only[0].end).trim() ? 'picture' : 'code';
+    parts.push({kind, language, text: kind === 'ui' || kind === 'picture' ? match[2].trim() : match[2]});
     at = fences.lastIndex;
   }
   if (at < value.length) parts.push({kind: 'text', text: value.slice(at)});
@@ -43,6 +46,19 @@ export function assistantParts(text, {beautified = false} = {}) {
     }
     if (cursor < part.text.length) expanded.push({kind: 'text', text: part.text.slice(cursor), ...(story ? {story: true} : {})});
   }
+  // 出图块 (<img>…</img> with 画幅/场景/角色 lines) in the reply become picture cards.
+  const pictured = [];
+  for (const part of expanded) {
+    const blocks = part.kind === 'text' && !part.story ? parsePictures(part.text).filter(t => t.spec) : [];
+    if (!blocks.length) { pictured.push(part); continue; }
+    let from = 0;
+    for (const t of blocks) {
+      if (t.start > from) pictured.push({kind: 'text', text: part.text.slice(from, t.start)});
+      pictured.push({kind: 'picture', text: part.text.slice(t.start, t.end)}); from = t.end;
+    }
+    if (from < part.text.length) pictured.push({kind: 'text', text: part.text.slice(from)});
+  }
+  expanded.splice(0, expanded.length, ...pictured.filter(part => part.kind !== 'text' || part.text.trim() || pictured.length === 1));
   for (const part of expanded) if (part.kind === 'text' && !part.story && /^\s*<(?:!doctype\s+html|html|head|body|div|section|article|button|script|style|form|table|canvas|svg|p|span|h[1-6]|ul|ol|details|a|img)\b/i.test(part.text)) part.kind = 'html';
 
   if (beautified) for (const part of expanded) {
@@ -57,6 +73,7 @@ export function assistantVoiceLines(api, text) {
 }
 
 function partVoiceLines(api, part) {
+  if (part.kind === 'picture' || part.kind === 'ui') return [];
   if (part.kind === 'code' && !/^(?:tts|text|plaintext)?$/i.test(part.language)) return [];
   // Mask non-dialogue HTML without changing offsets. Generated HTML always stays in the iframe.
   const sample = part.kind === 'html' ? part.text.replace(/<!--[^]*?(?:-->|$)|<(script|style)\b[^>]*>[^]*?(?:<\/\1\s*>|$)/gi, value => ' '.repeat(value.length)) : part.text;
@@ -79,6 +96,88 @@ function inlineDialogue(part, lines, attrs, offset) {
   lines.forEach((line, i) => { out += part.text.slice(at, line.start) + `${marker}${i}END`; at = line.end; });
   out = prose(out + part.text.slice(at));
   return out.replace(new RegExp(marker + '(\\d+)END', 'g'), (_, i) => utterance(lines[Number(i)], Number(i)));
+}
+
+// ---------- 出图块 cards and 智能界面 ----------
+const str = (value, max = 200) => typeof value === 'string' ? value.trim().slice(0, max) : Number.isFinite(value) ? String(value) : '';
+const list = (value, max) => Array.isArray(value) ? value.slice(0, max) : [];
+const SIZE_NAMES = {竖: '竖图', 横: '横图', 方: '方图', portrait: '竖图', landscape: '横图', square: '方图'};
+/** An 出图块 as a card: what it draws, 复制 and 画这张. */
+export function assistantPictureHTML(text, attrs = '', {live = false} = {}) {
+  const [tag] = parsePictures(text).filter(t => t.spec);
+  if (!tag) return `<pre class="assistant-code"><code>${esc(text)}</code></pre>`;
+  const spec = tag.spec, size = SIZE_NAMES[String(spec.size || '').trim().split(/\s*[/／]\s*/)[0]] || (spec.size ? spec.size : '竖图');
+  const row = (label, body) => `<div class="aui-pic-row"><span>${esc(label)}</span><p>${body}</p></div>`;
+  return `<div class="aui aui-pic"><div class="aui-pic-head">${icon('image')}<strong>出图块</strong><span class="aui-tag">${esc(size)}</span></div>`
+    + (spec.tags ? row('场景', esc(spec.tags)) : '')
+    + spec.cast.map(c => row(c.name, `${esc(c.tags)}${c.negative ? `<small>不要：${esc(c.negative)}</small>` : ''}${c.position ? `<small>站位 ${esc(c.position)}</small>` : ''}`)).join('')
+    + spec.register.map(r => row('新外貌', `<b>${esc(r.name)}</b> ${esc(r.appearance)}`)).join('')
+    + (live ? '' : `<div class="aui-tools">${btn('pic-copy', icon('copy') + '复制', 'text-button', attrs)}${btn('pic-draw', icon('paint') + '画这张', 'aui-go', attrs)}</div>`)
+    + '</div>';
+}
+function visualPiece(x, attrs, key) {
+  const title = str(x.title, 80) ? `<p class="aui-title">${esc(str(x.title, 80))}</p>` : '';
+  const send = (text, inner, cls = 'aui-chip') => `<button type="button" class="${cls}" data-action="ui-send" ${attrs} data-text="${esc(text)}">${inner}</button>`;
+  switch (x.type) {
+    case 'choices': {
+      const options = list(x.options, 8).map(o => str(o, 80)).filter(Boolean);
+      return options.length ? `<div class="aui aui-choices">${title}<div class="aui-chips">${options.map(o => send(o, esc(o))).join('')}</div></div>` : '';
+    }
+    case 'cards': {
+      const items = list(x.items, 8).filter(i => i && str(i.title, 60));
+      if (!items.length) return '';
+      return `<div class="aui aui-cards-wrap">${title}<div class="aui-cards">${items.map(i => {
+        const inner = `<strong>${esc(str(i.title, 60))}</strong>${str(i.text, 240) ? `<span>${esc(str(i.text, 240))}</span>` : ''}${list(i.tags, 6).map(t => str(t, 20)).filter(Boolean).length ? `<span class="aui-tags">${list(i.tags, 6).map(t => str(t, 20)).filter(Boolean).map(t => `<i>${esc(t)}</i>`).join('')}</span>` : ''}`;
+        return str(i.send, 300) ? send(str(i.send, 300), inner, 'aui-card') : `<div class="aui-card">${inner}</div>`;
+      }).join('')}</div></div>`;
+    }
+    case 'compare': {
+      const columns = list(x.columns, 5).map(c => str(c, 40)), rows = list(x.rows, 12).filter(Array.isArray).map(r => r.slice(0, columns.length || 5).map(c => str(c, 120)));
+      if (!rows.length) return '';
+      return `<div class="aui aui-compare">${title}<div class="aui-table"><table>${columns.some(Boolean) ? `<thead><tr>${columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>` : ''}<tbody>${rows.map(r => `<tr>${r.map((c, i) => i ? `<td>${esc(c)}</td>` : `<th>${esc(c)}</th>`).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+    }
+    case 'steps': {
+      const items = list(x.items, 12).map(i => str(typeof i === 'object' && i ? i.text || i.title : i, 240)).filter(Boolean);
+      return items.length ? `<div class="aui aui-steps">${title}<ol>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ol></div>` : '';
+    }
+    case 'form': {
+      const fields = list(x.fields, 6).filter(f => f && str(f.label, 40));
+      if (!fields.length) return '';
+      return `<div class="aui aui-form" data-form-title="${esc(str(x.title, 80))}">${title}${fields.map((f, n) => {
+        const label = str(f.label, 40), options = list(f.options, 8).map(o => str(o, 40)).filter(Boolean);
+        return `<div class="aui-field" data-label="${esc(label)}"><span>${esc(label)}</span>${options.length
+          ? `<div class="aui-chips">${options.map(o => `<label class="aui-chip aui-pick"><input type="radio" name="aui-${esc(key)}-${n}" value="${esc(o)}"><span>${esc(o)}</span></label>`).join('')}</div>`
+          : `<input type="text" maxlength="200" placeholder="${esc(str(f.placeholder, 60))}" aria-label="${esc(label)}">`}</div>`;
+      }).join('')}<div class="aui-tools">${btn('ui-form', esc(str(x.submit, 20) || '发送'), 'aui-go', attrs)}</div></div>`;
+    }
+    case 'bars': {
+      const items = list(x.items, 12).filter(i => i && str(i.label, 30) && Number.isFinite(Number(i.value)));
+      if (!items.length) return '';
+      const most = Math.max(...items.map(i => Math.abs(Number(i.value))), 1), unit = str(x.unit, 10);
+      return `<div class="aui aui-bars">${title}${items.map(i => `<div class="aui-bar"><span>${esc(str(i.label, 30))}</span><i style="--w:${Math.round(Math.abs(Number(i.value)) / most * 100)}%"></i><b>${esc(String(Number(i.value)))}${esc(unit)}</b></div>`).join('')}</div>`;
+    }
+    case 'tip': {
+      const text = str(x.text, 300);
+      return text ? `<div class="aui aui-tip" data-tone="${x.tone === 'warn' ? 'warn' : 'info'}">${icon(x.tone === 'warn' ? 'alert' : 'star')}<span>${esc(text)}</span></div>` : '';
+    }
+    default: return '';
+  }
+}
+/** A ```ui block as native pieces; anything unreadable stays a code block. */
+export function assistantVisualHTML(raw, attrs = '', key = '') {
+  let value;
+  try { value = JSON.parse(String(raw)); } catch { return `<pre class="assistant-code"><code>${esc(raw)}</code></pre>`; }
+  const html = (Array.isArray(value) ? value : [value]).filter(x => x && typeof x === 'object').slice(0, 4).map((x, i) => visualPiece(x, attrs, `${key}-${i}`)).join('');
+  return html ? `<div class="assistant-ui">${html}</div>` : `<pre class="assistant-code"><code>${esc(raw)}</code></pre>`;
+}
+/** While a reply streams in: a ```ui block or an 出图块 still being written shows as a placeholder, not half a card. */
+function streamingParts(text) {
+  let body = String(text || ''), pending = '';
+  const fences = body.match(/```/g)?.length || 0;
+  if (fences % 2) { const at = body.lastIndexOf('```'); if (/^```\s*ui\b/i.test(body.slice(at))) { pending = 'ui'; body = body.slice(0, at); } }
+  const open = body.search(/<img\b(?![^>]*\bsrc\s*=)[^>]*>(?![\s\S]*<\/img\s*>)/i);
+  if (!pending && open >= 0) { pending = 'picture'; body = body.slice(0, open); }
+  return {parts: assistantParts(body), pending};
 }
 
 export function assistantApp(ctx) {
@@ -168,6 +267,8 @@ export function assistantApp(ctx) {
     const parts = partsFor(m), lines = voiceFor(m); let offset = 0;
     return `<article class="assistant-message" ${attrs}><span class="assistant-who">${icon('star')}助手${replyInfo(m)}</span><div class="assistant-bubble">${reasoning ? `<details class="assistant-reasoning" data-group="reasoning-${esc(m.id)}"><summary${Number.isFinite(m.meta?.reasoningMs) ? ' title="从请求开始到推理结束的流式观测时间"' : ''}>${Number.isFinite(m.meta?.reasoningMs) ? `思考了 ${(m.meta.reasoningMs / 1000).toFixed(1)} 秒` : '思考内容'}</summary><div class="assistant-prose">${prose(reasoning)}</div></details>` : ''}${parts.map((p, i) => {
       if (p.kind === 'image') return imageButton(m, attrs);
+      if (p.kind === 'picture') return assistantPictureHTML(p.text, `${attrs} data-part="${i}"`);
+      if (p.kind === 'ui') return assistantVisualHTML(p.text, `${attrs} data-part="${i}"`, `${m.id}-${i}`);
       const spoken = partVoiceLines(api, p), rendered = inlineDialogue(p, spoken, attrs, offset); offset += spoken.length;
       if (p.kind === 'text') return `<div class="assistant-prose">${rendered}</div>`;
       if (p.kind === 'code') {
@@ -292,7 +393,10 @@ export function assistantApp(ctx) {
     const phase = progress.phase, seconds = ((phase === 'responding' && Number.isFinite(meta.reasoningMs) ? meta.reasoningMs : elapsed) / 1000).toFixed(1);
     const label = phase === 'thinking' ? `正在思考 · ${seconds} 秒` : phase === 'responding' ? Number.isFinite(meta.reasoningMs) ? `思考了 ${seconds} 秒` : '思考内容' : `等待回复 · ${seconds} 秒`;
     // Incomplete HTML/regex scripts are not executed on every token. Final output is beautified once complete.
-    const body = show && phase === 'responding' ? assistantParts(part.text).map(p => p.kind === 'html' ? '<span class="hint">正在生成 HTML…</span>' : p.kind === 'code' ? `<pre class="assistant-code"><code>${esc(p.text)}</code></pre>` : `<div class="assistant-prose">${prose(p.text)}</div>`).join('') : '';
+    const streaming = show && phase === 'responding' ? streamingParts(part.text) : null;
+    const skeleton = label => `<div class="aui aui-skeleton" role="status"><i></i><span>${label}</span></div>`;
+    const body = streaming ? streaming.parts.map(p => p.kind === 'html' ? '<span class="hint">正在生成 HTML…</span>' : p.kind === 'ui' ? assistantVisualHTML(p.text) : p.kind === 'picture' ? assistantPictureHTML(p.text, '', {live: true}) : p.kind === 'code' ? `<pre class="assistant-code"><code>${esc(p.text)}</code></pre>` : `<div class="assistant-prose">${prose(p.text)}</div>`).join('')
+      + (streaming.pending === 'ui' ? skeleton('正在生成界面…') : streaming.pending === 'picture' ? skeleton('正在写出图块…') : '') : '';
     return `<article class="assistant-live"><span class="assistant-who">${icon('star')}助手${progress.rerollId ? ' · 重新生成' : ''}${replyInfo({meta:{...meta,elapsedMs:elapsed}})}</span><div class="assistant-bubble">${reason || phase === 'thinking' ? `<details class="assistant-reasoning" data-group="live-${esc(progress.id)}"><summary>${label}</summary>${show && reason ? `<div class="assistant-prose">${prose(reason)}</div>` : ''}</details>` : ''}${phase === 'waiting' ? `<span role="status">${label}</span>` : phase === 'responding' ? `<span class="assistant-stream-status" role="status">正在回复 · ${(elapsed / 1000).toFixed(1)} 秒</span>` : ''}${body}</div></article>`;
   }
   function syncClock(running) {
@@ -344,7 +448,7 @@ export function assistantApp(ctx) {
     const s = settings || state(), built = s.presets?.find(p => p.id === s.activePreset), external = tavern.find(p => p.id === s.tavernPreset);
     const entries = s.source === 'tavern' ? external?.entries || [] : built?.entries || [];
     v.root.classList.remove('assistant-chat-mode');
-    v.draw(heading('助手设置', btn('save-settings', settingsSaving ? '保存中' : '完成', 'primary small', settingsSaving ? 'disabled' : ''), 'Assistant') + `<p class="hint">这里的选择只用于助手。</p><div class="group">${field('预设来源', select('source', s.source, [['builtin', '助手预设'], ['tavern', '酒馆预设']]))}${s.source === 'tavern' ? field('酒馆预设', select('tavernPreset', s.tavernPreset, [['', '选择一个预设'], ...tavern.map(p => [p.id, p.name])])) : field('助手预设', select('activePreset', s.activePreset, s.presets.map(p => [p.id, p.name]))) + `<div class="assistant-preset-tools">${btn('new-preset', '新建', 'text-button')}${btn('copy-preset', '另存为新预设', 'text-button')}${built?.id !== 'companion' ? btn('delete-preset', '删除预设', 'text-button') : ''}</div>${field('预设名称', `<input data-preset-name value="${esc(built?.name || '')}" maxlength="80" aria-label="预设名称">`)}`}${toggle('stream', '流式显示', s.stream !== false, '开启后边生成边显示；关闭后等待完整回复。思考状态仍实时更新。')}${toggle('readContext', '读取正文上下文', s.readContext)}${s.readContext ? `<p class="hint">${esc(contextCopy(s))}</p><p class="hint">使用最近一次正文请求的完整快照，保留当次正则、预设与注入；不含随后生成的回复。刷新或切换正文后，请先发送一次正文。</p>` : '<p class="hint">只带助手提示词和这个会话，不读取正文。</p>'}</div>${s.source === 'tavern' && tavernLoading ? '<p class="hint" role="status">正在读取酒馆预设……</p>' : ''}${s.source === 'tavern' && tavernError ? `<p class="assistant-error" role="alert">${esc(tavernError)}</p>${btn('reload-presets', '重新读取', 'secondary small')}` : ''}<div class="group-title"><span>${s.source === 'tavern' ? '预设条目' : '助手提示词'}</span><small>${entries.length} 条</small>${s.source === 'builtin' ? btn('add-entry', icon('add'), 'text-button', 'aria-label="添加条目"') : ''}</div><div class="assistant-entries">${entries.map(entry => {
+    v.draw(heading('助手设置', btn('save-settings', settingsSaving ? '保存中' : '完成', 'primary small', settingsSaving ? 'disabled' : ''), 'Assistant') + `<p class="hint">这里的选择只用于助手。</p><div class="group">${field('预设来源', select('source', s.source, [['builtin', '助手预设'], ['tavern', '酒馆预设']]))}${s.source === 'tavern' ? field('酒馆预设', select('tavernPreset', s.tavernPreset, [['', '选择一个预设'], ...tavern.map(p => [p.id, p.name])])) : field('助手预设', select('activePreset', s.activePreset, s.presets.map(p => [p.id, p.name]))) + `<div class="assistant-preset-tools">${btn('new-preset', '新建', 'text-button')}${btn('copy-preset', '另存为新预设', 'text-button')}${built?.id !== 'companion' ? btn('delete-preset', '删除预设', 'text-button') : ''}</div>${field('预设名称', `<input data-preset-name value="${esc(built?.name || '')}" maxlength="80" aria-label="预设名称">`)}`}${toggle('stream', '流式显示', s.stream !== false, '开启后边生成边显示；关闭后等待完整回复。思考状态仍实时更新。')}${toggle('visuals', '智能界面', s.visuals !== false, '需要时，助手会用可以点的按钮、方案卡片、对比表、步骤、小表单来回答，点一下就能接着聊。关掉后只用文字。')}${toggle('readContext', '读取正文上下文', s.readContext)}${s.readContext ? `<p class="hint">${esc(contextCopy(s))}</p><p class="hint">使用最近一次正文请求的完整快照，保留当次正则、预设与注入；不含随后生成的回复。刷新或切换正文后，请先发送一次正文。</p>` : '<p class="hint">只带助手提示词和这个会话，不读取正文。</p>'}</div>${s.source === 'tavern' && tavernLoading ? '<p class="hint" role="status">正在读取酒馆预设……</p>' : ''}${s.source === 'tavern' && tavernError ? `<p class="assistant-error" role="alert">${esc(tavernError)}</p>${btn('reload-presets', '重新读取', 'secondary small')}` : ''}<div class="group-title"><span>${s.source === 'tavern' ? '预设条目' : '助手提示词'}</span><small>${entries.length} 条</small>${s.source === 'builtin' ? btn('add-entry', icon('add'), 'text-button', 'aria-label="添加条目"') : ''}</div><div class="assistant-entries">${entries.map(entry => {
       const enabled = s.source === 'tavern' ? s.tavernEntries?.[s.tavernPreset]?.[entry.id] ?? entry.enabled !== false : entry.enabled !== false;
       return `<details class="group assistant-entry" data-group="entry-${esc(entry.id)}"><summary><span>${esc(entry.title || entry.id)}${entry.marker ? '<small> · 上下文位置</small>' : ''}</span><input class="switch" type="checkbox" data-entry="${esc(entry.id)}" aria-label="启用 ${esc(entry.title || entry.id)}" ${enabled ? 'checked' : ''}></summary>${s.source === 'builtin' ? `<div class="assistant-entry-edit"><input data-entry-title="${esc(entry.id)}" value="${esc(entry.title)}" maxlength="100" aria-label="条目名称">${btn('delete-entry', icon('trash'), 'text-button', `data-entry-id="${esc(entry.id)}" aria-label="删除条目"`)}</div><textarea data-entry-text="${esc(entry.id)}" aria-label="${esc(entry.title || entry.id)}的内容" rows="6">${esc(entry.text)}</textarea>` : `<pre class="assistant-code">${esc(entry.text || (entry.marker ? '正文快照完整保留当次发送内容，不由此处的条目开关裁剪。' : '这个条目没有文字内容。'))}</pre>`}</details>`;
     }).join('')}</div>`);
@@ -394,6 +498,19 @@ export function assistantApp(ctx) {
         if (files.length) fileDrafts.set(id, [...files, ...attachments(id)]);
       }
     } finally { for (const key of [originalId, id]) if (pending.get(key) === job) pending.delete(key); if (!v.disposed) await render(); }
+  }
+  /** A tap on a 智能界面 button: sends that text and asks for the reply at once. */
+  async function sendNow(text) {
+    if (!text || busy(threadId) || fileReads.has(threadId)) return;
+    saveDraft(text); await send();
+    if (!errors.get(threadId) && thread?.messages.at(-1)?.role === 'user') await send(true);
+  }
+  async function drawBlock(block) {
+    if (!block || busy(threadId)) return;
+    const id = threadId, job = {kind: 'reply'}; pending.set(id, job); errors.delete(id); drawChat();
+    try { await replyWithCost(options => { if (job.cancelled) throw Object.assign(Error('已取消'), {name: 'AbortError'}); return api.assistantDrawBlock(id, block, options); }); }
+    catch (error) { if (error.name !== 'AbortError') errors.set(id, error.message); }
+    finally { if (pending.get(id) === job) pending.delete(id); if (!v.disposed) await render(); }
   }
   async function reroll(message) {
     if (!message || busy(threadId)) return;
@@ -446,7 +563,7 @@ export function assistantApp(ctx) {
         if (!src) return;
         const photo = await api.getPhoto(id); if (v.disposed) return;
         if (!photo) { ctx.notify('这张图片已从相册移除'); imageURLs.delete(id); win.URL.revokeObjectURL(src); el.textContent = '图片已从相册移除'; return; }
-        openImageViewer({doc: ctx.doc, src, alt: '助手生成的图片', from: el.querySelector('img'), info: photo.info, actions: [downloadAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify)]}); return;
+        openImageViewer({doc: ctx.doc, src, alt: '助手生成的图片', from: el.querySelector('img'), info: photo.info, actions: [downloadAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify), shareAction(ctx.doc, async () => ({source: photo.blob, name: photo.name}), ctx.notify)]}); return;
       }
       case 'remove-file': fileDrafts.set(threadId, attachments().filter((_, i) => i !== Number(el.dataset.file))); drawChat(); return;
       case 'reroll': return reroll(message);
@@ -516,6 +633,24 @@ export function assistantApp(ctx) {
         settingsSaving = true;
         try { await api.saveAssistant(settings); settings = null; mode = 'chat'; await render(); }
         finally { settingsSaving = false; } return;
+      case 'pic-copy': case 'pic-draw': {
+        const part = message && partsFor(message)[Number(el.dataset.part)];
+        if (part?.kind !== 'picture') return;
+        if (action === 'pic-draw') return drawBlock(part.text);
+        ctx.notify(await copyText(win, part.text) ? '出图块已复制' : '没能复制，请长按手动选取');
+        return;
+      }
+      case 'ui-send': return sendNow(el.dataset.text);
+      case 'ui-form': {
+        const form = el.closest('.aui-form');
+        if (!form) return;
+        const lines = [...form.querySelectorAll('.aui-field')].map(f => {
+          const value = f.querySelector('input[type=radio]:checked')?.value || f.querySelector('input[type=text]')?.value.trim() || '';
+          return value ? `${f.dataset.label}：${value}` : '';
+        }).filter(Boolean);
+        if (!lines.length) { ctx.notify('先选一下或填一下'); return; }
+        return sendNow([form.dataset.formTitle, ...lines].filter(Boolean).join('\n'));
+      }
       case 'copy-code': {
         const code = el.closest('.assistant-code-block')?.querySelector('pre > code');
         if (!code) return;

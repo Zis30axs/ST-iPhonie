@@ -2093,3 +2093,70 @@ button.gift-item[data-short]{opacity:.55}
 .assistant-entry-edit input{flex:1;min-width:0}
 
 .assistant-image-pending{margin:10px 0;padding:24px 12px;border:1px dashed var(--line);border-radius:12px;background:var(--card2);color:var(--ink2);text-align:center;font-size:12px}
+/* 删好友: the note above the message box, and 新的朋友 rows. */
+.friend-cut{flex-shrink:0;position:relative;z-index:2;display:flex;align-items:center;gap:8px;margin:0;padding:8px 12px;background:var(--danger-soft,#ffe3e8);color:var(--ink);font-size:13px}
+.friend-cut svg{width:16px;height:16px;flex-shrink:0;color:var(--danger,#c8364f)}
+.friend-cut span{flex:1;min-width:0}
+.friend-row{cursor:default}
+.friend-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 助手 · 智能界面 and 出图块 cards: native pieces in a reply, in the phone's own colours. */
+.assistant-ui{display:grid;gap:10px;margin:8px 0}
+.aui{border:1px solid var(--line);border-radius:14px;background:var(--card2);padding:10px 12px;min-width:0}
+.aui-title{margin:0 0 8px;font-weight:700;font-size:13px;color:var(--ink)}
+.aui-chips{display:flex;flex-wrap:wrap;gap:6px}
+.aui-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:var(--card);color:var(--accent-ink);font:inherit;font-size:13px;line-height:1.3;cursor:pointer;text-align:left;transition:transform .15s,background-color .15s}
+.aui-chip:active{transform:scale(.96)}
+.aui-chip:hover{background:var(--accent-soft)}
+.aui-pick input{position:absolute;opacity:0;pointer-events:none}
+.aui-pick:has(input:checked){background:var(--accent-btn);border-color:var(--accent-btn);color:var(--on-accent)}
+.aui-pick:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.aui-cards-wrap{padding-right:0}
+.aui-cards{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 12px 4px 0;scrollbar-width:none}
+.aui-cards::-webkit-scrollbar{display:none}
+.aui-card{flex:0 0 min(70%,220px);scroll-snap-align:start;display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);color:var(--ink);font:inherit;text-align:left}
+button.aui-card{cursor:pointer}
+button.aui-card:active{transform:scale(.98)}
+.aui-card strong{font-size:14px}
+.aui-card span{font-size:12.5px;color:var(--ink2);line-height:1.45}
+.aui-tags{display:flex;flex-wrap:wrap;gap:4px}
+.aui-tags i,.aui-tag{font-style:normal;font-size:11px;padding:2px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent-ink)}
+.aui-table{overflow-x:auto}
+.aui-compare table{border-collapse:collapse;width:100%;font-size:12.5px}
+.aui-compare th,.aui-compare td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.aui-compare thead th{color:var(--accent-ink);font-weight:700}
+.aui-compare tbody th{color:var(--ink2);font-weight:600;white-space:nowrap}
+.aui-steps ol{margin:0;padding:0;list-style:none;counter-reset:step;display:grid;gap:6px}
+.aui-steps li{counter-increment:step;display:flex;gap:8px;font-size:13px;line-height:1.5}
+.aui-steps li::before{content:counter(step);flex:0 0 20px;height:20px;border-radius:50%;background:var(--accent-btn);color:var(--on-accent);font-size:11px;font-weight:700;display:grid;place-items:center;margin-top:1px}
+.aui-field{display:grid;gap:6px;margin-bottom:10px}
+.aui-field>span{font-size:12.5px;color:var(--ink2);font-weight:600}
+.aui-field input[type=text]{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--card);color:var(--ink);font:inherit;font-size:13px}
+.aui-tools{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:8px}
+.aui-bar{display:grid;grid-template-columns:minmax(0,5em) 1fr auto;align-items:center;gap:8px;font-size:12.5px;margin:4px 0}
+.aui-bar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2)}
+.aui-bar i{height:8px;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent-btn));width:var(--w);min-width:4px}
+.aui-bar b{font-weight:600;color:var(--ink)}
+.aui-tip{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.5;background:var(--accent-soft);border-color:transparent}
+.aui-tip[data-tone=warn]{background:var(--danger-soft);color:var(--ink)}
+.aui-tip svg{width:16px;height:16px;flex-shrink:0;margin-top:2px;color:var(--accent-ink)}
+.aui-tip[data-tone=warn] svg{color:var(--danger)}
+.aui-pic{margin:8px 0;background:var(--card)}
+.aui-pic-head{display:flex;align-items:center;gap:6px;margin-bottom:6px;color:var(--accent-ink)}
+.aui-pic-head svg{width:16px;height:16px}
+.aui-pic-head strong{font-size:13px}
+.aui-pic-row{display:grid;grid-template-columns:4.5em 1fr;gap:8px;padding:5px 0;border-top:1px dashed var(--line);font-size:12px}
+.aui-pic-row>span{color:var(--ink2);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aui-pic-row p{margin:0;color:var(--ink);overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.5}
+.aui-pic-row small{display:block;color:var(--ink2);margin-top:2px}
+.aui-skeleton{display:flex;align-items:center;gap:8px;color:var(--ink2);font-size:12.5px}
+.aui-skeleton i{width:14px;height:14px;border-radius:50%;border:2px solid var(--accent-soft);border-top-color:var(--accent);animation:aui-spin .8s linear infinite}
+@keyframes aui-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.aui-skeleton i{animation:none}.aui-chip,.aui-card{transition:none}}
+.aui-go{display:inline-flex;align-items:center;gap:5px;border:0;border-radius:999px;padding:7px 14px;background:var(--accent-btn);color:var(--on-accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer;box-shadow:none}
+.aui-go svg{width:15px;height:15px}
+.aui-go:active{transform:scale(.96)}
+.aui-tools .text-button{font-size:13px}
+.aui-tools .text-button svg{width:15px;height:15px}
+.friend-ico{flex:none;width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(145deg,#ffb36b,#ff8a3d);color:#fff}
+.friend-ico svg{width:22px;height:22px}
+.list-row .friend-badge{flex:none;margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;display:grid;place-items:center;font-size:12px;font-style:normal}

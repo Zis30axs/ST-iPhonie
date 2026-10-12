@@ -11,6 +11,9 @@
 //         lines:[{from, text, translation, emotion}] what was said, voicemail:[{text, translation, emotion}] a missed call's message
 // list() returns threads without their messages, plus the last message for previews, pinned threads first.
 // A thread can be pinned (置顶) or muted (免打扰: its unread messages do not count toward the app's badge).
+// friend (删好友, private chats only): {by:'me'|'them', at, requests:[{text, at}]} — by 'me': the user deleted the contact
+// (the chat is put away; what the contact sends meanwhile waits as 好友申请 in requests); by 'them': the contact deleted
+// the user (the user's messages are refused until a 好友申请 is accepted).
 // streak (聊天火花): days in a row, up to today or yesterday, on which both the user and the other side wrote.
 import {connectionLost, lostError} from './idb.js';
 
@@ -19,6 +22,12 @@ const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'tran
 const CALL_STATES = ['answered', 'missed', 'declined', 'cancelled'];
 const spoken = (list, max, withFrom) => (Array.isArray(list) ? list : []).slice(-max).filter(l => l && String(l.text || l.translation || '').trim()).map(l => ({...(withFrom ? {from: clip(l.from, 40).trim() || 'me'} : {}), text: clip(l.text || l.translation, 1000), translation: clip(l.translation || l.text, 1000), emotion: clip(l.emotion || 'calm', 100)}));
 const STATES = {redpacket: ['sent', 'opened'], transfer: ['sent', 'accepted', 'returned'], gift: ['sent', 'accepted', 'returned']};
+/** A private chat's 删好友 state, checked; null when there is none. */
+export function cleanFriend(f) {
+  if (!f || typeof f !== 'object' || !['me', 'them'].includes(f.by)) return null;
+  const requests = (Array.isArray(f.requests) ? f.requests : []).filter(r => r && String(r.text || '').trim()).slice(-10).map(r => ({text: clip(r.text, 300).trim(), at: Number.isFinite(r.at) ? r.at : 0}));
+  return {by: f.by, at: Number.isFinite(f.at) ? f.at : 0, requests};
+}
 /** Money as a string with two decimals, 0.01 to 200000; null when the value is not an amount. */
 export function money(value) {
   const n = Math.round(Number(String(value ?? '').replace(/[¥￥,，\s元]/g, '')) * 100) / 100;
@@ -158,8 +167,9 @@ export class ChatStore {
       done(this.#public(row));
     }));
   }
-  async update(id, {name, members, pinned, muted} = {}) {
+  async update(id, {name, members, pinned, muted, friend} = {}) {
     return this.#change(id, row => {
+      if (friend !== undefined && row.type === 'dm') { const f = cleanFriend(friend); if (f) row.friend = f; else delete row.friend; }
       if (pinned !== undefined) row.pinned = pinned === true;
       if (muted !== undefined) row.muted = muted === true;
       if (name !== undefined) row.name = clip(name, 40).trim() || row.name;
@@ -209,6 +219,15 @@ export class ChatStore {
       if (patch.openedBy !== undefined) m.openedBy = clip(patch.openedBy, 40);
     });
   }
+  /** A 好友申请 from a contact the user deleted: kept with the chat until the user adds them back. */
+  async addRequest(id, texts) {
+    return this.#change(id, row => {
+      if (row.friend?.by !== 'me') throw fail('TA 还是你的好友');
+      const now = this.#now(), list = (Array.isArray(texts) ? texts : [texts]).map(t => clip(t, 300).trim()).filter(Boolean);
+      row.friend = cleanFriend({...row.friend, requests: [...row.friend.requests, ...list.map((text, i) => ({text, at: now + i}))]});
+      row.updatedAt = now;
+    });
+  }
   async removeMessages(id, ids) {
     const drop = new Set(ids);
     return this.#change(id, row => { row.messages = row.messages.filter(m => !drop.has(m.id)); });
@@ -236,7 +255,7 @@ export class ChatStore {
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
       return {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true,
-        unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {})};
+        unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {})};
     });
     return this.#tx('readwrite', (store, done) => {
       const write = () => { for (const row of rows) store.put(row); done(rows.length); };

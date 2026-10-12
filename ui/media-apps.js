@@ -1,7 +1,7 @@
 import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help} from './common.js';
 import {icon, wave, halo} from './icons.js';
 import {openAlbum} from './album-viewer.js';
-import {saveFile} from '../download.js';
+import {saveFile, shareFile, canShareFiles} from '../download.js';
 import {decodeMono, joinClips, encodeWav, JOIN_RATE} from '../core/audio-join.js';
 
 const NOTE_COLORS = ['#fff4b0', '#ffd9e6', '#d9ecff', '#e3f5d9', '#efe0ff', '#ffe6cc'];
@@ -107,6 +107,7 @@ export function galleryApp(ctx) {
       actions: [
         {key: 'wallpaper', icon: 'image', label: '设为壁纸', run: async id => { await api.savePhone({wallpaper: {kind: 'photo', photoId: id}}); ctx.notify('已设为壁纸'); }},
         {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await photoFile(id); await saveAs(ctx, {blob: source, name}); }},
+        ...(canShareFiles(ctx.win) ? [{key: 'share', icon: 'share', label: '分享', run: async id => { const {source, name} = await photoFile(id); try { await shareFile(ctx.doc, source, name); } catch (error) { ctx.notify(error.message, {error: !/已取消/.test(error.message)}); } }}] : []),
         {key: 'delete', icon: 'trash', label: '删除', danger: true, run: async id => {
           if (!await ctx.confirm('删除这张照片？', '使用它的壁纸和图标会恢复默认。')) return;
           await api.deletePhoto(id); changed = true; ctx.notify('已删除');

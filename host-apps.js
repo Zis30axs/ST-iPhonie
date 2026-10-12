@@ -5,7 +5,7 @@ import {buildPeekRequest, parsePeek, peekId, mergePeek} from './core/peek.js';
 import {storyLines} from './core/moments.js';
 import {inSpace, activeChatPreset, cleanTagged} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
-import {pictureInputs, sizeFor} from './core/draw.js';
+import {pictureInputs, sizeFor, photoCast} from './core/draw.js';
 
 const PEOPLE = 12;
 
@@ -106,11 +106,11 @@ export function createAppsHost({context, settings, backend, memory = null}) {
     if (!photo.tags) throw Error((wall ? '壁纸' : '这张照片') + '没有画图用的描述，「再看一次」后就有了');
     if (!backend.drawReady()) throw Error(backend.drawMissing() + '，相册只能看文字');
     const set = patch => backend.appsMutate('peek', () => backend.apps.change(id, doc => { const target = pick(doc); Object.assign(target, patch); for (const k of Object.keys(patch)) if (patch[k] === '') delete target[k]; }));
-    // The owner's saved look only when the picture shows a person (a selfie), not for a view or a meal.
-    const person = /(\d+(?:girl|boy|other)s?|solo|selfie|portrait|upper body|cowboy shot)/i.test(photo.tags);
+    // The saved looks of who the photo shows: the people its description names, else the owner (a selfie).
+    const cast = photoCast({text: photo.text, tags: photo.tags, owner: name, names: [...settings().routes.map(r => r.name), userName()]});
     try {
       await set({state: 'waiting', note: ''});
-      const input = pictureInputs(settings(), {prompt: photo.tags, characters: person ? [name] : []}, '');
+      const input = pictureInputs(settings(), {prompt: photo.tags, characters: cast}, '');
       // A wallpaper stands upright like the phone (a square size becomes 832×1216 for 1024: about as many pixels, so the
       // free tier still holds).
       if (wall) { const up = sizeFor(input.params, '竖'), side = up.width, snap64 = n => Math.max(64, Math.round(n / 64) * 64); input.params = {...input.params, ...(up.width === up.height ? {width: snap64(side * .8125), height: snap64(side * 1.1875)} : up)}; }

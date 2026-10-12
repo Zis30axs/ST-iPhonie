@@ -297,7 +297,7 @@ const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => 
  * members: [{name, persona, card, voice, language}] (card: the tavern character card text, when there is one)
  * story: [{name, text}] recent story messages, oldest first.
  */
-export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = []}) {
+export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = ''}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -322,15 +322,17 @@ export function buildChatRequest({preset, thread, members, story = [], user = '�
       `只输出新消息，每条消息单独一行，写成「名字：消息内容」。名字只能是：${names}。`,
       `不要写${user}的消息，不要写时间、编号、引号或任何解释。`,
       speakers.length ? `语音消息的整行写成「名字：${voiceFormat}」，标签里的角色填同一个名字；标签里的原文（{文本}）是念出来的话，用这个人的语音语言写（${speakers.map(m => `${m.name}：${languageName(m.language || 'zh')}`).join('，')}），引号里的{译文}写中文。` : '',
-      `需要时也可以像真人一样用手机功能，每种单独一行，偶尔用，别每轮都用：「名字：[图片] 一句话描述拍的照片${images ? '｜画这张照片用的英文 danbooru tag（拍的是什么、构图、光线；拍到自己就写 1girl 或 1boy 和 selfie）' : ''}」「名字：[位置] 地点」「名字：[红包 ¥金额] 祝福语」「名字：[转账 ¥金额] 备注」「名字：[拍一拍]」（拍一拍${user}）；很偶尔（节日、纪念日、道歉、想对${user}好的时候）可以送${user}礼物：「名字：[礼物 物品名] 附言」。`,
+      `需要时也可以像真人一样用手机功能，每种单独一行，偶尔用，别每轮都用：「名字：[图片] 一句话描述拍的照片（拍到别人就写出是谁）${images ? '｜画这张照片用的英文 danbooru tag（拍的是什么、构图、光线；拍到自己就写 1girl 或 1boy 和 selfie）' : ''}」「名字：[位置] 地点」「名字：[红包 ¥金额] 祝福语」「名字：[转账 ¥金额] 备注」「名字：[拍一拍]」（拍一拍${user}）；很偶尔（节日、纪念日、道歉、想对${user}好的时候）可以送${user}礼物：「名字：[礼物 物品名] 附言」。`,
       `${user}发来红包或转账时，收下红包单独写一行「名字：[领取红包]」，收下转账写「名字：[收款]」，退还转账写「名字：[退还]」；${user}送来礼物时，收下写「名字：[收下礼物]」，不收写「名字：[退还礼物]」；收不收按人设决定。`,
       stickers.length ? `可以像真人一样发表情包，单独一行写成「名字：[表情包] 表情包的名字」，合适的时候用，别每条都发；名字只能从这些里选：${stickers.slice(-80).map(s => s.name ?? s).join('、')}。` : '',
       dialing ? `很偶尔可以直接给${user}打语音电话：这一轮最后单独一行写成「名字：[打电话] 为什么打」，大多数回复都不要打。` : '',
-      posting ? `很偶尔可以顺手发一条朋友圈，单独一行写成「名字：[朋友圈] 动态内容」；这是发给所有朋友看的动态，不是发给${user}的消息，大多数回复都不要发。` : ''].filter(Boolean).join('\n')
+      posting ? `很偶尔可以顺手发一条朋友圈，单独一行写成「名字：[朋友圈] 动态内容」；这是发给所有朋友看的动态，不是发给${user}的消息，大多数回复都不要发。` : '',
+      !group && !asking ? `只有和${user}吵架闹翻、真的气到不想再理${user}的时候，可以单独一行写「名字：[删除好友]」把${user}从好友里删掉；之后${user}的消息会被拒收，直到${partner}通过${user}的好友申请。极少用，大多数时候都不要删。` : ''].filter(Boolean).join('\n'),
+    asking ? ['【好友申请】', `${partner}之前在手机上把${user}删了好友。现在${user}发来好友申请，验证消息：「${asking}」。`, `按${partner}的性格、你们现在的关系和最近发生的事决定通不通过：通过就第一行单独写「${partner}：[通过好友]」，后面可以接着发几条消息；还不想通过就只写一行「${partner}：[拒绝好友] 想说的一句话（可以空着）」。`].join('\n') : ''
   ].filter(Boolean).join('\n\n');
   const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history);
   const last = history.at(-1);
-  const turn = !history.length ? `（聊天刚开始：${group ? '群里有人' : partner}主动给${user}发消息。）`
+  const turn = asking ? `（${user}发来了好友申请，现在由${partner}决定。）` : !history.length ? `（聊天刚开始：${group ? '群里有人' : partner}主动给${user}发消息。）`
     : last.from === 'me' ? `（现在轮到${group ? '群里的成员' : partner}回复${user}。）`
     : `（${group ? '群里' : partner}可以继续说，或者换个话题。）`;
   const transcript = history.length ? `【${group ? thread.name + '（群聊）' : '和' + partner}的聊天记录】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}\n\n` : '';
@@ -339,7 +341,7 @@ export function buildChatRequest({preset, thread, members, story = [], user = '�
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
 const unquote = s => s.trim().replace(/^[「“"『](.*)[」”"』]$/s, '$1').trim();
-const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|打电话|语音通话|来电)\s*([^\]】]*)[\]】]\s*(.*)$/;
+const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|打电话|语音通话|来电|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
 const LUCKY = ['6.66', '8.88', '5.20', '13.14', '16.80', '1.88'];
 /**
  * A phone-feature line (「[红包 ¥8.88] 祝福」 and the like) as a message; {kind:'claim', action} for taking or returning
@@ -354,6 +356,10 @@ function special(from, content, {names, user, stickers = []}) {
     case '朋友圈': case '发朋友圈': case '动态': { const said = (text || arg.trim()).slice(0, 2000); return said ? {from, kind: 'moment', text: said} : null; }
     // A voice call placed from the chat: the phone rings after this reply.
     case '打电话': case '语音通话': case '来电': return {from, kind: 'call', reason: (text || arg.trim()).slice(0, 200)};
+    // 删好友: the contact deletes the user; answering the user's 好友申请.
+    case '删除好友': case '删好友': case '拉黑': return {from, kind: 'unfriend'};
+    case '通过好友': case '通过好友申请': case '同意好友': case '接受好友': return {from, kind: 'befriend'};
+    case '拒绝好友': case '拒绝好友申请': return {from, kind: 'refuse', text: (text || arg.trim()).slice(0, 200)};
     case '图片': case '照片': {
       // 「描述｜英文 tag」: the tags draw it when a drawing engine is set up (Chinese words in them are left out).
       const [said, ...tags] = (text || arg.trim()).split(/[|｜]/);
