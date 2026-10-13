@@ -2,6 +2,9 @@ import {createView, esc, btn, field, input, select, textArea, toggle, heading, h
 import {icon, glyph} from './icons.js';
 import {APPS} from './apps.js';
 import {MARK_CHOICES} from '../core/voice-fx.js';
+import {CONTRACT_PROMPT, READING_PROMPT} from '../core/protocol.js';
+// The voice preset's rule entries that can go back to what ships.
+const RULE_DEFAULTS = {contract: CONTRACT_PROMPT, reading: READING_PROMPT};
 
 const positions = [['in_chat', '聊天内'], ['before_prompt', '主提示词之前'], ['in_prompt', '主提示词之后']];
 const roles = [['system', '系统'], ['user', '用户'], ['assistant', '助手']];
@@ -20,7 +23,8 @@ export function presetsApp(ctx) {
   /** A fresh copy of the shipped preset of a kind: new entry ids, no preset id. */
   const shipped = k => {
     const base = structuredClone(k === 'chat' ? api.defaultChatPreset : k === 'draw' ? api.defaultDrawPreset : api.defaultVoicePreset);
-    base.entries = base.entries.map(e => ({...e, id: e.id && k !== 'tts' ? e.id : crypto.randomUUID()}));
+    // The voice preset's built-in entries keep their ids (the rules and 心声和电话 are known by them); others get new ones.
+    base.entries = base.entries.map(e => ({...e, id: e.id && (k !== 'tts' || ['dialogue', 'reading', 'contract', 'effects'].includes(e.id)) ? e.id : crypto.randomUUID()}));
     return base;
   };
   const tile = app => { const [t1, t2, tac] = APPS[app].colors; return `<span class="mini-tile" style="--t1:${t1};--t2:${t2};--tac:${tac}">${glyph(app)}</span>`; };
@@ -163,7 +167,7 @@ export function presetsApp(ctx) {
           ${toggle('enabled', '启用此条目', e.enabled)}
           ${field('条目名称', input('title', e.title))}
           ${draw ? `<div class="field"><span>用在哪个引擎${help('勾了哪个，用那个引擎画图时才把这条规则发给模型。都勾或都不勾就是三个都用。在绘图 App 顶上选用哪个画。')}</span><div class="use-row">${ENGINE_USES.map(([u, l]) => `<label class="use-chip"><input type="checkbox" data-engine-use="${u}" ${!e.engines?.length || e.engines.includes(u) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>` : ''}
-          ${chat ? `<div class="field"><span>用在</span><div class="use-row">${USES.map(([u, l]) => `<label class="use-chip"><input type="checkbox" data-use="${u}" ${(e.use || []).includes(u) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>` : ''}${field(draw || chat ? '规则' : '提示词', textArea('text', e.text, 'class="code"'), draw ? '可以用 {{出图格式}}、{{出图数量}}、{{角色列表}}。插件会在最后自动加上格式和张数的硬性要求。' : chat ? '可以用 {{用户}}、{{对象}}；写语音消息规则时用 {{语音格式}}（手机固定用默认的台词格式，不跟配音预设走）、{{可发语音}}。用在朋友圈的规则只能用 {{用户}}。插件会在最后自动加上输出格式的硬性要求。' : '启用规则的合计文字需包含 {{格式}} 和 {{语言}}。')}
+          ${chat ? `<div class="field"><span>用在</span><div class="use-row">${USES.map(([u, l]) => `<label class="use-chip"><input type="checkbox" data-use="${u}" ${(e.use || []).includes(u) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>` : ''}${field(draw || chat ? '规则' : '提示词', textArea('text', e.text, 'class="code"'), draw ? '可以用 {{出图格式}}、{{出图数量}}、{{角色列表}}。插件会在最后自动加上格式和张数的硬性要求。' : chat ? '可以用 {{用户}}、{{对象}}；写语音消息规则时用 {{语音格式}}（手机固定用默认的台词格式，不跟配音预设走）、{{可发语音}}。用在朋友圈的规则只能用 {{用户}}。插件会在最后自动加上输出格式的硬性要求。' : e.id === 'reading' ? '{{朗读规则}} 会换成这段剧情里每个说话者按自己的引擎和模型该怎么写（情绪、语气标签）。可以在前后加字；不想要就停用这一条。' : e.id === 'contract' ? '{{格式}} 换成上面的台词格式；{{错误示例}} {{正确示例}} 会按台词格式自动写出例子，改了格式也不会对不上。可以随便改，改乱了点「恢复这一条」。' : '启用规则的合计文字需包含 {{格式}} 和 {{语言}}。')}${!draw && !chat && RULE_DEFAULTS[e.id] ? `<div class="actions">${btn('entry-default', icon('refresh') + '恢复这一条', 'text-button', `data-index="${i}"`)}</div>` : ''}
           ${chat ? '' : toggle('customInjection', '单独设置插入位置', !!e.injection)}${!chat && e.injection ? injection(e.injection, i) : ''}
           <div class="entry-tools">${btn('entry-up', icon('up') + '上移', 'text-button', `data-index="${i}" ${i === 0 ? 'disabled' : ''}`)}${btn('entry-down', icon('down') + '下移', 'text-button', `data-index="${i}" ${i === p.entries.length - 1 ? 'disabled' : ''}`)}${btn('delete-entry', icon('trash') + '删除', 'text-button', `data-index="${i}"`)}</div>
         </div></details>`).join('')}
@@ -287,6 +291,9 @@ export function presetsApp(ctx) {
         mark();
         break;
       case 'delete-entry': if (await ctx.confirm('删除这条规则？', '保存预设后生效。')) { current.entries.splice(index, 1); render(); mark(); } break;
+      case 'entry-default':
+        if (RULE_DEFAULTS[current.entries[index]?.id]) { current.entries[index] = {...current.entries[index], text: RULE_DEFAULTS[current.entries[index].id]}; render(); mark(); ctx.notify('这一条换回默认了，记得保存'); }
+        break;
       case 'entry-up':
       case 'entry-down': {
         const to = index + (el.dataset.action === 'entry-up' ? -1 : 1);

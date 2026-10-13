@@ -60,19 +60,31 @@ export function renderDialogue(message,format,marker){const lines=parseDialogue(
 /** Voice switched off: each tagged line shows only its Chinese translation, without the tag or the wave button. */
 export function plainDialogue(message,format){const lines=parseDialogue(message,format);let out='',at=0;for(const line of lines){out+=message.slice(at,line.start)+'“'+escapeHTML(line.translation)+'”';at=line.end;}return out+message.slice(at);}
 export function validatePreset(p){compileFormat(p.format);if(!p.entries?.some(e=>e.enabled&&e.text?.trim()))throw Error('请启用至少一条提示词');const text=p.entries.filter(e=>e.enabled).map(e=>e.text).join('\n');if(!text.includes('{{格式}}')||!text.includes('{{语言}}'))throw Error('提示词需要 {{格式}} 与 {{语言}}');for(const i of [p.injection,...p.entries.filter(e=>e.injection).map(e=>e.injection)]){if(!i||!['in_chat','in_prompt','before_prompt'].includes(i.position)||!['system','user','assistant'].includes(i.role)||!Number.isInteger(i.depth)||i.depth<0||i.depth>10000)throw Error('提示词插入设置无效');}}
-export function dialogueContract(format){return [
-'【对白输出硬性规则】',
-'每一次真正说出口的台词都必须使用这一完整格式：'+format,
+// 对白输出硬性规则: an entry of the voice preset (id 'contract') the user may edit. {{格式}} is the preset's 台词格式, and
+// {{错误示例}} {{正确示例}} are filled in that format, so changing the format never leaves the rules showing another one.
+export const CONTRACT_PROMPT=['【对白输出硬性规则】',
+'每一次真正说出口的台词都必须使用这一完整格式：{{格式}}',
 '完整覆盖：问候、短答、感叹、打断、对白中的连续句子都要带标签；不要只给部分对白加标签。旁白、动作、环境和未说出口的心理活动保持普通正文。',
 '一一配对：一组中文译文紧接一个语音标签，二者对应同一个说话者的同一段连续发言。每句意思、事实、称呼、否定、提问和先后顺序都必须完整对应。译文不能只译开头、概括大意、截短或用省略号代替剩余内容；朗读文本不得增加译文中没有的句子、解释或情节。',
 '分段对应：长台词按句或短意群拆成多组，每组都保留完整中文译文及对应原语言文本。换说话者或中间插入动作/旁白时另起一组，不把多个人的发言塞进同一个标签。',
-'中文台词（最容易出错，务必遵守）：原语言就是中文时，标签前的引号里和标签里写的是同一整句话，把整句完整写两遍（去掉引擎声音标签和停顿标记后，两边一字不差）。绝不能把一句话拆成两半——前半句放引号里、后半句只放标签里——那样读者只看得到前半句。错误：“今天天气真不错”<tts>小林|开心|我们出去约会吧，那一定很棒！</tts>；正确：“今天天气真不错，我们出去约会吧，那一定很棒！”<tts>小林|开心|今天天气真不错，我们出去约会吧，那一定很棒！</tts>。句子太长就拆成几组，每组引号里和标签里各自完整。其他语言使用忠实、完整的自然中文翻译，不按字数比例机械删减。',
+'中文台词（最容易出错，务必遵守）：原语言就是中文时，译文和朗读文本写的是同一整句话，把整句完整写两遍（去掉引擎声音标签和停顿标记后，两边一字不差）。绝不能把一句话拆成两半——前半句放译文里、后半句只放朗读文本里——那样读者只看得到前半句。错误：{{错误示例}}；正确：{{正确示例}}。句子太长就拆成几组，每组译文和朗读文本各自完整。其他语言使用忠实、完整的自然中文翻译，不按字数比例机械删减。',
 '发声范围：语气词和停顿仅使用该角色引擎/模型支持的写法，不把动作或心理描写夹进朗读文本。角色字段填写实际姓名，不能照抄 {角色} 或 {{角色}} 等占位符。',
-'格式完整：每一组都填写译文、角色、情绪、文本并闭合标签；字段内的特殊分隔符用 HTML 实体转义（例如 &quot;、&lt;、&gt;、&amp;），完整标签不要写进代码块。',
-'输出前自行核对：每段发声是否都有完整标签；每组译文与朗读内容是否逐句对应且无漏译、无增写；所有标签是否闭合。直接输出检查后的正文，不输出核对过程。'
-].join('\n');}
+'格式完整：每一组都填写译文、角色、情绪、文本，格式写完整（有成对的标签就要闭合）；字段内的特殊分隔符用 HTML 实体转义（例如 &quot;、&lt;、&gt;、&amp;），完整的一组不要写进代码块。',
+'输出前自行核对：每段发声是否都有完整格式；每组译文与朗读内容是否逐句对应且无漏译、无增写；所有标签是否闭合。直接输出检查后的正文，不输出核对过程。'
+].join('\n');
+/** 朗读规则: the voice preset's entry (id 'reading') where each speaker's engine rules go ({{朗读规则}}). */
+export const READING_PROMPT='{{朗读规则}}';
+/** One line in the preset's format, for the examples of the rules. */
+export const formatExample=(format,values)=>String(format).replace(/\{(译文|角色|情绪|文本)\}/g,(m,key)=>values[key]??m);
+/** The rules' placeholders filled for a preset's format. */
+export function fillContract(text,format){const half='今天天气真不错',whole='今天天气真不错，我们出去约会吧，那一定很棒！';
+ return String(text).replaceAll('{{格式}}',format).replaceAll('{{错误示例}}',formatExample(format,{译文:half,角色:'小林',情绪:'开心',文本:'我们出去约会吧，那一定很棒！'})).replaceAll('{{正确示例}}',formatExample(format,{译文:whole,角色:'小林',情绪:'开心',文本:whole}));}
+export function dialogueContract(format,template=CONTRACT_PROMPT){return fillContract(template,format);}
 /** Prompt entries for the story request. only: names of this chat's speakers; the language line lists just them. */
-export function promptPlan(settings,rules,only=null){const p=settings.presets.find(p=>p.id===settings.activePreset);if(!p)return [];validatePreset(p);const named=(()=>{const all=settings.routes.filter(r=>!isPlaceholderRole(r.name));if(!Array.isArray(only))return all;const wanted=new Set(only.map(n=>String(n).trim()));return all.filter(r=>wanted.has(r.name));})();const language='默认台词语言：'+settings.general.defaultLanguage+(named.length?'；'+named.map(r=>`${r.name}：${r.language||settings.general.defaultLanguage}`).join('；'):'');const entries=p.entries.filter(e=>e.enabled&&e.text.trim());const plan=entries.map((e,index)=>{const i=e.injection||p.injection;return {key:'sttts.entry.'+String(index).padStart(4,'0'),text:e.text.replaceAll('{{格式}}',p.format).replaceAll('{{语言}}',language),position:{in_chat:1,in_prompt:0,before_prompt:2}[i.position],depth:i.position==='in_chat'?i.depth:0,role:i.position==='in_chat'?{system:0,user:1,assistant:2}[i.role]:0};});const tail=plan[0];if(tail)tail.text+='\n\n'+rules+'\n\n'+dialogueContract(p.format);return plan;}
+export function promptPlan(settings,rules,only=null){const p=settings.presets.find(p=>p.id===settings.activePreset);if(!p)return [];validatePreset(p);const named=(()=>{const all=settings.routes.filter(r=>!isPlaceholderRole(r.name));if(!Array.isArray(only))return all;const wanted=new Set(only.map(n=>String(n).trim()));return all.filter(r=>wanted.has(r.name));})();const language='默认台词语言：'+settings.general.defaultLanguage+(named.length?'；'+named.map(r=>`${r.name}：${r.language||settings.general.defaultLanguage}`).join('；'):'');const entries=p.entries.filter(e=>e.enabled&&e.text.trim())
+// The rules are entries of their own (朗读规则, 对白输出硬性规则) since 0.7.58; a preset without them (made elsewhere and not
+// opened since) still gets them after its first entry, as before.
+const own=p.entries.some(e=>e.id==='contract'||e.id==='reading'||/\{\{朗读规则\}\}/.test(e.text));const plan=entries.map((e,index)=>{const i=e.injection||p.injection;return {key:'sttts.entry.'+String(index).padStart(4,'0'),text:fillContract(e.text.replaceAll('{{朗读规则}}',rules),p.format).replaceAll('{{语言}}',language),position:{in_chat:1,in_prompt:0,before_prompt:2}[i.position],depth:i.position==='in_chat'?i.depth:0,role:i.position==='in_chat'?{system:0,user:1,assistant:2}[i.role]:0};});const tail=plan[0];if(tail&&!own)tail.text+='\n\n'+rules+'\n\n'+dialogueContract(p.format);return plan;}
 // 前端美化 cards: their regex may put the reply into a code block or a whole HTML page that 酒馆助手 draws in a frame of
 // its own, where the plugin's styles and clicks do not reach. The waves that landed in such places are taken back out,
 // leaving the translation as written, so the card looks as it was made (the lines still play from 整条播放 and 听取).
