@@ -10,7 +10,7 @@ import { normalizeCalls, buildCallRequest } from './call.js';
 import { normalizeText, activeText, customRequest, listModels, streamText, asMessages, TEXT_PRESET_ID } from './llm.js';
 import { normalizeEmbed, embedReady, embedTexts } from './embed.js';
 import { bookId, emptyBook, cleanBook, removeNode } from './memory.js';
-import { normalizeSync, runSync, removeSync, SYNC_PARTS } from './sync.js';
+import { normalizeSync, runSync, removeSync, joinGone, SYNC_PARTS } from './sync.js';
 import { normalizePool } from './auto-voice.js';
 import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, PACK_FORMAT, SOUND_LIMITS, SOUND_KINDS } from './sounds.js';
 import { decodeMono, encodeWav } from './audio-join.js';
@@ -558,6 +558,20 @@ export class TTSBackend {
             return id;
         } catch { return 'unknown'; }
     }
+    /** Remembers deleted items (keys as in joinGone) so a sync does not bring them back from another device's copy. */
+    noteGone(part, keys) {
+        const list = [...new Set((keys || []).map(String).filter(Boolean))];
+        if (!list.length) return;
+        const memory = this.#syncMemory(), now = Date.now();
+        this.#syncMemory({ ...memory, gone: joinGone([memory.gone, { [part]: Object.fromEntries(list.map(key => [key, now])) }], now) });
+    }
+    /** Runs a deletion of a part's items and remembers which went. */
+    async dropping(part, list, task) {
+        const before = new Set((await list()).map(x => String(x.id))), result = await task();
+        for (const x of await list()) before.delete(String(x.id));
+        this.noteGone(part, [...before]);
+        return result;
+    }
     syncStatus() {
         const { running, ...state } = this.syncState;
         return clone({ enabled: this.settings.sync.enabled, available: !!this.syncFiles, parts: SYNC_PARTS, ...state, memoryAt: this.#syncMemory().savedAt || 0 });
@@ -609,7 +623,8 @@ export class TTSBackend {
             try {
                 this.syncApplying = true;
                 const result = await runSync({ stores, files: this.syncFiles, memory: this.#syncMemory(), device: this.#device(), deviceName: deviceName || this.syncDeviceName || '' });
-                this.#syncMemory(result.memory);
+                // Deletions made while it ran are kept too.
+                this.#syncMemory({ ...result.memory, gone: joinGone([result.memory.gone, this.#syncMemory().gone]) });
                 this.syncState = { ...this.syncState, busy: false, error: '', lastAt: Date.now(), remote: result.remote, lastResult: { pulled: result.pulled, pushed: result.pushed, merged: result.merged } };
                 for (const part of [...result.pulled, ...result.merged]) {
                     if (part === 'chats') this.emit('chat', { threadId: '' });
@@ -1864,6 +1879,7 @@ export class TTSBackend {
         const keys = Array.isArray(sources) && sources.length ? sources.filter(k => found.sources[k]) : Object.keys(found.sources);
         const gone = new Set(keys.flatMap(k => found.sources[k].ids));
         for (const id of gone) await this.library.deletePhoto(id);
+        this.noteGone('photos', [...gone]);
         if (gone.size) await this.#forgetPhotos(gone);
         this.emit('library', { collection: 'photos' });
         this.emit('phone', { preferences: await this.getPhone() });
@@ -2036,6 +2052,7 @@ export class TTSBackend {
     async deletePhotos(ids) {
         const gone = new Set((Array.isArray(ids) ? ids : [ids]).map(String).filter(Boolean));
         for (const id of gone) await this.library.deletePhoto(id);
+        this.noteGone('photos', [...gone]);
         if (gone.size) await this.#forgetPhotos(gone);
         this.emit('library', { collection: 'photos' });
         this.emit('phone', { preferences: await this.getPhone() });
@@ -2043,6 +2060,8 @@ export class TTSBackend {
     }
     async mutateLibrary(collection, method, ...args) {
         const result = await this.library[method](...args.map(clone));
+        if (method === 'deleteNote') this.noteGone('notes', [args[0]]);
+        if (method === 'deletePhoto') this.noteGone('photos', [args[0]]);
         this.emit('library', { collection });
         if (method === 'deletePhoto') this.emit('phone', { preferences: await this.getPhone() });
         return result;
@@ -2108,8 +2127,8 @@ export class TTSBackend {
             postMoment: ({ text, photoId } = {}) => this.momentsMutate(async () => (await this.moments.add([{ author: 'me', source: 'me', text, photoId, space: this.cardKey() }]))[0]),
             likeMoment: (id, on = true) => this.momentsMutate(() => this.moments.like(id, 'me', on)),
             commentMoment: (id, { text, to } = {}) => this.momentsMutate(() => this.moments.comment(id, { from: 'me', text, to })),
-            deleteMoment: id => this.momentsMutate(() => this.moments.remove(id)), deleteMomentComment: (id, commentId) => this.momentsMutate(() => this.moments.removeComment(id, commentId)),
-            clearMoments: () => this.momentsMutate(() => this.clearHere(() => this.moments.list(), id => this.moments.remove(id), () => this.moments.clear())),
+            deleteMoment: id => this.momentsMutate(async () => { const done = await this.moments.remove(id); this.noteGone('moments', [id]); return done; }), deleteMomentComment: (id, commentId) => this.momentsMutate(async () => { const post = await this.moments.removeComment(id, commentId); this.noteGone('moments', [`${id}/${commentId}`]); return post; }),
+            clearMoments: () => this.momentsMutate(() => this.dropping('moments', () => this.moments.list(), () => this.clearHere(() => this.moments.list(), id => this.moments.remove(id), () => this.moments.clear()))),
             listForum: async () => { const here = this.here(); return (await this.apps.list('forum')).filter(p => inSpace(p, here)); }, getForumPost: id => this.apps.get(id),
             forumHot: async () => (await this.apps.get(this.hotId()))?.topics || [],
             postForum: async ({ title = '', text = '' } = {}) => (await this.addForumPosts([{ author: 'me', title, text }], { source: 'me' }))[0],
@@ -2133,7 +2152,7 @@ export class TTSBackend {
             listThreads: () => this.threads(), getThread: id => this.chats.get(id), chatUnread: async () => (await this.threads()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0),
             createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), space: this.cardKey() })),
             updateThread: (id, patch) => this.chatMutate(id, () => this.chats.update(id, clone(patch))),
-            deleteThread: id => this.chatMutate(id, async () => { const done = await this.chats.remove(id); await this.memoryForget(id).catch(() => {}); return done; }),
+            deleteThread: id => this.chatMutate(id, async () => { const done = await this.chats.remove(id); this.noteGone('chats', [id]); await this.memoryForget(id).catch(() => {}); return done; }),
             // 记忆: what a chat remembers; a summary can be corrected or deleted (what it covered is used again).
             memoryBook: threadId => this.memoryBook(threadId),
             memoryEdit: (threadId, nodeId, text) => { const value = String(text ?? '').trim(); if (value.length < 2) throw Error('写点内容再保存'); return this.memoryChange(threadId, book => { const node = book.nodes.find(n => n.id === nodeId); if (!node) throw Error('这条记忆已经不在了'); node.text = value; node.edited = true; return book; }); },
@@ -2144,7 +2163,7 @@ export class TTSBackend {
             embedTest: async draft => { const [v] = await this.embed(['测试一下向量模型'], clone(draft || {})); return v.length; },
             appendChat: (id, messages, options) => { this.assertOpen(); return this.appendChat(id, clone(messages), clone(options || {})); },
             unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId),
-            deleteChatMessages: (id, ids) => this.chatMutate(id, () => this.chats.removeMessages(id, clone(ids))),
+            deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); return thread; }),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
             markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),
             speak: line => this.speak(clone(line)), voiceFormat: () => this.voiceFormat(),

@@ -12,6 +12,8 @@
 // A sync reads the tavern's copy first. A part changed only there is taken as it is (so deletions carry over); a part
 // changed on both sides is merged item by item (the newer item wins, messages and comments are joined); then what
 // changed here is written back. Each device remembers the hashes of the last copy it saw.
+// What was deleted (a chat, a message, a post, a comment, a note, a photo) is remembered for a while, here and in the
+// manifest, so a merge does not bring it back from a copy that still has it.
 import {sha256Hex} from './hash.js';
 
 export const SYNC_FORMAT = 1;
@@ -32,10 +34,36 @@ export function canonical(part, items) {
 }
 export async function hashText(text) { return sha256Hex(text); }
 
+const GONE_DAYS = 90, GONE_MAX = 3000;
+/**
+ * Deletions: {part: {key: at}}. The key is the item's id, or `itemId/childId` for a chat message or a post comment.
+ * Joins several lists, keeps the last GONE_DAYS days and at most GONE_MAX keys a part (the newest).
+ */
+export function joinGone(lists, now = Date.now()) {
+  const out = {}, since = now - GONE_DAYS * 864e5;
+  for (const list of lists) for (const [part, keys] of Object.entries(list && typeof list === 'object' ? list : {})) {
+    if (!(part in SYNC_PARTS) || !keys || typeof keys !== 'object') continue;
+    for (const [key, at] of Object.entries(keys)) if (Number.isFinite(at) && at > since) (out[part] ||= {})[key] = Math.max(out[part][key] || 0, at);
+  }
+  for (const part of Object.keys(out)) {
+    const keys = Object.entries(out[part]);
+    if (keys.length > GONE_MAX) out[part] = Object.fromEntries(keys.sort((a, b) => b[1] - a[1]).slice(0, GONE_MAX));
+  }
+  return out;
+}
+/** A part's items without what was deleted. */
+export function prune(part, items, gone = {}) {
+  const has = key => Object.hasOwn(gone, key);
+  return items.filter(x => !has(String(x.id))).map(x =>
+    part === 'chats' && Array.isArray(x.messages) && x.messages.some(m => has(`${x.id}/${m.id}`)) ? {...x, messages: x.messages.filter(m => !has(`${x.id}/${m.id}`))}
+    : part === 'moments' && Array.isArray(x.comments) && x.comments.some(c => has(`${x.id}/${c.id}`)) ? {...x, comments: x.comments.filter(c => !has(`${x.id}/${c.id}`))}
+    : x);
+}
 const newer = (a, b, time) => (time(b) || 0) > (time(a) || 0) ? b : a;
 const union = (a = [], b = [], key = x => x.id) => { const map = new Map(); for (const x of [...a, ...b]) map.set(key(x), x); return [...map.values()]; };
-/** Both sides changed a part: joins them item by item. */
-export function mergePart(part, local, remote) {
+/** Both sides changed a part: joins them item by item; what either side deleted stays deleted. */
+export function mergePart(part, local, remote, gone = {}) {
+  local = prune(part, local, gone); remote = prune(part, remote, gone);
   const mine = new Map(local.map(x => [x.id, x])), out = [];
   for (const theirs of remote) {
     const here = mine.get(theirs.id);
@@ -59,6 +87,7 @@ export function mergePart(part, local, remote) {
  */
 export async function runSync({stores, files, memory = {}, device = '', deviceName = '', now = () => Date.now(), parts = Object.keys(SYNC_PARTS)}) {
   const hashes = {...(memory.hashes || {})}, pulled = [], pushed = [], merged = [];
+  let gone = joinGone([memory.gone], now());
   let manifest = null;
   const raw = await files.read(MANIFEST);
   if (raw) {
@@ -67,6 +96,8 @@ export async function runSync({stores, files, memory = {}, device = '', deviceNa
     if (manifest.format > SYNC_FORMAT) throw Error('酒馆里的数据来自更新版本的插件，请先在这台设备上更新插件');
   }
   const remoteParts = manifest?.parts || {}, next = {};
+  gone = joinGone([gone, manifest?.gone], now());
+  const told = Object.entries(gone).some(([part, keys]) => Object.keys(keys).some(key => !manifest?.gone?.[part]?.[key]));
   for (const part of parts) {
     let items = await stores.read(part);
     let text = JSON.stringify(canonical(part, items)), hash = await hashText(text);
@@ -76,7 +107,7 @@ export async function runSync({stores, files, memory = {}, device = '', deviceNa
       if (body === null) throw Error(`酒馆里少了 ${partFile(part)}，这次先不同步`);
       const theirs = JSON.parse(body);
       const changedHere = base !== undefined ? hash !== base : items.length > 0;
-      let result = changedHere ? mergePart(part, items, theirs) : theirs;
+      let result = changedHere ? mergePart(part, items, theirs, gone[part]) : prune(part, theirs, gone[part]);
       if (part === 'photos') {
         const have = new Map(items.map(r => [r.id, r]));
         result = await Promise.all(result.map(async row => have.get(row.id) || {...row, blob: await files.read(photoFile(row), {blob: true})}));
@@ -102,12 +133,12 @@ export async function runSync({stores, files, memory = {}, device = '', deviceNa
     hashes[part] = hash;
   }
   let remote = manifest ? {savedAt: manifest.savedAt, deviceName: manifest.deviceName || '', device: manifest.device || ''} : null;
-  if (pushed.length || !manifest) {
+  if (pushed.length || !manifest || told) {
     remote = {savedAt: now(), deviceName, device};
-    await files.write(MANIFEST, JSON.stringify({app: 'ST-iPhonie', kind: 'sync', format: SYNC_FORMAT, ...remote, parts: {...remoteParts, ...next}}));
+    await files.write(MANIFEST, JSON.stringify({app: 'ST-iPhonie', kind: 'sync', format: SYNC_FORMAT, ...remote, parts: {...remoteParts, ...next}, gone}));
   }
   // The tavern's copy is now what this device holds.
-  return {memory: {hashes, savedAt: remote.savedAt}, pulled, pushed, merged, savedAt: remote.savedAt, remote};
+  return {memory: {hashes, savedAt: remote.savedAt, gone}, pulled, pushed, merged, savedAt: remote.savedAt, remote};
 }
 
 /**

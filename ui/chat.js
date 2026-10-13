@@ -371,7 +371,7 @@ export function chatApp(ctx) {
     edges = selecting?.size ? pickEdges() : {};
     const look = profile();
     const bg = look.backgroundPhoto ? 'photo' : look.background, scene = chatScene(bg);
-    v.draw(`<div class="chat-thread${selecting ? ' selecting' : ''}" data-bubble="${esc(look.bubble)}" data-bg="${esc(bg)}"${scene ? ` data-scene data-tone="${sceneDark(bg) ? 'dark' : 'light'}"` : ''}>
+    drawThread(`<div class="chat-thread${selecting ? ' selecting' : ''}" data-thread="${esc(threadId)}" data-bubble="${esc(look.bubble)}" data-bg="${esc(bg)}"${scene ? ` data-scene data-tone="${sceneDark(bg) ? 'dark' : 'light'}"` : ''}>
       <div class="th-head" data-engine="${group ? 'none' : engine(thread.members[0])}">${threadAvatar(thread, 38)}<div class="th-title"><strong>${esc(thread.name)}</strong><small>${esc(sub)}</small></div>
         ${btn('bring', selecting ? '取消' : icon('book') + '<span class="bring-label">带进剧情</span>', 'chip-button', selecting ? '' : 'aria-label="带进剧情" title="带进剧情"')}${!group && api.callDial ? btn('call', icon('phone'), 'round-button call-go', 'aria-label="语音通话"') : ''}${btn('thread-menu', icon('more'), 'round-button', 'aria-label="更多"')}</div>
       <div class="msgs-wrap">${scene}<div class="msgs" role="log" aria-live="polite" data-keep-scroll="msgs-${esc(threadId)}">${list.length ? list.map((m, i) => messageHTML(m, i, list)).join('') : `<p class="chat-empty">${live ? '发几条消息都行，发完点右下角的气泡按钮让对方回复；输入框空着时发送键就会变成它。也可以直接点它，让对方先开口。' : '在酒馆里打开小手机时，联系人才会回复。'}</p>`}
@@ -391,6 +391,38 @@ export function chatApp(ctx) {
     paintVoices();
     paintPhotos();
     if (look.backgroundPhoto) photoURL(look.backgroundPhoto).then(url => { const box = v.root.querySelector('.msgs'); if (box && url) box.style.backgroundImage = `url("${url}")`; });
+  }
+  // A thread is drawn again often while the user may be typing (each message of a reply shows on its own, the typing
+  // dots come and go). The message box itself stays: a new one would put the caret at the start and break off a word
+  // the input method is still putting together. Everything around it is drawn anew.
+  function drawThread(html) {
+    const old = v.root.querySelector('.chat-thread'), box = old?.querySelector('[data-field=draft]');
+    const template = ctx.doc.createElement('template');
+    template.innerHTML = html;
+    const fresh = template.content.querySelector('.chat-thread'), freshBox = fresh?.querySelector('[data-field=draft]');
+    if (!old || !box || !freshBox || old.dataset.thread !== fresh.dataset.thread || old.parentElement !== v.root) return v.draw(html);
+    const y = v.root.scrollTop, inner = new Map([...old.querySelectorAll('[data-keep-scroll]')].map(el => [el.dataset.keepScroll, el.scrollTop]));
+    for (const name of old.getAttributeNames()) if (!fresh.hasAttribute(name)) old.removeAttribute(name);
+    for (const name of fresh.getAttributeNames()) old.setAttribute(name, fresh.getAttribute(name));
+    // From the box outwards: each level gets the new children around the one that holds the box.
+    const keep = [box.parentElement, box.parentElement?.parentElement], put = [freshBox.parentElement, freshBox.parentElement?.parentElement];
+    if (keep[1]?.parentElement !== old || put[1]?.parentElement !== fresh) return v.draw(html);
+    around(old, keep[1], fresh, put[1]);
+    around(keep[1], keep[0], put[1], put[0]);
+    around(keep[0], box, put[0], freshBox);
+    const text = drafts.get(threadId) || '';
+    if (box.value !== text) box.value = text;
+    for (const el of old.querySelectorAll('[data-keep-scroll]')) if (inner.has(el.dataset.keepScroll)) el.scrollTop = inner.get(el.dataset.keepScroll);
+    v.root.scrollTop = y;
+  }
+  /** `parent` takes `from`'s children, except that `keep` stays where it is, in the place of `instead`. */
+  function around(parent, keep, from, instead) {
+    for (const node of [...parent.childNodes]) if (node !== keep) node.remove();
+    let after = false;
+    for (const node of [...from.childNodes]) {
+      if (node === instead) { after = true; continue; }
+      if (after) parent.append(node); else keep.before(node);
+    }
   }
   // Opens or closes the + panel in place, so the message box keeps its text and focus.
   function syncPanel() {
@@ -1009,7 +1041,9 @@ export function chatApp(ctx) {
   }
 
   v.on('input', '[data-field=draft]', el => { drafts.set(threadId, el.value); syncSend(); });
-  v.on('input', '[data-field=chat-search]', el => { search = el.value; searching = true; render(); });
+  // While the input method is still putting a word together, the list waits for the word.
+  v.on('input', '[data-field=chat-search]', (el, e) => { search = el.value; searching = true; if (!e.isComposing) render(); });
+  v.on('compositionend', '[data-field=chat-search]', el => { search = el.value; searching = true; render(); });
   v.on('focusout', '[data-field=chat-search]', () => { searching = false; });
   v.on('change', '[data-field^=me-]', el => {
     const key = el.dataset.field.slice(3);
