@@ -1,4 +1,5 @@
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText} from './common.js';
+import {songOf} from '../core/music.js';
 import {icon} from './icons.js';
 import {fly} from './carry.js';
 import {openImageViewer} from '../image-viewer.js';
@@ -331,7 +332,7 @@ export function chatApp(ctx) {
   function toolsHTML() {
     const group = thread.type === 'group';
     const tools = [['photo', 'image', '照片'], ['emoji', 'smile', '表情'], ['redpacket', 'packet', '红包'], ...(group ? [] : [['transfer', 'swap', '转账'], ['gift', 'gift', '礼物']]),
-      ['location', 'pin', '位置'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子']];
+      ['location', 'pin', '位置'], ['song', 'music', '分享歌'], ['pat', 'hand', '拍一拍'], ['dice', 'dice', '骰子']];
     const tabs = `<div class="emoji-tabs" role="tablist">${[['emoji', '表情'], ['stickers', '表情包']].map(([k, t]) => `<button type="button" role="tab" data-action="panel-${k}" aria-selected="${panel === k}">${t}</button>`).join('')}</div>`;
     if (panel === 'stickers') {
       const list = api.getState().chat.stickers || [];
@@ -344,8 +345,13 @@ export function chatApp(ctx) {
       <div class="emoji-grid">${EMOJI.map(e => `<button data-action="emoji-pick" data-emoji="${e}" aria-label="${e}">${e}</button>`).join('')}</div>
       <div class="kao-row">${KAOMOJI.map(e => `<button data-action="emoji-pick" data-emoji="${esc(e)}">${esc(e)}</button>`).join('')}</div>
       <div class="panel-foot">${btn('panel-tools', icon('back') + '更多功能', 'text-button')}${btn('emoji-del', icon('backspace'), 'round-button', 'aria-label="删除一个字"')}</div></div>`;
-    return `<div class="chat-panel" role="group" aria-label="更多功能"><div class="tool-grid">${tools.map(([action, glyph, label]) =>
-      `<button class="tool" data-action="tool-${action}"><span class="tool-ico" data-tool="${action}">${icon(glyph)}</span><span>${label}</span></button>`).join('')}</div></div>`;
+    // Pages of 8 (two rows), swiped sideways like WeChat's; the dots show the page and switch it on a tap.
+    const pages = [];
+    for (let i = 0; i < tools.length; i += 8) pages.push(tools.slice(i, i + 8));
+    const page = list => `<div class="tool-grid">${list.map(([action, glyph, label]) =>
+      `<button class="tool" data-action="tool-${action}"><span class="tool-ico" data-tool="${action}">${icon(glyph)}</span><span>${label}</span></button>`).join('')}</div>`;
+    return `<div class="chat-panel" role="group" aria-label="更多功能"><div class="tool-pages">${pages.map(page).join('')}</div>${pages.length > 1
+      ? `<div class="tool-dots">${pages.map((_, i) => `<button type="button" data-action="tool-page" data-page="${i}" aria-label="第 ${i + 1} 页" aria-current="${i === 0}"></button>`).join('')}</div>` : ''}</div>`;
   }
   function composerHTML() {
     const group = thread.type === 'group';
@@ -614,6 +620,25 @@ export function chatApp(ctx) {
         const detail = value(d, 'detail');
         d.close();
         await post([{from: 'me', kind: 'location', text, detail}]);
+      }
+    });
+  }
+  /** 分享歌: what is playing, a song of the 歌单, or any song typed in; it shows as a card they can play too. */
+  async function shareSong() {
+    const playing = (() => { try { const t = api.musicStatus?.()?.track; return t?.title && t.from !== 'bgm' ? t : null; } catch { return null; } })();
+    const mine = (await api.listSongs?.().catch(() => []) || []).filter(x => x.title).slice(0, 60);
+    const name = s => s.artist ? `${s.title} - ${s.artist}` : s.title;
+    const row = (s, note = '') => `<button type="button" class="list-row" data-action="song-pick" data-title="${esc(s.title)}" data-artist="${esc(s.artist || '')}">${icon('music')}<span><strong>${esc(s.title)}</strong><small>${esc([s.artist, note].filter(Boolean).join(' · '))}</small></span></button>`;
+    const d = sheet('分享歌', `${field('歌', input('song', playing ? name(playing) : '', 'text', 'maxlength="200" placeholder="歌名 - 歌手，比如：晴天 - 周杰伦"'))}${field('想说的话', input('note', '', 'text', 'maxlength="200" placeholder="可以不写"'))}
+      <div class="actions">${btn('song-send', icon('send') + '发送', 'primary')}</div>
+      ${playing || mine.length ? `<div class="pick-list">${playing ? row(playing, '正在听') : ''}${mine.map(s => row(s)).join('')}</div>` : '<p class="hint">「音乐」里的歌单和正在听的歌会列在这里；也可以直接写歌名。</p>'}`, {
+      'song-pick': b => { const box = d.body.querySelector('[data-field=song]'); box.value = name({title: b.dataset.title, artist: b.dataset.artist}); box.focus(); },
+      'song-send': async () => {
+        const song = songOf(value(d, 'song'));
+        if (!song.title) throw Error('写一下歌名');
+        const text = value(d, 'note');
+        d.close();
+        await post([{from: 'me', kind: 'song', song, ...(text ? {text} : {})}]);
       }
     });
   }
@@ -1042,6 +1067,13 @@ export function chatApp(ctx) {
   }
 
   v.on('input', '[data-field=draft]', el => { drafts.set(threadId, el.value); syncSend(); });
+  // The + panel's page dots follow the swipe (scroll does not bubble: heard on the way down).
+  v.root.addEventListener('scroll', e => {
+    const box = e.target;
+    if (!box.classList?.contains('tool-pages')) return;
+    const at = Math.round(box.scrollLeft / Math.max(1, box.clientWidth));
+    for (const dot of box.parentElement.querySelectorAll('[data-action=tool-page]')) dot.setAttribute('aria-current', String(Number(dot.dataset.page) === at));
+  }, true);
   // While the input method is still putting a word together, the list waits for the word.
   v.on('input', '[data-field=chat-search]', (el, e) => { search = el.value; searching = true; if (!e.isComposing) render(); });
   v.on('compositionend', '[data-field=chat-search]', el => { search = el.value; searching = true; render(); });
@@ -1251,6 +1283,8 @@ export function chatApp(ctx) {
       case 'tool-transfer': panel = null; syncPanel(); sendTransfer(); break;
       case 'tool-gift': panel = null; syncPanel(); sendGift(); break;
       case 'tool-location': panel = null; syncPanel(); sendLocation(); break;
+      case 'tool-song': panel = null; syncPanel(); await shareSong(); break;
+      case 'tool-page': { const box = el.closest('.chat-panel')?.querySelector('.tool-pages'); box?.scrollTo({left: Number(el.dataset.page) * box.clientWidth, behavior: 'smooth'}); break; }
       case 'tool-pat': panel = null; syncPanel(); await choosePat(); break;
       case 'tool-dice': panel = null; syncPanel(); await rollDice(); break;
       case 'quote-off': quote = null; render(); break;

@@ -231,3 +231,16 @@ export function assistantWantsImage(messages) {
   }
   return false;
 }
+
+// ---------- 放歌 ----------
+/** The user asked for music to be played now (not only talked about songs). */
+export const ASSISTANT_WANTS_MUSIC = /播放|放(?:一?首|一下|点|些|个)?(?:歌|音乐|曲子)|(?:来|放)一?首|来点(?:歌|音乐)|想听|听听|点(?:一?首)?歌|换一?首|放.{0,20}的歌|放[「『《“"]/;
+/** Songs the reply may put on: 「[放歌] 歌名 - 歌手」 lines become cards the user taps (the first one plays at once when asked). */
+export function assistantMusicRule({ready = false, library = [], listening = null, asked = false} = {}) {
+  const lines = ['【放歌】你可以给用户放歌、推荐歌：单独一行写「[放歌] 歌名 - 歌手」，想说一句话就写在后面「｜」之后，比如「[放歌] 晴天 - 周杰伦｜下雨天听这个」。手机会把这一行变成歌曲卡片，用户点一下就播放；用户让你放歌时，第一首会直接开始放。推荐几首就写几行。',
+    '歌名和歌手写准确的原名，不要编不存在的歌，不要用别的格式；不要说自己不能放歌。用户没提音乐时不用主动放歌。'];
+  if (!ready) lines.push('用户还没有添加音源，歌单也是空的：卡片可能放不出来，放不出来时请用户去「音乐 → 设置 → 音源」添加音源，或者把歌加进歌单。');
+  if (listening?.title) lines.push(`用户正在听：${listening.title}${listening.artist ? ' - ' + listening.artist : ''}`);
+  if (asked && library.length) lines.push('用户歌单里有：' + library.slice(0, 40).map(x => x.artist ? `${x.title} - ${x.artist}` : x.title).join('、'));
+  return lines.join('\n');
+}

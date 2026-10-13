@@ -2,7 +2,8 @@ import {createView, esc, btn, heading, field, select, toggle, copyText} from './
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
-import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, assistantAttachments, assistantThoughts} from '../core/assistant.js';
+import {ASSISTANT_IMAGE_SLOT, ASSISTANT_LIMITS, ASSISTANT_WANTS_MUSIC, assistantAttachments, assistantThoughts} from '../core/assistant.js';
+import {songOf} from '../core/music.js';
 import {icon, glyph} from './icons.js';
 import {assistantMarkdown, assistantHTMLMarkdown} from './assistant-markdown.js';
 import {parsePictures} from '../core/draw.js';
@@ -62,7 +63,22 @@ export function assistantParts(text, {beautified = false} = {}) {
     }
     if (from < part.text.length) pictured.push({kind: 'text', text: part.text.slice(from)});
   }
-  expanded.splice(0, expanded.length, ...pictured.filter(part => part.kind !== 'text' || part.text.trim() || pictured.length === 1));
+  // 「[放歌] 歌名 - 歌手｜一句话」 lines become song cards.
+  const sung = [], line = /^[ \t]*(?:[-*>][ \t]*)?\[(?:放歌|点歌|分享歌曲|歌曲)\][ \t]*([^\n]+?)[ \t]*$/gm;
+  for (const part of pictured) {
+    if (part.kind !== 'text' || part.story) { sung.push(part); continue; }
+    let from = 0, found;
+    line.lastIndex = 0;
+    while ((found = line.exec(part.text))) {
+      const [what, ...note] = found[1].split(/[|｜]/), song = songOf(what);
+      if (!song.title) continue;
+      if (found.index > from) sung.push({kind: 'text', text: part.text.slice(from, found.index)});
+      sung.push({kind: 'song', text: found[0].trim(), song, note: note.join('｜').trim()});
+      from = line.lastIndex;
+    }
+    if (from < part.text.length) sung.push({kind: 'text', text: part.text.slice(from)});
+  }
+  expanded.splice(0, expanded.length, ...sung.filter(part => part.kind !== 'text' || part.text.trim() || sung.length === 1));
   for (const part of expanded) if (part.kind === 'text' && !part.story && /^\s*<(?:!doctype\s+html|html|head|body|div|section|article|button|script|style|form|table|canvas|svg|p|span|h[1-6]|ul|ol|details|a|img)\b/i.test(part.text)) part.kind = 'html';
 
   if (beautified) for (const part of expanded) {
@@ -77,7 +93,7 @@ export function assistantVoiceLines(api, text) {
 }
 
 function partVoiceLines(api, part) {
-  if (part.kind === 'picture' || part.kind === 'ui') return [];
+  if (part.kind === 'picture' || part.kind === 'ui' || part.kind === 'song') return [];
   if (part.kind === 'code' && !/^(?:tts|text|plaintext)?$/i.test(part.language)) return [];
   // Mask non-dialogue HTML without changing offsets. Generated HTML always stays in the iframe.
   const sample = part.kind === 'html' ? part.text.replace(/<!--[^]*?(?:-->|$)|<(script|style)\b[^>]*>[^]*?(?:<\/\1\s*>|$)/gi, value => ' '.repeat(value.length)) : part.text;
@@ -137,6 +153,12 @@ function looksVisual(raw) {
 }
 const str = (value, max = 200) => typeof value === 'string' ? value.trim().slice(0, max) : Number.isFinite(value) ? String(value) : '';
 const list = (value, max) => Array.isArray(value) ? value.slice(0, max) : [];
+/** A song the reply puts on: a card like the chat's; a tap plays it (and the cards after it). */
+export function assistantSongHTML(part, attrs = '') {
+  const {title, artist} = part.song;
+  return `<button type="button" class="song-card aui-song" data-action="as-song" ${attrs} aria-label="播放 ${esc(title)}"><span class="sg-disc" aria-hidden="true">${icon('music')}</span><span class="sg-text"><strong>${esc(title)}</strong>${artist ? `<small>${esc(artist)}</small>` : ''}${part.note ? `<em>${esc(part.note)}</em>` : ''}</span><span class="sg-play" aria-hidden="true">${icon('play', true)}</span></button>`;
+}
+
 const SIZE_NAMES = {竖: '竖图', 横: '横图', 方: '方图', portrait: '竖图', landscape: '横图', square: '方图'};
 /** An 出图块 as a card: what it draws, 复制 and 画这张. */
 export function assistantPictureHTML(text, attrs = '', {live = false} = {}) {
@@ -321,6 +343,7 @@ export function assistantApp(ctx) {
     return `<article class="assistant-message" ${attrs}><span class="assistant-who">${icon('star')}助手${replyInfo(m)}</span><div class="assistant-bubble">${reasoning ? `<details class="assistant-reasoning" data-group="reasoning-${esc(m.id)}"><summary${Number.isFinite(m.meta?.reasoningMs) ? ' title="从请求开始到推理结束的流式观测时间"' : ''}>${Number.isFinite(m.meta?.reasoningMs) ? `思考了 ${(m.meta.reasoningMs / 1000).toFixed(1)} 秒` : '思考内容'}</summary><div class="assistant-prose">${prose(reasoning)}</div></details>` : ''}${parts.map((p, i) => {
       if (p.kind === 'image') return imageButton(m, attrs);
       if (p.kind === 'picture') return assistantPictureHTML(p.text, `${attrs} data-part="${i}"`);
+      if (p.kind === 'song') return assistantSongHTML(p, `${attrs} data-part="${i}"`);
       if (p.kind === 'ui') return assistantVisualHTML(p.text, `${attrs} data-part="${i}"`, `${m.id}-${i}`);
       const spoken = partVoiceLines(api, p), rendered = inlineDialogue(p, spoken, attrs, offset); offset += spoken.length;
       if (p.kind === 'text') return `<div class="assistant-prose">${rendered}</div>`;
@@ -448,7 +471,7 @@ export function assistantApp(ctx) {
     // Incomplete HTML/regex scripts are not executed on every token. Final output is beautified once complete.
     const streaming = show && phase === 'responding' ? streamingParts(part.text) : null;
     const skeleton = label => `<div class="aui aui-skeleton" role="status"><i></i><span>${label}</span></div>`;
-    const body = streaming ? streaming.parts.map(p => p.kind === 'html' ? skeleton('正在做界面…') : p.kind === 'ui' ? assistantVisualHTML(p.text) : p.kind === 'picture' ? assistantPictureHTML(p.text, '', {live: true}) : p.kind === 'code' ? `<pre class="assistant-code"><code>${esc(p.text)}</code></pre>` : `<div class="assistant-prose">${prose(p.text)}</div>`).join('')
+    const body = streaming ? streaming.parts.map(p => p.kind === 'html' ? skeleton('正在做界面…') : p.kind === 'ui' ? assistantVisualHTML(p.text) : p.kind === 'picture' ? assistantPictureHTML(p.text, '', {live: true}) : p.kind === 'song' ? assistantSongHTML(p) : p.kind === 'code' ? `<pre class="assistant-code"><code>${esc(p.text)}</code></pre>` : `<div class="assistant-prose">${prose(p.text)}</div>`).join('')
       + (streaming.pending === 'ui' || streaming.pending === 'widget' ? skeleton(streaming.pending === 'widget' ? '正在做界面…' : '正在生成界面…') : streaming.pending === 'picture' ? skeleton('正在写出图块…') : '') : '';
     return `<article class="assistant-live"><span class="assistant-who">${icon('star')}助手${progress.rerollId ? ' · 重新生成' : ''}${replyInfo({meta:{...meta,elapsedMs:elapsed}})}</span><div class="assistant-bubble">${reason || phase === 'thinking' ? `<details class="assistant-reasoning" data-group="live-${esc(progress.id)}"><summary>${label}</summary>${show && reason ? `<div class="assistant-prose">${prose(reason)}</div>` : ''}</details>` : ''}${phase === 'waiting' ? `<span role="status">${label}</span>` : phase === 'responding' ? `<span class="assistant-stream-status" role="status">正在回复 · ${(elapsed / 1000).toFixed(1)} 秒</span>` : ''}${body}</div></article>`;
   }
@@ -564,7 +587,7 @@ export function assistantApp(ctx) {
         if (job.cancelled) throw Object.assign(Error('已取消发送'), {name: 'AbortError'});
         await api.appendAssistantMessage(id, {role: 'user', text, attachments: files});
         job.saved = true;
-      } else await replyWithCost(options => { if (job.cancelled) throw Object.assign(Error('已取消'), {name: 'AbortError'}); return api.assistantReply(id, undefined, options); });
+      } else { await replyWithCost(options => { if (job.cancelled) throw Object.assign(Error('已取消'), {name: 'AbortError'}); return api.assistantReply(id, undefined, options); }); await playAsked(id).catch(() => {}); }
     } catch (error) {
       if (error?.name !== 'AbortError') errors.set(id, error.message || '回复没有完成，请重试。');
       // If generation failed before saving the user message, put the unsent text back.
@@ -573,6 +596,18 @@ export function assistantApp(ctx) {
         if (files.length) fileDrafts.set(id, [...files, ...attachments(id)]);
       }
     } finally { for (const key of [originalId, id]) if (pending.get(key) === job) pending.delete(key); if (!v.disposed) await render(); }
+  }
+  /** Plays the reply's songs from one of them (through the phone's 音乐, which finds each by name). */
+  function playSongs(message, from = 0) {
+    const songs = partsFor(message).filter(p => p.kind === 'song');
+    if (!songs.length || !api.musicPlayList) return;
+    ctx.notify(`正在找「${songs[from].song.title}」……`);
+    api.musicPlayList(songs.map(p => ({title: p.song.title, artist: p.song.artist, from: 'assistant'})), from).catch(error => ctx.notify(error.message, {error: true}));
+  }
+  /** A fresh reply to「放首歌」: its first song starts at once (a reroll or an old reply waits for a tap). */
+  async function playAsked(id) {
+    const row = await api.assistantThread(id), reply = row?.messages.at(-1), asked = row?.messages.findLast(m => m.role === 'user');
+    if (reply?.role === 'assistant' && asked && ASSISTANT_WANTS_MUSIC.test(asked.text || '')) playSongs(reply, 0);
   }
   /** A tap on a 智能界面 button: sends that text and asks for the reply at once. */
   async function sendNow(text) {
@@ -736,6 +771,11 @@ export function assistantApp(ctx) {
         if (action === 'pic-draw') return drawBlock(part.text);
         ctx.notify(await copyText(win, part.text) ? '出图块已复制' : '没能复制，请长按手动选取');
         return;
+      }
+      case 'as-song': {
+        const parts = message ? partsFor(message) : [], at = Number(el.dataset.part);
+        if (parts[at]?.kind !== 'song') return;
+        return playSongs(message, parts.slice(0, at).filter(p => p.kind === 'song').length);
       }
       case 'ui-send': return sendNow(el.dataset.text);
       case 'ui-form': {
