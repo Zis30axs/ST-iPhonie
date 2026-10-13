@@ -299,6 +299,19 @@ const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => 
  * members: [{name, persona, card, voice, language}] (card: the tavern character card text, when there is one)
  * story: [{name, text}] recent story messages, oldest first.
  */
+/**
+ * What the people on the phone know of the story: what they were there for, were told, or said on the phone — not
+ * the rest the reader saw. names: who speaks (a chat's members, the one on the call). group: a group chat.
+ */
+export function knowsRule(names, user, {group = false} = {}) {
+  const who = names.length === 1 ? names[0] : '每个人';
+  return [`【${names.length === 1 ? names[0] : '各人'}知道什么】`,
+    `- ${who}只知道自己在场亲眼看到、亲耳听到的事，${user}或别人告诉过${names.length === 1 ? ' TA ' : '自己'}的事，还有在手机上和${user}聊过的事。`,
+    `- 剧情里${names.length === 1 ? names[0] : '一个人'}不在场时发生的事（${user}和别人在一起做了什么、在哪、说了什么），${names.length === 1 ? names[0] : '这个人'}不知道：不能提起这些细节，也不能「碰巧」猜中；想知道可以问${user}。`,
+    `- ${user}心里想的、没说出口的话，旁白交代的秘密和真相，就算在场也不知道。`,
+    `- 自己在场经历的事，自然记得，可以聊起来。剧情里看不出${names.length === 1 ? names[0] : '一个人'}在不在场的，就当不知道。`,
+    group ? `- 群里的消息大家都看得到：各人知道的不一样，私事一般不在群里说。` : ''].filter(Boolean).join('\n');
+}
 export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
@@ -315,11 +328,12 @@ export function buildChatRequest({preset, thread, members, story = [], user = '�
   const system = [
     rules.join('\n\n'),
     `【聊天对象】\n${people}`,
-    lore.trim() ? `【世界书】（这些人物和这个世界的设定：人设、口音、方言、说话方式都按这里来）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，只作背景参考）\n${earlier.trim()}` : '',
-    story.length ? `【最近的剧情】（只作背景参考）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
+    lore.trim() ? `【世界书】（这些人物和这个世界的设定，写给读者看的：人设、口音、方言、说话方式按这里来；里面的秘密不是每个人都知道）\n${lore.trim()}` : '',
+    userPersona.trim() ? `【${user}】（${user}自己的设定，里面可能有别人不知道的事）\n${userPersona.trim()}` : '',
+    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，旁观的记录：${group ? '群里每个人' : partner}只经历了其中一部分）\n${earlier.trim()}` : '',
+    story.length ? `【最近的剧情】（旁观的记录：读者看得到全部，${group ? '群里每个人' : partner}只经历了其中一部分）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
     memory.trim(),
+    story.length || earlier.trim() ? knowsRule(group ? members.map(m => m.name) : [partner], user, {group}) : '',
     ['【输出格式】',
       `只输出新消息，每条消息单独一行，写成「名字：消息内容」。名字只能是：${names}。`,
       `不要写${user}的消息，不要写时间、编号、引号或任何解释。`,

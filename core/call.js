@@ -4,7 +4,7 @@
 // tags as story dialogue), so it can be read aloud with the contact's own voice. Rules come from the chat preset, the
 // ones used in 电话. The finished call is kept in the private chat as one message of kind 'call'.
 import {parseDialogue} from './protocol.js';
-import {messageLine} from './chat.js';
+import {messageLine, knowsRule} from './chat.js';
 import {languageName} from './languages.js';
 
 // perTurn: lines kept from one answer (each is read aloud one after another); a talkative contact may say a lot.
@@ -60,11 +60,12 @@ export function buildCallRequest({preset, mode, contact, lines = [], history = [
   const system = [
     rules.join('\n\n'),
     `【通话对象】\n- ${name}：${(contact.persona || contact.card || '').trim() || '（没有资料，按剧情里的表现来）'}`,
-    lore.trim() ? `【世界书】（这些人物和这个世界的设定：人设、口音、方言、说话方式都按这里来）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，只作背景参考）\n${earlier.trim()}` : '',
-    story.length ? `【最近的剧情】（只作背景参考）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
+    lore.trim() ? `【世界书】（这些人物和这个世界的设定，写给读者看的：人设、口音、方言、说话方式按这里来；里面的秘密${name}不一定知道）\n${lore.trim()}` : '',
+    userPersona.trim() ? `【${user}】（${user}自己的设定，里面可能有${name}不知道的事）\n${userPersona.trim()}` : '',
+    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，旁观的记录：${name}只经历了其中一部分）\n${earlier.trim()}` : '',
+    story.length ? `【最近的剧情】（旁观的记录：读者看得到全部，${name}只经历了其中一部分）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
     memory.trim(),
+    story.length || earlier.trim() ? knowsRule([name], user) : '',
     history.length ? `【${name}和${user}最近的手机聊天】\n${history.map(m => messageLine(m, user)).filter(Boolean).join('\n')}` : '',
     `【现在】\n${situation}`,
     ['【输出格式】',
