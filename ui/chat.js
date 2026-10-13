@@ -46,6 +46,7 @@ export function preview(m) {
     case 'transfer': return '[转账] ¥' + m.amount;
     case 'gift': return '[礼物] ' + (m.gift?.name || '');
     case 'location': return '[位置] ' + m.text;
+    case 'song': return '[音乐] ' + (m.song?.title || '');
     case 'dice': return '[骰子]';
     case 'call': return `[${callSummary(m)}]`;
     case 'pat': return patText(m);
@@ -227,6 +228,7 @@ export function chatApp(ctx) {
       <div class="actions">${btn('profile-chat', icon('chat') + '发消息', 'primary')}${api.callDial ? btn('profile-call', icon('phone') + '打电话', 'secondary') : ''}${btn('profile-moments', icon('moments') + 'TA 的动态', 'secondary')}</div>
       <div class="group">${btn('avatar-pick', `${icon('image')}<span><strong>换头像</strong><small>${esc(avatarState(c.name))}</small></span>`, 'list-row', `data-key="${esc(c.name)}"`)}${btn('star', `<span>${star ? '★ 取消特别关心' : '☆ 设为特别关心'}</span>`, 'list-row')}${manual ? `<button class="list-row" data-action="contact-edit" data-id="${esc(manual.id)}">${icon('edit')}<span><strong>编辑资料和人设</strong></span></button>` : ''}</div>
       <div class="actions">${btn('unfriend', '删除好友', 'danger')}</div>`);
+    listeningOf(c.name).then(song => { const box = v.root.querySelector('.qq-card'); if (!song || !box || profileOf !== c.name || mode !== 'profile') return; box.insertAdjacentHTML('beforeend', `<button type="button" class="qq-listening" data-action="play-song" data-title="${esc(song.title)}" data-artist="${esc(song.artist)}">${icon('music')}<span>最近在听：${esc(song.title)}${song.artist ? ' - ' + esc(song.artist) : ''}</span></button>`); }).catch(() => {});
   }
   /** 新的朋友: contacts the user deleted, with what they sent since (好友申请); 添加 brings them and the chat back. */
   async function renderFriends(ticket) {
@@ -236,6 +238,12 @@ export function chatApp(ctx) {
     v.draw(heading('新的朋友', '', 'New Friends')
       + `<p class="hint">删掉的好友在这里。TA 们这段时间发来的消息会变成好友申请；点「添加」就加回来，聊天记录和申请里的话都会回到聊天里。</p>`
       + `<div class="group">${cut.map(t => { const name = t.members[0], asks = t.friend.requests || [], last = asks.at(-1); return `<div class="list-row friend-row">${avatar(name, engine(name), 42)}<span><strong>${esc(name)}</strong><small>${last ? `${asks.length > 1 ? `${asks.length} 条申请 · ` : ''}「${esc(last.text)}」` : '已删除 · 还没有发来申请'}</small></span>${btn('refriend', asks.length ? '通过' : '添加', 'chip-button', `data-id="${esc(t.id)}" aria-label="把 ${esc(name)} 加回好友"`)}</div>`; }).join('')}</div>`);
+  }
+  /** 最近在听: the last song this contact shared in your private chat. */
+  async function listeningOf(name) {
+    const t = (await api.listThreads()).find(x => x.type === 'dm' && x.members[0] === name);
+    if (!t) return null;
+    return (await api.getThread(t.id))?.messages.findLast(m => m.kind === 'song' && m.from === name)?.song || null;
   }
   /** 我: name, status, signature, and 个性装扮. */
   function renderMe() {
@@ -285,6 +293,7 @@ export function chatApp(ctx) {
         const fresh = Date.now() - m.at < 1500;
         return `<button class="dice-msg${fresh ? ' rolling' : ''}" data-action="message" ${mid} data-face="${esc(m.text)}" aria-label="骰子 ${esc(m.text)} 点">${Array.from({length: 9}, (_, i) => `<i${PIPS[m.text]?.includes(i) ? ' class="on"' : ''}></i>`).join('')}</button>`;
       }
+      case 'song': return `<button class="song-card" data-action="song" ${mid} aria-label="播放 ${esc(m.song?.title || '')}"><span class="sg-disc" aria-hidden="true">${icon('music')}</span><span class="sg-text"><strong>${esc(m.song?.title || '')}</strong><small>${esc(m.song?.artist || '')}</small>${m.text ? `<em>${esc(m.text)}</em>` : ''}</span><span class="sg-play" aria-hidden="true">${icon('play', true)}</span></button>`;
       case 'call': return `<button class="call-msg${m.state === 'answered' ? '' : ' missed'}" data-action="call-log" ${mid}>${icon('phone', true)}<span>${esc(callSummary(m))}</span></button>`;
       default: return `<button class="chat-bubble" data-action="message" ${mid}>${esc(m.text)}</button>`;
     }
@@ -1146,6 +1155,8 @@ export function chatApp(ctx) {
       case 'dm-open': await openDm(el.dataset.name); break;
       case 'profile': profileOf = el.dataset.name; mode = 'profile'; render(); break;
       case 'profile-chat': await openDm(profileOf); break;
+      case 'song': { const m = thread?.messages.find(x => x.id === el.dataset.mid); if (m?.song) { ctx.notify(`正在找「${m.song.title}」……`); api.musicPlay?.({...m.song, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); } break; }
+      case 'play-song': api.musicPlay?.({title: el.dataset.title, artist: el.dataset.artist, from: 'share'}).catch(error => ctx.notify(error.message, {error: true})); break;
       case 'unfriend': {
         const name = profileOf;
         if (!await ctx.confirm(`删除好友「${name}」？`, `和 TA 的聊天会从消息列表收起来（记录还在），TA 也不在好友列表里了。之后 TA 给你发的消息会变成好友申请，在「联系人 → 新的朋友」里随时可以加回来。`)) break;

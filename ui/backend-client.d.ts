@@ -97,6 +97,7 @@ export interface Settings {
     calls: CallsSettings;
     assistant: AssistantSettings;
     sounds: SoundSettings;
+    music: MusicSettings;
     text: TextSettings;
     /** 向量模型 for 记忆 (key kept as KeyEngine 'embed'). */
     embed: EmbedSettings;
@@ -285,6 +286,16 @@ export interface ChatMessage { id: string; from: 'me' | string; kind: ChatKind; 
     dir?: 'in' | 'out'; duration?: number; lines?: CallLine[]; voicemail?: Omit<CallLine, 'from'>[]; }
 /** pinned: 置顶. muted: 免打扰 (its unread messages do not count toward the badge). */
 /** 删好友 on a private chat: by 'me' the user deleted the contact (their messages wait as requests); by 'them' the contact deleted the user. */
+/** A music source the user added: search and link addresses ({{query}}, {{id}}) and where the answers keep each field. */
+export interface MusicSource { id: string; name: string; enabled: boolean; search: string; url: string; lyric: string; listPath: string; idPath: string; titlePath: string; artistPath: string; urlPath: string; lyricPath: string; }
+/** 音乐: bgm 'off' | 'tap' | 'auto' (the story picks songs with <bgm>), its rule, the volume, turning down for voice lines, songs shared in chats. */
+export interface MusicSettings { bgm: 'off' | 'tap' | 'auto'; rule: string; volume: number; duck: boolean; share: boolean; sources: MusicSource[]; }
+/** A 歌单 song: a file on this device, or a song of a source (its link is fetched when it plays). */
+export interface MusicSong { id: string; kind: 'song'; at: number; title: string; artist: string; origin: 'file' | 'source'; source?: string; songId?: string; lyric?: string; size?: number; mime?: string; }
+export interface MusicFound { source: string; sourceName: string; id: string; title: string; artist: string; }
+/** What plays now (the tavern page's player). */
+export interface MusicStatus { phase: 'idle' | 'loading' | 'playing' | 'paused' | 'error'; message: string; track: { title: string; artist: string; from: string; origin: string; id: string; source: string; songId: string } | null; position: number; duration: number; volume: number; queue: number; index: number; lyric: string; lyricIndex: number; lyrics: { at: number; text: string }[]; }
+export type MusicTrack = Partial<MusicSong> & { title: string; artist?: string; from?: string };
 export interface ChatFriendState { by: 'me' | 'them'; at: number; requests: { text: string; at: number }[]; }
 export interface ChatThread { id: string; type: 'dm' | 'group'; name: string; members: string[]; unread: number; pinned: boolean; muted: boolean; createdAt: number; updatedAt: number; messages: ChatMessage[]; friend?: ChatFriendState; }
 /** streak: 聊天火花, days in a row both sides wrote. */
@@ -655,6 +666,16 @@ export interface BackendFacade {
     saveCalls(patch: Partial<CallsSettings>): CallsSettings;
     /** 音效 options. */
     saveSounds(patch: Partial<SoundSettings>): SoundSettings;
+    saveMusic(patch: Partial<MusicSettings>): MusicSettings;
+    /** Searches the enabled music sources (or one). */
+    searchMusic(query: string, sourceId?: string): Promise<{ songs: MusicFound[]; errors: { source: string; message: string }[] }>;
+    musicLink(sourceId: string, songId: string): Promise<string>;
+    musicLyric(sourceId: string, songId: string): Promise<string>;
+    listSongs(): Promise<MusicSong[]>;
+    songBlob(id: string): Promise<Blob | null>;
+    addSongs(list: ({ title: string; artist?: string; blob: Blob } | { title: string; artist?: string; source: string; songId: string })[]): Promise<MusicSong[]>;
+    updateSong(id: string, patch: { title?: string; artist?: string; lyric?: string }): Promise<MusicSong>;
+    deleteSongs(ids: string[]): Promise<boolean>;
     listSounds(): Promise<SoundRow[]>;
     soundBlob(id: string): Promise<Blob | null>;
     /** Adds sounds (the names they answer are no longer missing). */
@@ -836,6 +857,16 @@ export interface BackendAPI extends BackendFacade {
     chatTyping(threadId: string): boolean;
     /** 发送好友申请 to a contact who deleted the user: the contact decides (one model request). */
     chatAskFriend(threadId: string, text: string): Promise<{ accepted: boolean; thread: ChatThread }>;
+    musicStatus(): MusicStatus;
+    /** Plays a list (the 歌单, search results) from one of its songs. */
+    musicPlayList(list: MusicTrack[], at?: number): Promise<void>;
+    /** Plays one song; a song given only by name is looked up in the 歌单, then the sources. */
+    musicPlay(track: MusicTrack): Promise<void>;
+    musicToggle(): Promise<void>;
+    musicNext(): Promise<void>;
+    musicPrev(): Promise<void>;
+    musicStop(): void;
+    musicSeek(seconds: number): void;
     /** New 朋友圈 posts from the characters (one model request). */
     momentsRefresh(): Promise<MomentPost[]>;
     /** Friends react to the user's post. */

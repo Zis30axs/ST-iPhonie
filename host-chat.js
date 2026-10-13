@@ -52,7 +52,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
       // 记忆: the written-up older chat, and older messages that match the latest ones.
       const query = thread.messages.filter(m => m.kind !== 'system').slice(-6).map(m => messageLine(m, user)).join('\n');
       const remembered = memory ? (await memory.contextFor(thread, {query}).catch(() => ({text: ''}))).text : '';
-      const prompt = buildChatRequest({preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || []});
+      const prompt = buildChatRequest({preset, thread, members: people, story: recent, user, userPersona: userPersona(), voiceFormat, lore, memory: remembered, earlier: memory?.storyMemory() || '', images: !!backend.drawReady?.(), stickers: settings().chat.stickers || [], music: {share: s.music?.share !== false, listening: s.music?.share !== false ? backend.listening : null}});
       const text = cleanTagged(await backend.generateText(ctx, {prompt, trimNames: false}), preset.cleanTags);
       const items = parseChatReply(text, {members: people, user, voiceFormat, voiceNames: people.filter(p => p.voice).map(p => p.name), stickers: settings().chat.stickers || []});
       if (!items.length) throw Error('这次没有收到消息，可以再试一次');

@@ -2185,3 +2185,45 @@ button.aui-card:active{transform:scale(.98)}
 .aui-quiz-options .aui-chip[data-wrong]{opacity:1;background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
 :root[data-theme=dark] .aui-quiz-options .aui-chip[data-right]{background:#173d25;color:#9be3b0;border-color:#3f9a5c}
 .aui-explain{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--ink2)}
+/* 音乐 */
+.music-now{margin:0 0 14px;padding:14px;border-radius:22px;background:linear-gradient(150deg,color-mix(in srgb,var(--pink) 22%,var(--card)),var(--card) 60%);box-shadow:var(--shadow);display:grid;gap:10px}
+.music-now.idle{display:flex;align-items:center;gap:12px}
+.music-now-top{display:flex;align-items:center;gap:12px;min-width:0}
+.music-cover{flex:none;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);color:#fff;box-shadow:inset 0 0 0 18px rgba(0,0,0,.08)}
+.music-cover svg{width:24px;height:24px}
+.music-cover.spin{animation:music-spin 8s linear infinite}
+@keyframes music-spin{to{transform:rotate(360deg)}}
+.music-now-text{display:grid;min-width:0}
+.music-now-text strong{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.music-now-text small{color:var(--ink2);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.music-progress{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px;font-size:11px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.music-controls{display:flex;justify-content:center;align-items:center;gap:12px}
+.music-main{width:54px;height:54px;border:0;border-radius:50%;background:var(--accent-btn);color:var(--on-accent);display:grid;place-items:center;box-shadow:0 4px 0 color-mix(in srgb,var(--accent-btn) 65%,#000)}
+.music-main svg{width:24px;height:24px}
+.music-main:active{transform:translateY(2px);box-shadow:0 2px 0 color-mix(in srgb,var(--accent-btn) 65%,#000)}
+.music-lyric-line{border:0;background:transparent;color:var(--accent-ink);font:inherit;font-weight:700;font-size:14px;text-align:center;padding:4px;cursor:pointer;min-height:1.5em}
+.music-lyrics{max-height:180px;overflow-y:auto;text-align:center;scroll-behavior:smooth;mask-image:linear-gradient(transparent,#000 20%,#000 80%,transparent)}
+.music-lyrics p{margin:6px 0;font-size:13px;color:var(--ink2);transition:color .3s,transform .3s}
+.music-lyrics p.now{color:var(--ink);font-weight:800;transform:scale(1.06)}
+.music-message{margin:0;text-align:center}
+.music-row{padding:0 8px 0 0}
+.music-row-main{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:12px 4px 12px 16px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.music-row-main span{display:grid;min-width:0}
+.music-row-main strong,.music-row-main small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.music-search{display:flex;gap:8px;margin:0 0 12px}
+.music-search input{flex:1;min-width:0;border:2px solid var(--line);border-radius:999px;padding:10px 14px;background:var(--card);color:var(--ink);font:inherit}
+.music-source span{flex:1;min-width:0}
+.music-test-row{margin:4px 0;font-size:13px}
+@media (prefers-reduced-motion:reduce){.music-cover.spin{animation:none}}
+.song-card{display:flex;align-items:center;gap:10px;width:min(240px,100%);padding:10px 12px;border:0;border-radius:16px;background:linear-gradient(135deg,#ff8ab3,#e8507a);color:#fff;text-align:left;font:inherit;cursor:pointer;box-shadow:0 4px 12px -6px rgba(232,80,122,.6)}
+.song-card .sg-disc{flex:none;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.22);display:grid;place-items:center}
+.song-card .sg-disc svg{width:20px;height:20px}
+.song-card .sg-text{flex:1;min-width:0;display:grid}
+.song-card strong,.song-card small,.song-card em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.song-card small{opacity:.85;font-size:12px}
+.song-card em{font-style:normal;font-size:12px;opacity:.95;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.song-card .sg-play{flex:none;width:28px;height:28px;border-radius:50%;background:#fff;color:#e8507a;display:grid;place-items:center}
+.song-card .sg-play svg{width:14px;height:14px}
+.qq-listening{position:relative;z-index:1;display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:5px 12px;border:0;border-radius:999px;background:var(--accent-soft);color:var(--accent-ink);font:inherit;font-size:12px;cursor:pointer;max-width:100%}
+.qq-listening svg{width:14px;height:14px;flex:none}
+.qq-listening span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

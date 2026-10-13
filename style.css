@@ -165,3 +165,27 @@
 .sttts-call-island .ci-close svg{width:16px;height:16px}
 .sttts-msg-island .ci-text small{color:rgba(255,255,255,.6)}
 .sttts-msg-island .mi-from{font-weight:800;color:#64d2ff}
+/* 背景音乐 chip: the song the story picked (<bgm>); a tap plays it, or pauses it while it plays. */
+#chat [data-sttts-action="bgm"]{display:inline-flex;align-items:center;gap:4px;margin:0 0 .4em;padding:2px 10px;border:1px solid color-mix(in srgb,var(--SmartThemeQuoteColor,#7dadd6) 45%,transparent);border-radius:999px;background:color-mix(in srgb,var(--SmartThemeQuoteColor,#7dadd6) 12%,transparent);color:var(--SmartThemeQuoteColor,#5b8fc4);font:inherit;font-size:.82em;line-height:1.6;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+#chat [data-sttts-action="bgm"]:hover{background:color-mix(in srgb,var(--SmartThemeQuoteColor,#7dadd6) 22%,transparent)}
+#chat .sttts-bgm{display:block}
+/* 音乐小窗: the song and its lyric line while the phone is put away. */
+.sttts-music-island{position:fixed;z-index:30990;width:min(300px,calc(100vw - 16px));padding:8px 10px 10px;border-radius:26px;background:#000;color:#fff;box-shadow:0 10px 30px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:13px/1.4 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;touch-action:none;user-select:none;cursor:grab;animation:sttts-mi-in .45s cubic-bezier(.34,1.3,.64,1)}
+.sttts-music-island[hidden]{display:none}
+.sttts-music-island[data-dragging]{cursor:grabbing}
+.sttts-music-island .mi-row{display:flex;align-items:center;gap:8px}
+.sttts-music-island .mi-disc{flex:none;width:34px;height:34px;border-radius:50%;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);display:grid;place-items:center;animation:sttts-mi-spin 6s linear infinite;animation-play-state:paused}
+.sttts-music-island[data-playing="1"] .mi-disc{animation-play-state:running}
+.sttts-music-island .mi-disc i{width:10px;height:10px;border-radius:50%;background:#000}
+.sttts-music-island .mi-text{flex:1;min-width:0;display:grid}
+.sttts-music-island .mi-text b,.sttts-music-island .mi-text small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sttts-music-island .mi-text small{color:rgba(255,255,255,.6);font-size:11px}
+.sttts-music-island .mi-btn{flex:none;width:30px;height:30px;border:0;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}
+.sttts-music-island .mi-btn svg{width:16px;height:16px}
+.sttts-music-island .mi-close{background:transparent;color:rgba(255,255,255,.55)}
+.sttts-music-island .mi-lyrics{margin-top:6px;text-align:center;overflow:hidden}
+.sttts-music-island .mi-lyrics p{margin:0;font-size:11px;line-height:1.5;color:rgba(255,255,255,.4);min-height:1.5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color .3s}
+.sttts-music-island .mi-lyrics p.now{font-size:14px;font-weight:700;color:#fff}
+@keyframes sttts-mi-in{from{opacity:0;transform:var(--mi-from,translateX(-50%)) scale(.6)}}
+@keyframes sttts-mi-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.sttts-music-island,.sttts-music-island .mi-disc{animation:none}}

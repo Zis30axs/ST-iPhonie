@@ -1,4 +1,5 @@
 import { MomentStore } from './moments-store.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -118,6 +119,7 @@ export class TTSBackend {
         this.memoryStore = new AppStore(this.settings.scope, { indexedDB, database: 'st-iphonie-memory-v1' });
         // 音效 (core/sounds.js): the sound library and the names the story asked for that it has none of. Its own database: big.
         this.sounds = new AppStore(this.settings.scope, { indexedDB, database: 'st-iphonie-sounds-v1' });
+        this.music = new AppStore(this.settings.scope, { indexedDB, database: 'st-iphonie-music-v1' });
         // 自带音效包: the folder of the plugin's sounds (sounds/pack.json lists them); '' when there is none (tests).
         this.soundPack = soundPack;
         this.packLoad = null;
@@ -1331,6 +1333,99 @@ export class TTSBackend {
     }
     // ---------- 音效 ----------
     /** {enabled, ambienceVolume, sfxVolume, vary, tapOnly, generate, versions}. */
+    // ---------- 音乐 ----------
+    /** Music options: {bgm, rule, volume, duck, share, sources}. Sources are checked before they are kept. */
+    saveMusic(patch) {
+        const next = this.getState(), allowed = ['bgm', 'rule', 'volume', 'duck', 'share', 'sources'];
+        const merged = { ...next.music, ...Object.fromEntries(Object.entries(patch || {}).filter(([key]) => allowed.includes(key))) };
+        if (Array.isArray(patch?.sources)) { if (patch.sources.length > MUSIC_LIMITS.sources) throw Error(`最多 ${MUSIC_LIMITS.sources} 个音源`); merged.sources = patch.sources.map((s, i) => validateSource(normalizeSource(s, i))); }
+        next.music = normalizeMusic(merged);
+        const saved = this.save(next).music;
+        this.emit('music', { settings: true });
+        return saved;
+    }
+    /** A web address read from the page, else (it does not allow pages to read it) through the tavern's own proxy. */
+    async musicFetch(url, as = 'json') {
+        const read = async response => { if (!response.ok) throw Object.assign(Error(`HTTP ${response.status}`), { status: response.status }); return as === 'json' ? response.json() : response.text(); };
+        try { return await read(await this.imageFetch(url, { credentials: 'omit' })); }
+        catch (error) {
+            if (error?.status) throw Error(`音源回答 ${error.message}`);
+            const proxied = await this.imageFetch('/proxy/' + encodeURIComponent(url), { credentials: 'same-origin' }).catch(() => null);
+            if (!proxied) throw Error('连不上这个音源：网址不对，或者它不让网页直接读取，酒馆代理也连不上');
+            if (!proxied.ok) { const said = await proxied.text().catch(() => ''); throw Error(/CORS proxy is disabled/i.test(said) ? '这个音源不让网页直接读取：可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆' : `音源回答 HTTP ${proxied.status}`); }
+            return read(proxied);
+        }
+    }
+    musicSource(id) { const s = this.settings.music.sources.find(x => x.id === id); if (!s) throw Error('这个音源已经不在了'); return s; }
+    /** Searches the enabled sources (or one): {songs: [{source, sourceName, id, title, artist}], errors: [{source, message}]}. */
+    async searchMusic(query, sourceId = '') {
+        this.assertOpen();
+        const words = String(query || '').trim().slice(0, 100);
+        if (!words) throw Error('写一下想听的歌');
+        const sources = this.settings.music.sources.filter(s => sourceId ? s.id === sourceId : s.enabled);
+        if (!sources.length) throw Error('还没有能用的音源：先在「音乐 → 设置 → 音源」里添加一个');
+        const songs = [], errors = [];
+        await Promise.all(sources.map(async s => {
+            try { songs.push(...readSearch(s, await this.musicFetch(fillSource(s.search, { query: words }))).map(x => ({ ...x, sourceName: s.name }))); }
+            catch (error) { errors.push({ source: s.name, message: error.message }); }
+        }));
+        return { songs, errors };
+    }
+    /** A playable link for a song of a source. */
+    async musicLink(sourceId, songId) {
+        this.assertOpen();
+        const s = this.musicSource(sourceId), link = readLink(s, await this.musicFetch(fillSource(s.url, { id: songId })));
+        if (!link) throw Error(`「${s.name}」没有给出这首歌的播放链接（可能要会员，或者「链接在哪」填得不对）`);
+        return link;
+    }
+    async musicLyric(sourceId, songId) {
+        const s = this.musicSource(sourceId);
+        if (!s.lyric) return '';
+        try { const value = pickPath(await this.musicFetch(fillSource(s.lyric, { id: songId })), s.lyricPath); return typeof value === 'string' ? value.slice(0, 60000) : ''; } catch { return ''; }
+    }
+    /** The 歌单: songs without their files. */
+    async listSongs() { this.assertOpen(); return (await this.music.list('song')).map(({ blob, ...row }) => row); }
+    async songBlob(id) { const row = await this.music.get(id); return row?.blob || null; }
+    /** Adds files ({title, artist, blob}) or source songs ({title, artist, source, songId}) to the 歌单. */
+    async addSongs(list) {
+        this.assertOpen();
+        const now = Date.now(), have = await this.listSongs();
+        if (have.length + list.length > MUSIC_LIMITS.songs) throw Error(`歌单最多 ${MUSIC_LIMITS.songs} 首`);
+        const rows = list.map((value, i) => {
+            const row = songRow({ ...value, origin: value.blob ? 'file' : 'source' }, now + i);
+            if (row.origin === 'source') { const dup = have.find(h => h.source === row.source && h.songId === row.songId); if (dup) return null; return row; }
+            let blob;
+            try { blob = Blob.prototype.slice.call(value.blob, 0, undefined, value.blob?.type || ''); } catch { throw Error(`「${row.title}」不是能用的音频文件`); }
+            if (!blob.size) throw Error(`「${row.title}」是空文件`);
+            if (blob.size > MUSIC_LIMITS.file) throw Error(`「${row.title}」太大了（一首最多 ${MUSIC_LIMITS.file / 1024 / 1024} MB）`);
+            const type = String(blob.type || '').toLowerCase();
+            if (type && !type.startsWith('audio/') && !['application/octet-stream', 'video/mp4', 'video/webm', 'video/ogg'].includes(type)) throw Error(`「${row.title}」不是音频文件`);
+            return { ...row, blob, size: blob.size, mime: type };
+        }).filter(Boolean);
+        if (rows.length) await this.music.put(rows);
+        this.emit('music', { library: true });
+        return rows.map(({ blob, ...row }) => row);
+    }
+    async updateSong(id, patch = {}) {
+        const saved = await this.music.change(id, row => {
+            if ('title' in patch) { const t = String(patch.title || '').trim().slice(0, 200); if (!t) throw Error('歌名不能空着'); row.title = t; }
+            if ('artist' in patch) row.artist = String(patch.artist || '').trim().slice(0, 200);
+            if ('lyric' in patch) { if (patch.lyric) row.lyric = String(patch.lyric).slice(0, 60000); else delete row.lyric; }
+        });
+        this.emit('music', { library: true });
+        const { blob, ...row } = saved; return row;
+    }
+    async deleteSongs(ids) { for (const id of ids) await this.music.remove(id); this.emit('music', { library: true }); return true; }
+    /** A song asked for by name (<bgm>, a shared song): the 歌单 first, then the first fitting search result. */
+    async findSong(want) {
+        // The 歌单 only when the title is the same (晴天 is not 晴天（Live）); a search may be looser.
+        const mine = bestMatch((await this.listSongs()).filter(s => matchScore(s, want) >= 2), want);
+        if (mine) return mine;
+        if (!this.settings.music.sources.some(s => s.enabled)) return null;
+        const { songs } = await this.searchMusic([want.title, want.artist].filter(Boolean).join(' ')).catch(() => ({ songs: [] }));
+        const found = bestMatch(songs, want) || songs[0];
+        return found ? { origin: 'source', source: found.source, songId: found.id, title: found.title, artist: found.artist } : null;
+    }
     saveSounds(patch) {
         const next = this.getState(), allowed = ['enabled', 'ambienceVolume', 'sfxVolume', 'vary', 'tapOnly', 'generate', 'versions', 'pack', 'packHidden'];
         next.sounds = normalizeSounds({ ...next.sounds, ...Object.fromEntries(Object.entries(patch || {}).filter(([key]) => allowed.includes(key))) });
@@ -1996,6 +2091,8 @@ export class TTSBackend {
             deleteAssistantMessage: (id, mid) => this.deleteAssistantMessage(id, mid),
             selectAssistantVariant: (id, mid, selected) => this.selectAssistantVariant(id, mid, selected),
             deleteAssistantThread: id => this.deleteAssistantThread(id), clearAssistantThread: id => this.clearAssistantThread(id),
+            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId) => this.searchMusic(query, sourceId), musicLink: (sourceId, songId) => this.musicLink(sourceId, songId), musicLyric: (sourceId, songId) => this.musicLyric(sourceId, songId),
+            listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),
             saveText: patch => this.saveText(clone(patch)), setTextKey: (id, key) => this.setTextKey(id, key), clearTextKey: id => this.clearTextKey(id), textKeyHint: id => this.textKeyHint(id), textModels: draft => this.textModels(clone(draft || {})),
@@ -2063,6 +2160,7 @@ export class TTSBackend {
         this.apps.close();
         this.memoryStore.close();
         this.sounds.close();
+        this.music.close();
         this.drawQueue.cancelAll();
         this.closing = Promise.all([this.player.close(), this.cache.close(), this.library.close(), Promise.resolve(this.keyStore.flush?.()).then(() => this.keyStore.close?.())]);
         await this.closing;

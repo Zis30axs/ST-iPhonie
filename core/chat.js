@@ -3,6 +3,7 @@
 //
 // A chat preset holds the rules the model follows when it answers in the phone, how many recent story messages
 // and chat messages it sees, and the template used when a chat is brought into the story.
+import {songOf, listeningNote} from './music.js';
 import {normalizeWallet, defaultWallet, PREMIUM, guessEmoji, yuan} from './wallet.js';
 import {parseDialogue, isPlaceholderRole} from './protocol.js';
 import {money} from './chats.js';
@@ -281,6 +282,7 @@ export function messageLine(m, user) {
     case 'transfer': return `${who}：[转账 ¥${m.amount}]${m.text ? ' ' + m.text : ''}（${TRANSFER_STATE[m.state] || '待收款'}）`;
     case 'gift': return `${who}：[礼物 ${m.gift?.name || ''}${m.gift?.price ? ' ¥' + yuan(m.gift.price) : ''}]${m.text ? ' ' + m.text : ''}（${m.state === 'accepted' ? '已收下' : m.state === 'returned' ? '被退还了' : '还没收下'}）`;
     case 'location': return `${who}：[位置] ${m.text}${m.detail ? '（' + m.detail + '）' : ''}`;
+    case 'song': return `${who}：${quote}[分享歌曲] ${m.song?.title || ''}${m.song?.artist ? ' - ' + m.song.artist : ''}${m.text ? ' ' + m.text : ''}`;
     case 'pat': return `（${patText(m, user)}）`;
     case 'dice': return `${who}：[骰子] ${m.text} 点`;
     case 'notice': return `（${noticeText(m, user)}）`;
@@ -297,7 +299,7 @@ const fill = (template, values) => Object.entries(values).reduce((s, [k, v]) => 
  * members: [{name, persona, card, voice, language}] (card: the tavern character card text, when there is one)
  * story: [{name, text}] recent story messages, oldest first.
  */
-export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = ''}) {
+export function buildChatRequest({preset, thread, members, story = [], user = '我', userPersona = '', voiceFormat, lore = '', memory = '', earlier = '', images = false, stickers = [], asking = '', music = null}) {
   const group = thread.type === 'group';
   const partner = group ? thread.name : members[0]?.name || thread.name;
   const speakers = members.filter(m => m.voice);
@@ -327,7 +329,9 @@ export function buildChatRequest({preset, thread, members, story = [], user = '�
       stickers.length ? `可以像真人一样发表情包，单独一行写成「名字：[表情包] 表情包的名字」，合适的时候用，别每条都发；名字只能从这些里选：${stickers.slice(-80).map(s => s.name ?? s).join('、')}。` : '',
       dialing ? `很偶尔可以直接给${user}打语音电话：这一轮最后单独一行写成「名字：[打电话] 为什么打」，大多数回复都不要打。` : '',
       posting ? `很偶尔可以顺手发一条朋友圈，单独一行写成「名字：[朋友圈] 动态内容」；这是发给所有朋友看的动态，不是发给${user}的消息，大多数回复都不要发。` : '',
+      music?.share ? `很偶尔想给${user}分享一首歌时，单独一行写「名字：[分享歌曲] 歌名 - 歌手｜想说的一句话」，歌名和歌手写原文（方便搜到），大多数回复都不要分享。` : '',
       !group && !asking ? `只有和${user}吵架闹翻、真的气到不想再理${user}的时候，可以单独一行写「名字：[删除好友]」把${user}从好友里删掉；之后${user}的消息会被拒收，直到${partner}通过${user}的好友申请。极少用，大多数时候都不要删。` : ''].filter(Boolean).join('\n'),
+    music?.listening ? listeningNote(music.listening, user) : '',
     asking ? ['【好友申请】', `${partner}之前在手机上把${user}删了好友。现在${user}发来好友申请，验证消息：「${asking}」。`, `按${partner}的性格、你们现在的关系和最近发生的事决定通不通过：通过就第一行单独写「${partner}：[通过好友]」，后面可以接着发几条消息；还不想通过就只写一行「${partner}：[拒绝好友] 想说的一句话（可以空着）」。`].join('\n') : ''
   ].filter(Boolean).join('\n\n');
   const history = thread.messages.filter(m => m.kind !== 'system').slice(-preset.history);
@@ -341,7 +345,7 @@ export function buildChatRequest({preset, thread, members, story = [], user = '�
 
 const NAME_LINE = /^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]\s*(.*)$/;
 const unquote = s => s.trim().replace(/^[「“"『](.*)[」”"』]$/s, '$1').trim();
-const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|打电话|语音通话|来电|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
+const SPECIAL = /^\s*[[【]\s*(表情包|表情|收下礼物|退还礼物|礼物|送礼|图片|照片|位置|定位|红包|转账|拍一拍|领取红包|领取|收下|收款|退还|退回|朋友圈|发朋友圈|动态|打电话|语音通话|来电|分享歌曲|分享音乐|分享歌|歌曲|音乐|删除好友|删好友|拉黑|通过好友申请|通过好友|同意好友|接受好友|拒绝好友申请|拒绝好友)\s*([^\]】]*)[\]】]\s*(.*)$/;
 const LUCKY = ['6.66', '8.88', '5.20', '13.14', '16.80', '1.88'];
 /**
  * A phone-feature line (「[红包 ¥8.88] 祝福」 and the like) as a message; {kind:'claim', action} for taking or returning
@@ -356,6 +360,8 @@ function special(from, content, {names, user, stickers = []}) {
     case '朋友圈': case '发朋友圈': case '动态': { const said = (text || arg.trim()).slice(0, 2000); return said ? {from, kind: 'moment', text: said} : null; }
     // A voice call placed from the chat: the phone rings after this reply.
     case '打电话': case '语音通话': case '来电': return {from, kind: 'call', reason: (text || arg.trim()).slice(0, 200)};
+    // A song shared (「[分享歌曲] 歌名 - 歌手｜想说的话」): a card the user can play.
+    case '分享歌曲': case '分享音乐': case '分享歌': case '歌曲': case '音乐': { const [what, ...note] = (arg.trim() ? arg.trim() + (text ? '｜' + text : '') : text).split(/[|｜]/); const song = songOf(what); return song.title ? {from, kind: 'song', song, text: note.join(' ').trim().slice(0, 200)} : null; }
     // 删好友: the contact deletes the user; answering the user's 好友申请.
     case '删除好友': case '删好友': case '拉黑': return {from, kind: 'unfriend'};
     case '通过好友': case '通过好友申请': case '同意好友': case '接受好友': return {from, kind: 'befriend'};

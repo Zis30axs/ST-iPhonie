@@ -15,6 +15,7 @@ import {peekApp} from './peek.js';
 import {chatApp} from './chat.js';
 import {soundsApp} from './sounds.js';
 import {assistantApp} from './assistant.js';
+import {musicApp} from './music.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
@@ -22,7 +23,7 @@ import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js
 import {todayPage} from './today.js';
 
 // App factories, keyed by the ids in apps.js.
-const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp};
+const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp, music: musicApp};
 const ACTIVE_PHASES = ['playing', 'paused', 'generating', 'waiting'];
 
 // Network and battery in the status bar come from the user's own device (where the browser tells them).
@@ -812,6 +813,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (event.type === 'audio-ready') views.get('listen')?.onPlayback?.(api.status());
     if (event.type === 'draw') views.get('draw')?.onDraw?.(event);
     if (event.type === 'assistant') run(() => views.get('assistant')?.onAssistant?.(event));
+    if (event.type === 'music') run(() => views.get('music')?.onMusic?.(event));
     if (event.type === 'balance') run(() => views.get('engines')?.onBalance?.(event));
     if (event.type === 'chat') { run(() => views.get('chat')?.onChat?.(event)); countUnread(); if (event.incoming && !(active === 'chat' && views.get('chat')?.showing?.() === event.threadId)) notify(`${event.incoming.from}：${event.incoming.kind === 'text' ? event.incoming.text : '发来' + (event.incoming.count > 1 ? ` ${event.incoming.count} 条` : '一条') + '消息'}`.slice(0, 80)); }
     if (event.type === 'moments') { views.get('chat')?.onMoments?.(event); countMoments(); }
@@ -853,6 +855,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   // ---------- Host hooks ----------
   const previousOpenRole = win.stTtsOpenRole, previousVisibility = win.stTtsPanelVisibility, previousOpenDraw = win.stTtsOpenDraw, previousOpenThread = win.stTtsOpenThread;
   win.stTtsOpenRole = id => open('roles', id);
+  const previousOpenApp = win.stTtsOpenApp;
+  win.stTtsOpenApp = name => { if (FACTORIES[name]) run(() => open(name)); };
   function takeDraw() {
     const request = api.takeDraw?.();
     if (!request) return false;
@@ -902,6 +906,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     win.clearTimeout(unreadTimer); win.clearTimeout(freshTimer);
     win.cancelAnimationFrame(animation);
     win.stTtsOpenRole = previousOpenRole;
+    win.stTtsOpenApp = previousOpenApp;
     win.stTtsPanelVisibility = previousVisibility;
     win.stTtsOpenDraw = previousOpenDraw;
     win.stTtsOpenThread = previousOpenThread;
