@@ -60,7 +60,14 @@ export function musicApp(ctx) {
     const box = card.querySelector('[data-music-lyrics]');
     if (box) {
       const old = box.querySelector('.now'), cur = box.querySelector(`[data-i="${s.lyricIndex}"]`);
-      if (old !== cur) { old?.classList.remove('now'); cur?.classList.add('now'); if (cur) box.scrollTo({top: cur.offsetTop - box.clientHeight / 2 + cur.offsetHeight / 2, behavior: ctx.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'}); }
+      if (old !== cur) { old?.classList.remove('now'); cur?.classList.add('now'); }
+      // The line being sung in the middle of the box (measured against the box itself: offsetTop counts from the card).
+      // Also right after the lyrics open, when it is already marked.
+      if (cur && box.dataset.centered !== String(s.lyricIndex) && box.clientHeight) {
+        box.dataset.centered = String(s.lyricIndex);
+        const top = box.scrollTop + cur.getBoundingClientRect().top - box.getBoundingClientRect().top - (box.clientHeight - cur.offsetHeight) / 2;
+        box.scrollTo({top: Math.max(0, top), behavior: old && old !== cur && !ctx.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto'});
+      }
     }
   }
   const songRow = (s, i, list) => `<div class="list-row music-row" data-list="${list}" data-i="${i}"><button type="button" class="music-row-main" data-action="play" data-list="${list}" data-i="${i}"><span><strong>${esc(s.title)}</strong><small>${esc(s.artist || '未知歌手')}${list === 'results' ? ' · ' + esc(s.sourceName || '') : s.origin === 'source' ? ' · ' + esc(state().sources.find(x => x.id === s.source)?.name || '音源') : ' · 本机'}</small></span></button>${list === 'results' ? btn('save-song', icon('add'), 'icon-button', `data-i="${i}" aria-label="加进歌单"`) : btn('song-menu', icon('more'), 'icon-button', `data-i="${i}" aria-label="这首歌的选项"`)}</div>`;
