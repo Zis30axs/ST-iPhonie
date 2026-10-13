@@ -26,19 +26,32 @@ export function postLines(post, user, max = 30) {
  * The request for 论坛, with the chat preset's rules used in 论坛. mode 'posts': new posts and the 热搜;
  * 'react': replies to the user's new post; 'reply': answers to the user's reply. people: [{name, persona, card}].
  */
+/** Who knows what on a public forum: strangers only what is public; characters only what they lived, and they keep it to themselves. */
+export function forumKnows(user) {
+  return ['【论坛上的人知道什么】',
+    '论坛是公开的，帖子和回复只能写论坛上的人真的会知道的事：',
+    '- 路人只知道公开的事：在街上、学校、店里这类公共场所发生、被很多人看到的事，传开了的消息和传闻，有人在论坛上发过的事，这个世界里人人都知道的常识。',
+    '- 角色只知道自己在场经历的、别人告诉过 TA 的事；就算知道，在公开的论坛上一般也不会把私事说出来，要说也只说愿意让大家知道的，而且说得含糊。',
+    `- ${user}和别人在家里、房间里、私下里做的事和说的话（在做什么、穿什么、抱着什么、吃什么、聊了什么），论坛上的人都不知道，也不能「碰巧」猜中或者写出一样的细节。`,
+    '- 最近的剧情只能给论坛提供大方向（季节天气、城里的大事、大家都在关心的东西），不要把剧情里的具体场景、动作、对话搬到论坛上。',
+    `- ${user}自己在论坛上发的帖子和回复是公开的，大家都看得到；回复时只根据帖子里写的内容和公开的事。`,
+    '- 拿不准是不是公开的，就当不知道。'].join('\n');
+}
 export function buildForumRequest({preset, mode = 'posts', people, story = [], user = '我', userPersona = '', recent = [], hot = [], post = null, reply = null, lore = '', earlier = ''}) {
   const rules = preset.entries.filter(e => e.enabled && e.text.trim() && (e.use || []).includes('forum')).map(e => fill(e.text, {'用户': user}));
   const system = [
     rules.join('\n\n'),
     people.length ? `【论坛里的角色】（他们在论坛上用自己的名字）\n${people.map(p => `- ${p.name}：${(p.persona || p.card || '').trim() || '（没有资料，按剧情里的表现来）'}`).join('\n')}` : '',
-    lore.trim() ? `【世界书】（这些人物和这个世界的设定：人设、口音、方言、说话方式都按这里来）\n${lore.trim()}` : '',
-    userPersona.trim() ? `【${user}】\n${userPersona.trim()}` : '',
-    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，只作背景参考）\n${earlier.trim()}` : '',
-    story.length ? `【最近的剧情】（只作背景参考）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
+    lore.trim() ? `【世界书】（这些人物和这个世界的设定，写给读者看的：人设、口音、方言、说话方式按这里来；里面的秘密和私事，论坛上的人不知道）\n${lore.trim()}` : '',
+    userPersona.trim() ? `【${user}】（${user}自己的设定，论坛上的人不知道）\n${userPersona.trim()}` : '',
+    earlier.trim() ? `【更早的剧情】（记忆插件整理的长期剧情，旁观的记录：论坛上的人看不到）\n${earlier.trim()}` : '',
+    story.length ? `【最近的剧情】（旁观的记录：读者看得到全部，论坛上的人看不到。这不是论坛上的人知道的事）\n${story.map(s => `${s.name}：${s.text}`).join('\n')}` : '',
     mode === 'posts' && hot.length ? `【之前的热搜】（可以延续，也可以换新的）\n${hot.join('\n')}` : '',
     mode === 'posts' && recent.length ? `【最近的帖子】（不要重复这些内容）\n${recent.map(p => `${who(p.author, user)}｜${p.title}`).join('\n')}` : '',
+    forumKnows(user),
     ['【输出格式】',
       '每一项单独一行，只能用下面这几种写法，不要写别的文字、编号或解释：',
+      mode === 'posts' ? `「【公开】一件事」先写这块，0 到 5 条：最近的剧情里，论坛上的人真的能知道的公开的事（在公共场所发生、很多人看见的，传开了的，有人发出来的）；没有就不写。帖子和回复里提到剧情，只能用这几条；` : '',
       mode === 'posts' ? '「【热搜】话题」现在论坛上的热搜，一个话题一行；' : '',
       mode === 'posts' ? '「【帖子】作者｜标题｜正文」发一条新帖子，作者写角色的名字或者路人的网名；' : '',
       '「【回复】作者：内容」回复上面的帖子，回复某人时写「【回复】作者 回复 某人：内容」。',
