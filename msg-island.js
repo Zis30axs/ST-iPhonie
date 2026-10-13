@@ -27,7 +27,7 @@ export function messageText(m) {
  * app. read(threadId): marks it read (the user saw it here). avatar(name): a picture URL or ''.
  * Returns {show(threadId), refresh(), typing(threadId, on), changed(threadId), dispose()}.
  */
-export function createMessageIsland({doc = document, load, phoneOpen, openChat, send, ask, read = () => {}, avatar = () => ''}) {
+export function createMessageIsland({doc = document, load, phoneOpen, openChat, send, ask, read = () => {}, avatar = () => '', label = name => name}) {
   const win = doc.defaultView;
   const el = doc.createElement('div');
   el.className = 'sttts-call-island sttts-msg-island';
@@ -52,7 +52,7 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
     drawnFor = threadId;
     const name = who(), pic = avatar(name);
     el.innerHTML = `<div class="ci-head" title="拖动移动；双击打开小手机"><span class="ci-av">${pic ? `<img src="${esc(pic)}" alt="">` : esc(String(name || '?').slice(0, 1))}</span>
-        <span class="ci-text"><b>${esc(thread?.name || name)}</b><small data-mi-status></small></span>
+        <span class="ci-text"><b>${esc(thread?.type === 'group' ? thread.name : label(name) || thread?.name)}</b><small data-mi-status></small></span>
         <button type="button" class="ci-end ci-close" data-mi="close" aria-label="收起">${CLOSE}</button></div>
       <div class="ci-lines" data-mi-lines aria-live="polite"></div>
       <form class="ci-say" data-mi-form><input data-mi-input maxlength="1000" autocomplete="off" enterkeyhint="send" placeholder="回复……" aria-label="回复 ${esc(thread?.name || name)}"><button type="submit" class="ci-send" data-mi="send"></button></form>`;

@@ -31,7 +31,7 @@ import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
-import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeProactive } from './chat.js';
+import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
 import { ChatStore, money } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
@@ -1397,6 +1397,12 @@ export class TTSBackend {
         if (patch?.proactive && typeof patch.proactive === 'object') next.chat.proactive = normalizeProactive({ ...next.chat.proactive, ...patch.proactive });
         if (Array.isArray(patch?.stickers)) next.chat.stickers = normalizeStickers(patch.stickers);
         if (patch?.partition !== undefined) { if (!['none', 'card'].includes(patch.partition)) throw Error('分区方式无效'); next.chat.partition = patch.partition; }
+        // remarks (备注) and netNames (网名): {name: other name | '' | null}; empty takes it away.
+        for (const key of ['remarks', 'netNames']) if (patch?.[key] && typeof patch[key] === 'object') {
+            const merged = { ...next.chat[key] };
+            for (const [name, other] of Object.entries(patch[key])) { if (other) merged[name] = other; else delete merged[name]; }
+            next.chat[key] = normalizeNames(merged, key === 'remarks' ? 20 : 30);
+        }
         // avatars: {name: choice | null}; null goes back to the tavern's avatar (or the first letter).
         if (patch?.avatars && typeof patch.avatars === 'object') { const merged = { ...next.chat.avatars }; for (const [name, a] of Object.entries(patch.avatars)) { if (a) merged[name] = a; else delete merged[name]; } next.chat.avatars = normalizeAvatars(merged); }
         return this.save(next).chat;

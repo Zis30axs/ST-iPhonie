@@ -170,8 +170,10 @@ export class ChatStore {
       done(this.#public(row));
     }));
   }
-  async update(id, {name, members, pinned, muted, friend} = {}) {
+  async update(id, {name, members, pinned, muted, friend, story} = {}) {
     return this.#change(id, row => {
+      // 一直带着: the story always knows this chat (its memory and what is not written up yet).
+      if (story !== undefined) { if (story === true) row.story = true; else delete row.story; }
       if (friend !== undefined && row.type === 'dm') { const f = cleanFriend(friend); if (f) row.friend = f; else delete row.friend; }
       if (pinned !== undefined) row.pinned = pinned === true;
       if (muted !== undefined) row.muted = muted === true;
@@ -258,7 +260,7 @@ export class ChatStore {
       const members = [...new Set((Array.isArray(t.members) ? t.members : []).map(m => clip(m, 40).trim()).filter(Boolean))].slice(0, CHAT_STORE_LIMITS.members);
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
-      return {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true,
+      return {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}),
         unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {})};
     });
     const rows = prepare(threads);

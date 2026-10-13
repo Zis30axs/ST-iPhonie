@@ -37,15 +37,23 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   };
 
   // ---------- 论坛 ----------
+  /** 网名 on the forum: {me: the user's, name: a character's}. */
+  const netNames = () => ({...(settings().chat?.netNames || {})});
+  /** Screen names the model made up for characters who had none: kept, so they stay the same. */
+  async function keepNames(names, crowd) {
+    const have = netNames(), fresh = Object.fromEntries(Object.entries(names || {}).filter(([name]) => name !== 'me' && !have[name] && crowd.some(c => c.name === name)));
+    if (Object.keys(fresh).length) try { backend.saveChatOptions({netNames: fresh}); } catch { /* made up again next time */ }
+  }
   /** New posts and the 热搜. */
   function forumRefresh() {
     return run('forum', async ctx => {
       // The card asked for: the tavern may move to another one while the model writes.
-      const space = backend.cardKey(), hotId = backend.hotId(), {preset, crowd, user} = base();
+      const space = backend.cardKey(), hotId = backend.hotId(), {preset, crowd, user} = base(), handles = netNames();
       const recent = (await backend.apps.list('forum')).filter(p => inSpace(p, backend.here())).slice(0, 8), hot = (await backend.apps.get(hotId))?.topics || [];
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({preset, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
-      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'posts'});
+      const prompt = buildForumRequest({preset, handles, earlier: memory?.storyMemory() || '', mode: 'posts', people: crowd, story, user, userPersona: userPersona(), recent, hot, lore: await lore(preset, crowd, story, [...hot, ...recent.map(p => p.title)])});
+      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'posts', handles});
+      await keepNames(found.names, crowd);
       if (!found.posts.length) throw Error('这次没有刷出新帖子，可以再刷新一次');
       if (found.hot.length) await backend.setForumHot(found.hot, hotId);
       return backend.addForumPosts(found.posts, {space});
@@ -54,12 +62,13 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   /** Replies to the user's new post. */
   function forumReact(postId) {
     return run('forum', async ctx => {
-      const {preset, crowd, user} = base();
+      const {preset, crowd, user} = base(), handles = netNames();
       const post = await backend.apps.get(postId);
       if (!post) throw Error('这个帖子已经不在了');
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({preset, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [post.title, post.text])});
-      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'react'});
+      const prompt = buildForumRequest({preset, handles, earlier: memory?.storyMemory() || '', mode: 'react', people: crowd, story, user, userPersona: userPersona(), post, lore: await lore(preset, crowd, story, [post.title, post.text])});
+      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'react', handles});
+      await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人回复，可以再试一次');
       return backend.addForumReplies(postId, found.replies);
     });
@@ -67,12 +76,13 @@ export function createAppsHost({context, settings, backend, memory = null}) {
   /** Answers to the user's reply. */
   function forumReply(postId, replyId) {
     return run('forum', async ctx => {
-      const {preset, crowd, user} = base();
+      const {preset, crowd, user} = base(), handles = netNames();
       const post = await backend.apps.get(postId), mine = post?.replies.find(r => r.id === replyId);
       if (!post || !mine) throw Error('这条回复已经不在了');
       const story = storyLines(ctx.chat, preset, user);
-      const prompt = buildForumRequest({preset, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [post.title, mine.text])});
-      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'reply'});
+      const prompt = buildForumRequest({preset, handles, earlier: memory?.storyMemory() || '', mode: 'reply', people: crowd, story, user, userPersona: userPersona(), post, reply: mine, lore: await lore(preset, crowd, story, [post.title, mine.text])});
+      const found = parseForum(await ask(ctx, prompt, preset), {user, mode: 'reply', handles});
+      await keepNames(found.names, crowd);
       if (!found.replies.length) throw Error('这次没有人接话，可以再试一次');
       return backend.addForumReplies(postId, found.replies);
     });

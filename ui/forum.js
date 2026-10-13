@@ -17,7 +17,9 @@ export function forumApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'forum');
   let open = '', epoch = 0, posts = [];
   const myName = () => api.getState().chat.profile?.name || api.userName?.() || '我';
-  const nameOf = who => who === 'me' ? myName() : who;
+  // 网名: everyone shows by their screen name on the board (the user's, set in 论坛 → … → 网名; characters' given or made up once).
+  const net = () => api.getState().chat.netNames || {};
+  const nameOf = who => who === 'me' ? net().me || myName() : net()[who] || who;
   const characters = () => new Set((api.chatContacts?.() || []).map(c => c.name));
   const face = (who, size) => who === 'me' ? avatar(myName(), 'none', size, 'me') : avatar(who, ctx.engineOf(who), size);
   const badge = (who, roles) => who === 'me' ? '<span class="forum-tag me">我</span>' : roles.has(who) ? '<span class="forum-tag">角色</span>' : '';
@@ -75,8 +77,22 @@ export function forumApp(ctx) {
     d.body.querySelector('input,textarea')?.focus();
     return d;
   }
+  /** 网名: the user's and the characters' screen names on the board; empty ones are made up on the next refresh. */
+  function netNames() {
+    const names = net(), people = (api.chatContacts?.() || []).map(c => c.name);
+    const d = ctx.dialog('网名', `<p class="help-copy">论坛上大家都用网名，路人和角色只看得到网名，不知道背后是谁。角色的网名空着的话，下次刷新论坛时会按人设起一个，之后一直用它。</p>
+      <div class="group pad">${field('我的网名', input('net-me', names.me || '', 'text', `maxlength="30" placeholder="空着就显示「${esc(myName())}」"`))}
+      ${people.map(n => field(n, input('net-' + n, names[n] || '', 'text', 'maxlength="30" placeholder="空着就让它起一个"'))).join('')}</div>
+      <div class="actions">${btn('net-save', '保存', 'primary')}</div>`);
+    d.body.addEventListener('click', e => {
+      if (!e.target.closest('[data-action=net-save]')) return;
+      const patch = {};
+      for (const el of d.body.querySelectorAll('[data-field^="net-"]')) patch[el.dataset.field.slice(4)] = el.value.trim() || null;
+      try { api.saveChatOptions({netNames: patch}); d.close(); ctx.notify('网名已保存'); render(); } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
+  }
   function newPost() {
-    sheet('发帖', `${field('标题', input('title', '', 'text', 'maxlength="60" placeholder="一句话说清楚想聊什么"'))}${field('正文', textArea('text', '', 'rows="5" maxlength="2000" placeholder="写点什么…"'))}
+    const d = sheet('发帖', `<p class="hint forum-as">以「${esc(nameOf('me'))}」发帖 ${btn('net-names', '改网名', 'text-button')}</p>${field('标题', input('title', '', 'text', 'maxlength="60" placeholder="一句话说清楚想聊什么"'))}${field('正文', textArea('text', '', 'rows="5" maxlength="2000" placeholder="写点什么…"'))}
       <div class="actions">${btn('send-post', icon('send') + '发布', 'primary')}</div>`, 'send-post', async d => {
       const title = d.body.querySelector('[data-field=title]').value.trim(), text = d.body.querySelector('[data-field=text]').value.trim();
       if (!text) throw Error('正文写点什么再发');
@@ -84,6 +100,7 @@ export function forumApp(ctx) {
       d.close(); open = post.id;
       if (api.forumReact) background(api.forumReact(post.id), () => '有人回复了你的帖子'); else render();
     });
+    d.body.addEventListener('click', e => { if (e.target.closest('[data-action=net-names]')) { e.preventDefault(); d.close(); netNames(); } });
   }
   function replyTo(to = '') {
     const named = to && to !== 'me';
@@ -96,11 +113,12 @@ export function forumApp(ctx) {
     });
   }
   function options() {
-    const d = ctx.dialog('论坛设置', `<p class="help-copy">帖子和热搜怎么写，在预设 App 的聊天预设里：勾了「论坛」的规则就用在这里（默认是「论坛口吻」）。</p>
+    const d = ctx.dialog('论坛设置', `<div class="actions">${btn('net-names', icon('edit') + '网名', 'secondary')}</div><p class="help-copy">帖子和热搜怎么写，在预设 App 的聊天预设里：勾了「论坛」的规则就用在这里（默认是「论坛口吻」）。</p>
       <div class="actions">${btn('edit-prompt', icon('edit') + '编辑聊天预设', 'secondary')}</div><div class="actions">${btn('clear-forum', icon('trash') + '清空论坛', 'danger')}</div>`);
     d.body.addEventListener('click', async e => {
       const b = e.target.closest('[data-action]');
       if (b?.dataset.action === 'edit-prompt') { d.close(); ctx.open('presets'); ctx.showPresetKind?.('chat'); }
+      if (b?.dataset.action === 'net-names') { d.close(); netNames(); }
       if (b?.dataset.action === 'clear-forum') {
         if (!await ctx.confirm('清空论坛？', '所有帖子、回复和热搜都会删除。')) return;
         d.close(); await api.clearForum(); open = ''; await render(); ctx.notify('论坛已清空');
@@ -116,6 +134,7 @@ export function forumApp(ctx) {
       case 'forum-refresh': background(api.forumRefresh(), made => `刷出了 ${made.length} 个新帖子`); break;
       case 'forum-new': newPost(); break;
       case 'forum-options': options(); break;
+      case 'net-names': netNames(); break;
       case 'open-post': open = el.dataset.id; await render(); v.root.scrollTop = 0; break;
       case 'forum-like': { const p = post || await api.getForumPost(open); if (p) { await api.likeForum(open, !p.liked); await render(); } break; }
       case 'forum-reply': replyTo(el.dataset.to || ''); break;

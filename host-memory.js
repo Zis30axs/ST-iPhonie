@@ -2,7 +2,7 @@
 // gives the chat, call, 查手机, 朋友圈 and (when switched on) story requests what a chat remembers: the written-up
 // layers and the older messages that match what is being talked about now. Writing uses the 文字模型 and costs one
 // request per summary; searching is local unless a 向量模型 is set up.
-import {nextBatch, nextMerge, addNode, buildMemoryRequest, parseMemory, memoryText, chunks, recall, recallText, textKey, transcript, roots, storyMemoryText, STORY_MEMORY} from './core/memory.js';
+import {nextBatch, nextMerge, addNode, buildMemoryRequest, parseMemory, memoryText, chunks, recall, recallText, textKey, transcript, roots, storyMemoryText, unwritten, STORY_MEMORY} from './core/memory.js';
 import {activeChatPreset} from './core/chat.js';
 
 // How many requests one go may make: after a reply only a little (a long backlog is caught up over several replies),
@@ -133,16 +133,28 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
     storyTimer = setTimeout(async () => {
       try {
         const o = options(), ctx = context();
-        if (!o.enabled || !o.story || !ctx) { put(''); return; }
-        const names = new Set([ctx.name2].filter(Boolean));
-        if (ctx.groupId) for (const member of ctx.groups?.find(g => g.id === ctx.groupId)?.members || []) { const n = ctx.characters?.find(c => c.avatar === member)?.name; if (n) names.add(n); }
-        const parts = [], user = userName();
-        for (const name of names) {
-          const thread = await privateChat(name);
+        if (!ctx) { put(''); return; }
+        if (o.story) await moveOldSwitch(ctx);
+        // 一直带着: the chats (of the card open now) the user marked, each with its written-up memory and every message
+        // not written up yet, so nothing in between is missed; too many of those: the newest, and a write-up now.
+        // Only the chats of the card open now: made in it, or with one of its characters.
+        const key = backend.cardKey?.() || '', names = cardNames(ctx);
+        const marked = (await backend.threads()).filter(t => t.story && ((key && t.space === key) || t.members.some(n => names.has(n))));
+        const parts = [], user = userName(), budget = Math.max(1200, Math.floor(6000 / Math.max(1, marked.length)));
+        for (const row of marked) {
+          const thread = await backend.chats.get(row.id);
           if (!thread) continue;
-          const {text} = await contextFor(thread, {cap: 2500, recallCount: 0, record: false});
-          const last = thread.messages.filter(m => m.kind !== 'system').slice(-10);
-          const recent = last.length ? `【${user}和${name}最近在手机上的聊天】\n${transcript(last, user)}` : '';
+          const name = who(thread), group = thread.type === 'group';
+          const {text} = await contextFor(thread, {cap: budget, recallCount: 0, record: false});
+          const fresh = unwritten(thread, o.enabled ? await backend.memoryBook(thread.id) : null).filter(m => m.kind !== 'system');
+          const kept = [];
+          for (let i = fresh.length - 1, size = 0; i >= 0; i--) {
+            const line = transcript([fresh[i]], user);
+            if (kept.length && size + line.length > budget) break;
+            kept.unshift(fresh[i]); size += line.length;
+          }
+          if (o.enabled && kept.length < fresh.length) tidy(thread.id, {force: true}).catch(() => {});
+          const recent = kept.length ? `【${user}和${group ? `群聊「${name}」` : name}在手机上${text ? '后来' : ''}的聊天${kept.length < fresh.length ? `（最近 ${kept.length} 条）` : ''}】\n${transcript(kept, user)}` : '';
           if (text || recent) parts.push([text, recent].filter(Boolean).join('\n'));
         }
         put(parts.length ? `【小手机】（${user}和角色们在手机上聊过的事，角色都记得；剧情里自然提起就好，不用复述）\n${parts.join('\n\n')}` : '');
@@ -151,16 +163,33 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
       finish();
     }, delay);
   }
+  /** The characters of the card open now (the character, or the group's members). */
+  function cardNames(ctx) {
+    const names = new Set([ctx.name2].filter(Boolean));
+    if (ctx.groupId) for (const member of ctx.groups?.find(g => g.id === ctx.groupId)?.members || []) { const n = ctx.characters?.find(c => c.avatar === member)?.name; if (n) names.add(n); }
+    return names;
+  }
+  /**
+   * Before 0.7.52 one switch (预设 → 聊天 → 记忆「正文也带上」) brought the open card's private chats; now each chat
+   * has its own (带进剧情 → 一直带着). Those chats are marked once and the old switch is put off.
+   */
+  async function moveOldSwitch(ctx) {
+    for (const name of cardNames(ctx)) {
+      const thread = await privateChat(name);
+      if (thread && !thread.story) await backend.chatMutate(thread.id, () => backend.chats.update(thread.id, {story: true})).catch(() => {});
+    }
+    const preset = activeChatPreset(settings().chat);
+    try { backend.saveChatPreset({...preset, memory: {...preset.memory, story: false}}); } catch { /* tried again next time */ }
+  }
   /** Waits (a little) for the story memory being worked out, so a story request right after changing cards has it. */
   function storyReady(limit = 1500) {
-    if (!options().story) return Promise.resolve();
     // Worked out for another card (the card changed and the tavern has not said so yet): again, now.
     if (storyFor !== cardKey()) refreshStory(0);
     return Promise.race([storyDone, new Promise(r => setTimeout(r, limit))]);
   }
   /** Prompt entries for inject(): the phone memory for the story, placed like 带进剧情. */
   function storyPlan() {
-    if (!storyText || !options().story) return [];
+    if (!storyText) return [];
     const i = activeChatPreset(settings().chat).injection, inChat = i.position === 'in_chat';
     return [{key: 'sttts.entry.memory', text: storyText, position: {in_chat: 1, in_prompt: 0, before_prompt: 2}[i.position], depth: inChat ? i.depth : 0, role: inChat ? {system: 0, user: 1, assistant: 2}[i.role] : 0}];
   }

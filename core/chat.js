@@ -56,7 +56,7 @@ export function normalizeVoiceText(v = {}) {
 }
 
 export function defaultChat() {
-  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive()};
+  return {presets: [{...structuredClone(DEFAULT_PRESET), memory: normalizeMemory()}], activePreset: 'default', contacts: [], voiceText: {...DEFAULT_VOICE_TEXT}, profile: normalizeProfile(), starred: [], avatars: {}, partition: 'none', pace: true, wallet: defaultWallet(), stickers: [], proactive: normalizeProactive(), remarks: {}, netNames: {}};
 }
 
 const text = (value, max) => String(value ?? '').slice(0, max);
@@ -145,6 +145,19 @@ export function normalizeProfile(p = {}) {
  * Avatar choices by name ('me' is the user): a photo from the album, or plain text (the first letter). A name that is
  * not listed shows the tavern's own avatar when there is one (character card, persona), else the first letter.
  */
+/**
+ * Other names by person: 备注 (remarks: what the user calls a contact in the chat app — only the user sees it) and
+ * 网名 (netNames: the names on the forum; 'me' is the user's). {name: other name}.
+ */
+export function normalizeNames(value, max = 30) {
+  const out = {};
+  if (!value || typeof value !== 'object') return out;
+  for (const [name, other] of Object.entries(value).slice(0, CHAT_LIMITS.contacts * 2)) {
+    const key = text(name, 40).trim(), v = text(other, max).trim();
+    if (key && v && v !== key) out[key] = v;
+  }
+  return out;
+}
 export function normalizeAvatars(value) {
   const out = {};
   if (!value || typeof value !== 'object') return out;
@@ -200,7 +213,7 @@ export function normalizeChat(value) {
   const presets = (Array.isArray(value.presets) && value.presets.length ? value.presets : base.presets).map(normalizeChatPreset);
   const contacts = (Array.isArray(value.contacts) ? value.contacts : []).slice(0, CHAT_LIMITS.contacts).map(normalizeContact).filter(c => c.name);
   const starred = [...new Set((Array.isArray(value.starred) ? value.starred : []).map(n => text(n, 40).trim()).filter(Boolean))].slice(0, CHAT_LIMITS.contacts);
-  return {presets, activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : presets[0].id, contacts, voiceText: normalizeVoiceText(value.voiceText), profile: normalizeProfile(value.profile), wallet: normalizeWallet(value.wallet), starred, avatars: normalizeAvatars(value.avatars), partition: value.partition === 'card' ? 'card' : 'none', pace: value.pace !== false, stickers: normalizeStickers(value.stickers), proactive: normalizeProactive(value.proactive)};
+  return {presets, activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : presets[0].id, contacts, voiceText: normalizeVoiceText(value.voiceText), profile: normalizeProfile(value.profile), wallet: normalizeWallet(value.wallet), starred, avatars: normalizeAvatars(value.avatars), partition: value.partition === 'card' ? 'card' : 'none', pace: value.pace !== false, stickers: normalizeStickers(value.stickers), proactive: normalizeProactive(value.proactive), remarks: normalizeNames(value.remarks, 20), netNames: normalizeNames(value.netNames, 30)};
 }
 
 // ---------- 主动发消息: characters text the user on their own ----------
