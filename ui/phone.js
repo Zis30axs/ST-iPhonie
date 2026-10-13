@@ -414,23 +414,35 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   // ---------- 音乐 on the lock screen and in the control center ----------
   const musicNow = () => { try { return api.musicStatus?.() || null; } catch { return null; } };
+  const musicLine = s => { const t = s?.track; return !t ? '点这里打开音乐' : s.phase === 'loading' ? '正在找这首歌……' : s.phase === 'error' ? s.message : s.lyric || (t.artist || (t.from === 'bgm' ? '背景音乐' : '')); };
   /** The song playing (cover, song, its lyric line, previous / play / next); a tap on the song opens 音乐. */
   function musicTile(where) {
     const s = musicNow(), t = s?.track, playing = s?.phase === 'playing';
     if (!t && where === 'lock') return '';
-    const line = !t ? '点这里打开音乐' : s.phase === 'loading' ? '正在找这首歌……' : s.phase === 'error' ? s.message : s.lyric || (t.artist || (t.from === 'bgm' ? '背景音乐' : ''));
-    return `<div class="${where === 'lock' ? 'widget' : 'control-tile wide'} music-tile" data-music-tile data-playing="${playing ? '1' : ''}">
+    const line = musicLine(s);
+    return `<div class="${where === 'lock' ? 'widget' : 'control-tile wide'} music-tile" data-music-tile data-song="${esc(t ? t.title + '|' + t.artist : '')}" data-has="${!!t}" data-playing="${playing ? '1' : ''}">
       <button type="button" class="music-tile-open" data-app="music" aria-label="打开音乐"><span class="music-tile-disc" aria-hidden="true">${icon('music')}</span><span class="music-tile-text"><strong>${esc(t ? t.title : '音乐')}</strong><small data-music-line>${esc(line)}</small></span></button>
-      ${t ? `<span class="music-tile-buttons"><button type="button" data-music="prev" aria-label="上一首">${icon('prev', true)}</button><button type="button" data-music="toggle" aria-label="${playing ? '暂停' : '播放'}">${icon(playing ? 'pause' : 'play', true)}</button><button type="button" data-music="next" aria-label="下一首">${icon('skip', true)}</button></span>` : ''}</div>`;
+      ${t ? `<span class="music-tile-buttons"><button type="button" data-music="prev" aria-label="上一首">${icon('prev', true)}</button><button type="button" data-music="toggle" data-on="${playing}" aria-label="${playing ? '暂停' : '播放'}">${icon(playing ? 'pause' : 'play', true)}</button><button type="button" data-music="next" aria-label="下一首">${icon('skip', true)}</button></span>` : ''}</div>`;
   }
-  /** The song changed, or its lyric line: every music tile on screen follows. */
+  /** The song changed, or its lyric line: every music tile on screen follows — patched in place while the same song
+   *  plays (rebuilt each second, its turning disc would start over), rebuilt for another song. */
   function paintMusic() {
+    const s = musicNow(), t = s?.track, songKey = t ? t.title + '|' + t.artist : '';
     for (const el of mount.querySelectorAll('[data-music-tile]')) {
-      const where = el.classList.contains('widget') ? 'lock' : 'control', html = musicTile(where);
+      const where = el.classList.contains('widget') ? 'lock' : 'control';
+      if (el.dataset.song === songKey && el.dataset.has === String(!!t)) {
+        const playing = s?.phase === 'playing';
+        el.dataset.playing = playing ? '1' : '';
+        const line = el.querySelector('[data-music-line]'), text = musicLine(s);
+        if (line && line.textContent !== text) line.textContent = text;
+        const b = el.querySelector('[data-music=toggle]');
+        if (b && b.dataset.on !== String(playing)) { b.dataset.on = String(playing); b.innerHTML = icon(playing ? 'pause' : 'play', true); b.setAttribute('aria-label', playing ? '暂停' : '播放'); }
+        continue;
+      }
+      const html = musicTile(where);
       if (!html) { el.remove(); continue; }
       const tpl = doc.createElement('template'); tpl.innerHTML = html;
-      const next = tpl.content.firstElementChild;
-      if (next.outerHTML !== el.outerHTML) el.replaceWith(next);
+      el.replaceWith(tpl.content.firstElementChild);
     }
     // A song started while the lock screen shows and it had no music widget yet.
     if (locked && !lockscreen.querySelector('[data-music-tile]')) { const html = musicTile('lock'); if (html) lockscreen.querySelector('.lock-bottom')?.insertAdjacentHTML('beforebegin', html); }
@@ -888,7 +900,14 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   const previousOpenRole = win.stTtsOpenRole, previousVisibility = win.stTtsPanelVisibility, previousOpenDraw = win.stTtsOpenDraw, previousOpenThread = win.stTtsOpenThread;
   win.stTtsOpenRole = id => open('roles', id);
   const previousOpenApp = win.stTtsOpenApp;
-  win.stTtsOpenApp = name => { if (FACTORIES[name]) run(() => open(name)); };
+  /** An App the tavern page asked for (the music island's double tap): taken when the phone shows, or right away. */
+  function takeApp() {
+    const name = api.takeApp?.();
+    if (!name || !FACTORIES[name]) return false;
+    open(name);
+    return true;
+  }
+  win.stTtsOpenApp = name => run(() => name && FACTORIES[name] ? open(name) : takeApp());
   function takeDraw() {
     const request = api.takeDraw?.();
     if (!request) return false;
@@ -913,6 +932,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (!visible) { sheet?.close(null); if (active) views.get(active)?.leave?.(); }
     else if (takeDraw()) { /* opened from a chat picture */ }
     else if (takeThread()) { /* opened from a message card */ }
+    else if (takeApp()) { /* opened from the music island */ }
     else if (preferences?.lockOnOpen && !api.pendingRole()) lock();
     else if (reopening && !preserveView && !preferences?.lockOnOpen && !api.pendingRole()) { unlock(); showHome(true); }
     else if (active && !locked && !doc.hidden) run(() => views.get(active)?.resume?.());
@@ -968,6 +988,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     const pending = api.pendingRole();
     if (pending) openPendingRole(pending);
     else if (takeDraw()) { /* opened from a chat picture */ }
+    else if (takeApp()) { /* opened from the music island */ }
     else if (p.lockOnOpen) lock();
   }).catch(error => {
     if (disposed) return;

@@ -2243,3 +2243,15 @@ button.aui-card:active{transform:scale(.98)}
 @media (prefers-reduced-motion:reduce){.music-tile-disc{animation:none}}
 .lockscreen .music-tile.widget{flex-direction:row;align-items:center;justify-content:flex-start;text-align:left;gap:8px}
 .music-tile-text small{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.music-now .music-cover{border:0;padding:0;cursor:pointer;font:inherit;animation:music-spin 8s linear infinite;animation-play-state:paused}
+.music-now[data-playing="1"] .music-cover{animation-play-state:running}
+.music-now.idle .music-cover{cursor:default;animation:none}
+.music-now .music-cover:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.music-now.lyric-view .music-lyrics{max-height:240px;margin:2px -4px;padding:40px 4px}
+.music-lyrics .music-lyric{display:block;width:100%;margin:2px 0;padding:4px 6px;border:0;border-radius:10px;background:transparent;color:var(--ink2);font:inherit;font-size:13px;line-height:1.5;text-align:center;cursor:pointer;transition:color .3s,transform .3s,background-color .2s}
+.music-lyrics .music-lyric:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.music-lyrics .music-lyric.now{color:var(--ink);font-weight:800;transform:scale(1.06)}
+.music-no-lyric{color:var(--ink2);font-size:13px;line-height:1.6}
+.music-no-lyric small{font-size:11.5px}
+@media (prefers-reduced-motion:reduce){.music-now .music-cover{animation:none}}
+.music-lyrics{overflow-x:hidden}

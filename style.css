@@ -169,23 +169,39 @@
 #chat [data-sttts-action="bgm"]{display:inline-flex;align-items:center;gap:4px;margin:0 0 .4em;padding:2px 10px;border:1px solid color-mix(in srgb,var(--SmartThemeQuoteColor,#7dadd6) 45%,transparent);border-radius:999px;background:color-mix(in srgb,var(--SmartThemeQuoteColor,#7dadd6) 12%,transparent);color:var(--SmartThemeQuoteColor,#5b8fc4);font:inherit;font-size:.82em;line-height:1.6;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
 #chat [data-sttts-action="bgm"]:hover{background:color-mix(in srgb,var(--SmartThemeQuoteColor,#7dadd6) 22%,transparent)}
 #chat .sttts-bgm{display:block}
-/* 音乐小窗: the song and its lyric line while the phone is put away. */
-.sttts-music-island{position:fixed;z-index:30990;width:min(300px,calc(100vw - 16px));padding:8px 10px 10px;border-radius:26px;background:#000;color:#fff;box-shadow:0 10px 30px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:13px/1.4 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;touch-action:none;user-select:none;cursor:grab;animation:sttts-mi-in .45s cubic-bezier(.34,1.3,.64,1)}
+/* 音乐小窗: a small black pill (disc, the line being sung, a wave); a tap opens it into a card. */
+.sttts-music-island{position:fixed;z-index:30990;width:max-content;max-width:min(240px,calc(100vw - 16px));padding:5px 12px 5px 5px;border-radius:999px;background:#000;color:#fff;box-shadow:0 8px 24px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:12px/1.35 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;animation:sttts-mi-in .45s cubic-bezier(.34,1.3,.64,1);transition:max-width .35s cubic-bezier(.34,1.2,.64,1),padding .35s cubic-bezier(.34,1.2,.64,1),border-radius .35s ease}
 .sttts-music-island[hidden]{display:none}
 .sttts-music-island[data-dragging]{cursor:grabbing}
-.sttts-music-island .mi-row{display:flex;align-items:center;gap:8px}
-.sttts-music-island .mi-disc{flex:none;width:34px;height:34px;border-radius:50%;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);display:grid;place-items:center;animation:sttts-mi-spin 6s linear infinite;animation-play-state:paused}
+.sttts-music-island .mi-pill{display:flex;align-items:center;gap:8px;height:26px}
+.sttts-music-island .mi-card{display:none}
+.sttts-music-island[data-expanded="1"]{width:min(300px,calc(100vw - 16px));max-width:min(300px,calc(100vw - 16px));padding:10px 12px 12px;border-radius:28px}
+.sttts-music-island[data-expanded="1"] .mi-pill{display:none}
+.sttts-music-island[data-expanded="1"] .mi-card{display:block;animation:sttts-mi-open .3s ease}
+.sttts-music-island .mi-disc{flex:none;width:26px;height:26px;border-radius:50%;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);display:grid;place-items:center;animation:sttts-mi-spin 6s linear infinite;animation-play-state:paused}
+.sttts-music-island .mi-disc.big{width:38px;height:38px}
 .sttts-music-island[data-playing="1"] .mi-disc{animation-play-state:running}
-.sttts-music-island .mi-disc i{width:10px;height:10px;border-radius:50%;background:#000}
+.sttts-music-island .mi-disc i{width:30%;height:30%;border-radius:50%;background:#000}
+.sttts-music-island .mi-line{min-width:0;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.sttts-music-island .mi-bars{flex:none;display:flex;align-items:center;gap:2px;height:14px}
+.sttts-music-island .mi-bars i{width:2.5px;height:30%;border-radius:2px;background:#ff8ab3;transform-origin:center}
+.sttts-music-island[data-playing="1"] .mi-bars i{animation:sttts-mi-bar .9s ease-in-out infinite}
+.sttts-music-island .mi-bars i:nth-child(2){animation-delay:-.3s;background:#8fd8ff}
+.sttts-music-island .mi-bars i:nth-child(3){animation-delay:-.6s;background:#ffd36a}
+.sttts-music-island .mi-bars i:nth-child(4){animation-delay:-.15s}
+.sttts-music-island .mi-row{display:flex;align-items:center;gap:8px}
 .sttts-music-island .mi-text{flex:1;min-width:0;display:grid}
 .sttts-music-island .mi-text b,.sttts-music-island .mi-text small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sttts-music-island .mi-text b{font-size:13px}
 .sttts-music-island .mi-text small{color:rgba(255,255,255,.6);font-size:11px}
 .sttts-music-island .mi-btn{flex:none;width:30px;height:30px;border:0;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}
 .sttts-music-island .mi-btn svg{width:16px;height:16px}
 .sttts-music-island .mi-close{background:transparent;color:rgba(255,255,255,.55)}
-.sttts-music-island .mi-lyrics{margin-top:6px;text-align:center;overflow:hidden}
-.sttts-music-island .mi-lyrics p{margin:0;font-size:11px;line-height:1.5;color:rgba(255,255,255,.4);min-height:1.5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color .3s}
+.sttts-music-island .mi-lyrics{margin-top:8px;text-align:center;overflow:hidden}
+.sttts-music-island .mi-lyrics p{margin:0;font-size:11px;line-height:1.5;color:rgba(255,255,255,.4);min-height:1.5em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sttts-music-island .mi-lyrics p.now{font-size:14px;font-weight:700;color:#fff}
 @keyframes sttts-mi-in{from{opacity:0;transform:var(--mi-from,translateX(-50%)) scale(.6)}}
+@keyframes sttts-mi-open{from{opacity:0}}
 @keyframes sttts-mi-spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.sttts-music-island,.sttts-music-island .mi-disc{animation:none}}
+@keyframes sttts-mi-bar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1.6)}}
+@media (prefers-reduced-motion:reduce){.sttts-music-island,.sttts-music-island .mi-disc,.sttts-music-island .mi-bars i,.sttts-music-island .mi-card{animation:none!important;transition:none}}

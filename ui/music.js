@@ -26,16 +26,42 @@ export function musicApp(ctx) {
   const state = () => api.getState().music;
   const now = () => { try { return api.musicStatus?.() || null; } catch { return null; } };
 
+  // 正在播放: built once per song (and when the lyrics view opens or closes), then only patched — redrawn every second,
+  // the turning disc would start over each time.
+  const keyOf = s => s?.track ? JSON.stringify([s.track.title, s.track.artist, s.track.from, showLyrics, (s.lyrics || []).length]) : '';
   function nowPlaying() {
     const s = now(), t = s?.track;
-    if (!t) return `<div class="music-now idle"><span class="music-cover" aria-hidden="true">${icon('music')}</span><div class="music-now-text"><strong>没有在放歌</strong><small>点歌单或搜索结果里的歌开始放</small></div></div>`;
-    const playing = s.phase === 'playing', lines = s.lyrics || [];
-    return `<div class="music-now" data-phase="${esc(s.phase)}"><div class="music-now-top"><span class="music-cover${playing ? ' spin' : ''}" aria-hidden="true">${icon('music')}</span>
+    if (!t) return `<div class="music-now idle" data-now-key=""><span class="music-cover" aria-hidden="true">${icon('music')}</span><div class="music-now-text"><strong>没有在放歌</strong><small>点歌单或搜索结果里的歌开始放</small></div></div>`;
+    const lines = s.lyrics || [];
+    const lyricView = `<div class="music-lyrics" data-music-lyrics>${lines.length ? lines.map((l, i) => `<button type="button" class="music-lyric" data-action="lyric-seek" data-i="${i}" data-at="${l.at}">${esc(l.text || '♪')}</button>`).join('') : `<p class="music-no-lyric">这首歌没有歌词${t.origin === 'file' ? '<br><small>在歌单里点这首歌的「⋯」可以贴 LRC 歌词</small>' : ''}</p>`}</div>`;
+    return `<div class="music-now${showLyrics ? ' lyric-view' : ''}" data-now-key="${esc(keyOf(s))}"><div class="music-now-top"><button type="button" class="music-cover" data-action="lyrics" aria-label="${showLyrics ? '收起歌词' : '看歌词'}" title="${showLyrics ? '收起歌词' : '点一下看歌词'}">${icon('music')}</button>
         <div class="music-now-text"><strong>${esc(t.title)}</strong><small>${esc(t.artist || (t.from === 'bgm' ? '背景音乐' : ''))}${t.from === 'bgm' ? ' · 正文点的歌' : ''}</small></div></div>
-      <div class="music-progress"><span data-music-pos>${clock(s.position)}</span><input type="range" class="slider" min="0" max="${Math.max(1, Math.round(s.duration))}" value="${Math.round(s.position)}" data-music-seek aria-label="播放进度"><span>${clock(s.duration)}</span></div>
-      <div class="music-controls">${btn('music-prev', icon('prev', true), 'round-button', 'aria-label="上一首"')}${btn('music-toggle', icon(playing ? 'pause' : 'play', true), 'music-main', `aria-label="${playing ? '暂停' : '播放'}"`)}${btn('music-next', icon('skip', true), 'round-button', 'aria-label="下一首"')}${btn('music-stop', icon('stop', true), 'round-button', 'aria-label="停止"')}</div>
-      ${s.message ? `<p class="hint music-message" role="status">${esc(s.message)}</p>` : ''}
-      ${lines.length ? `<button type="button" class="music-lyric-line" data-action="lyrics" aria-expanded="${showLyrics}">${esc(s.lyric || '♪')}</button>${showLyrics ? `<div class="music-lyrics" data-music-lyrics>${lines.map((l, i) => `<p data-i="${i}"${i === s.lyricIndex ? ' class="now"' : ''}>${esc(l.text || '♪')}</p>`).join('')}</div>` : ''}` : ''}</div>`;
+      ${showLyrics ? lyricView : `<button type="button" class="music-lyric-line" data-action="lyrics" data-music-line aria-label="看歌词"></button>`}
+      <div class="music-progress"><span data-music-pos>0:00</span><input type="range" class="slider" min="0" max="1" value="0" data-music-seek aria-label="播放进度"><span data-music-dur>0:00</span></div>
+      <div class="music-controls">${btn('music-prev', icon('prev', true), 'round-button', 'aria-label="上一首"')}${btn('music-toggle', '', 'music-main', 'aria-label="播放"')}${btn('music-next', icon('skip', true), 'round-button', 'aria-label="下一首"')}${btn('music-stop', icon('stop', true), 'round-button', 'aria-label="停止"')}</div>
+      <p class="hint music-message" role="status" data-music-message hidden></p></div>`;
+  }
+  /** The parts that change while a song plays: time, progress, play/pause, the lyric line, the message. */
+  function paintNow() {
+    const card = v.root.querySelector('.music-now'), s = now();
+    if (!card || card.dataset.nowKey === undefined) return;
+    const playing = s?.phase === 'playing';
+    card.dataset.playing = playing ? '1' : '';
+    if (!s?.track) return;
+    const set = (sel, text) => { const el = card.querySelector(sel); if (el && el.textContent !== text) el.textContent = text; };
+    set('[data-music-pos]', clock(s.position)); set('[data-music-dur]', clock(s.duration));
+    const seek = card.querySelector('[data-music-seek]');
+    if (seek && ctx.doc.activeElement !== seek) { const max = String(Math.max(1, Math.round(s.duration))); if (seek.max !== max) seek.max = max; seek.value = String(Math.round(s.position)); }
+    const toggle = card.querySelector('[data-action=music-toggle]');
+    if (toggle && toggle.dataset.on !== String(playing)) { toggle.dataset.on = String(playing); toggle.innerHTML = icon(playing ? 'pause' : 'play', true); toggle.setAttribute('aria-label', playing ? '暂停' : '播放'); }
+    set('[data-music-line]', s.lyric || ((s.lyrics || []).length ? '♪' : '点这里看歌词'));
+    const message = card.querySelector('[data-music-message]');
+    if (message) { message.hidden = !s.message; set('[data-music-message]', s.message || ''); }
+    const box = card.querySelector('[data-music-lyrics]');
+    if (box) {
+      const old = box.querySelector('.now'), cur = box.querySelector(`[data-i="${s.lyricIndex}"]`);
+      if (old !== cur) { old?.classList.remove('now'); cur?.classList.add('now'); if (cur) box.scrollTo({top: cur.offsetTop - box.clientHeight / 2 + cur.offsetHeight / 2, behavior: ctx.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'}); }
+    }
   }
   const songRow = (s, i, list) => `<div class="list-row music-row" data-list="${list}" data-i="${i}"><button type="button" class="music-row-main" data-action="play" data-list="${list}" data-i="${i}"><span><strong>${esc(s.title)}</strong><small>${esc(s.artist || '未知歌手')}${list === 'results' ? ' · ' + esc(s.sourceName || '') : s.origin === 'source' ? ' · ' + esc(state().sources.find(x => x.id === s.source)?.name || '音源') : ' · 本机'}</small></span></button>${list === 'results' ? btn('save-song', icon('add'), 'icon-button', `data-i="${i}" aria-label="加进歌单"`) : btn('song-menu', icon('more'), 'icon-button', `data-i="${i}" aria-label="这首歌的选项"`)}</div>`;
 
@@ -58,21 +84,15 @@ export function musicApp(ctx) {
       + nowPlaying()
       + `<div class="segmented" role="group" aria-label="歌单或搜索">${[['library', '歌单'], ['search', '搜索']].map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${tab === k}">${l}</button>`).join('')}</div>`
       + list);
-    scrollLyric();
+    paintNow();
   }
-  function scrollLyric() {
-    const box = v.root.querySelector('[data-music-lyrics]'), cur = box?.querySelector('.now');
-    if (box && cur) box.scrollTop = cur.offsetTop - box.clientHeight / 2 + cur.offsetHeight / 2;
-  }
-  /** Only the now-playing card changes while a song plays (the lists keep their scroll and taps). */
+  /** Only the now-playing card changes while a song plays (the lists keep their scroll and taps); a new song or the
+   *  lyrics view opening builds it again, anything else is patched. */
   function refreshNow() {
     const card = v.root.querySelector('.music-now');
     if (!card || mode !== 'main') return;
-    const seek = card.querySelector('[data-music-seek]');
-    if (seek && ctx.doc.activeElement === seek) return;
-    const tpl = ctx.doc.createElement('template'); tpl.innerHTML = nowPlaying();
-    card.replaceWith(tpl.content.firstElementChild);
-    scrollLyric();
+    if (card.dataset.nowKey !== keyOf(now())) { const tpl = ctx.doc.createElement('template'); tpl.innerHTML = nowPlaying(); card.replaceWith(tpl.content.firstElementChild); }
+    paintNow();
   }
 
   function renderSettings() {
@@ -138,6 +158,7 @@ export function musicApp(ctx) {
       case 'music-prev': api.musicPrev?.(); break;
       case 'music-stop': api.musicStop?.(); break;
       case 'lyrics': showLyrics = !showLyrics; refreshNow(); break;
+      case 'lyric-seek': api.musicSeek?.(Number(el.dataset.at)); break;
       case 'save-song': {
         const s = results[i];
         try { const added = await api.addSongs([{title: s.title, artist: s.artist, source: s.source, songId: s.id}]); ctx.notify(added.length ? `「${s.title}」加进歌单了` : '歌单里已经有这首了'); }
