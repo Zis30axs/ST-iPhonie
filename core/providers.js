@@ -2,7 +2,8 @@ import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
 import { TTSParameters as P } from './parameters.js';
 import { speakable } from './voice-fx.js';
-const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo'};
+import { buildCustomRequest, customInit, readCustomAnswer, customVoices } from './custom-voice.js';
+const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',custom:'自己的接口'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
 const object=value=>Object.prototype.toString.call(value)==='[object Object]';
 function checkedConnection(engine,connection,route,line,references){
@@ -32,6 +33,8 @@ function checkedConnection(engine,connection,route,line,references){
  return c;
 }
 export function buildRequest(engine,connection,route,line,references=new Map()){line=speakable(line);// 心声/电话 are played, not read: off the emotion before the engine sees it.
+ // 自己的接口: the user's templates (core/custom-voice.js).
+ if(engine==='custom'){if(!object(connection)||!object(connection.params))throw Error('引擎设置格式无效，请重新保存引擎设置');return buildCustomRequest({...connection,params:{...P.defaults('custom'),...connection.params}},route,line);}
  const c=checkedConnection(engine,connection,route,line,references);
  // MiMo's preset model knows only its own voices. A 音色 that names a clone sample is drawn with the clone model;
  // any other name is explained here instead of MiMo's English "Unknown voice".
@@ -156,6 +159,7 @@ export class Providers{
   * we sent, that field is dropped and the request is sent once more; the model is remembered so later lines skip it.
   */
  async synthesize(request,signal){
+  if(request.engine==='custom')return this.speakCustom(request,signal);
   const model=request.body?.model_id,body={...request.body};
   for(const field of this.refused.get(model)||[])delete body[field];
   let response=await this.post(request,body,signal);
@@ -178,6 +182,18 @@ export class Providers{
   try{this.onSpend?.(request.engine);}catch{}
   if(request.engine==='mimo')return decodeMimo(response,request);
   if(request.engine==='mini')return decodeMini(response,request,this.fetcher,signal);if(response.headers.get('Content-Type')?.includes('json'))throw Error(names[request.engine]+' 未返回音频');return audioBlob(await limitedBytes(response),request);}
+ /**
+  * 自己的接口: the request as the templates say, the key (optional) put in now. A service that does not let web pages
+  * ask it (no CORS) is asked again through the tavern's own proxy (this.proxy, set by the backend).
+  */
+ async speakCustom(request,signal){
+  const {url,init}=customInit(request,this.keys.get('custom')||'');
+  const send=async target=>{try{return await fetchWithPolicy(this.fetcher,target,init,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
+   const relayed=await this.proxy(target,init,signal).catch(()=>null);if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
+   if(relayed.status===403&&/CORS proxy is disabled/i.test(await relayed.clone().text().catch(()=>'')))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');return relayed;}};
+  const response=await send(url);
+  return readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link)});
+ }
  /** ElevenLabs 音效 (text to sound effects): an English description to an MP3. seconds 0: ElevenLabs picks; loop: an ambience that loops seamlessly. */
  async soundEffect({text,seconds=0,loop=false},signal=new AbortController().signal){
   const body={text:String(text||'').slice(0,450),model_id:'eleven_text_to_sound_v2',prompt_influence:.4,...(seconds?{duration_seconds:Math.min(30,Math.max(.5,Number(seconds)))}:{}),...(loop?{loop:true}:{})};
@@ -193,6 +209,7 @@ export class Providers{
  /** What a voice list says about a voice besides its name (description, tags, gender and age, languages), for picking one. */
  static voiceInfo(engine,v){const list=x=>Array.isArray(x)?x.filter(y=>typeof y==='string'):[];const parts=engine==='fish'?[v.description,list(v.tags).join(' '),list(v.languages).join('/')]:engine==='mini'?[Array.isArray(v.description)?list(v.description).join('；'):v.description]:[Object.values(v.labels&&typeof v.labels==='object'?v.labels:{}).filter(x=>typeof x==='string').join(' '),v.description];return parts.filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim().replace(/\s+/g,' ')).join(' · ').slice(0,240);}
  async voices(engine,c,{search='',page=0,token=''}={}){
+  if(engine==='custom'){const q=search.trim().toLowerCase(),all=customVoices({params:{...P.defaults('custom'),...c?.params}});return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)):all,more:false,token:'',note:all.length?'自己的接口里添加的音色':'还没有音色：在引擎 App 的「自己的接口」里添加'};}
   if(engine==='fish'&&P.fishOpenAI(c))throw Error('这个中转（OpenAI 格式）没有音色列表：在角色的「音色」里直接填 Fish 的音色 ID（fish.audio 网站上音色页面地址里那串字母数字）');
   if(engine==='mimo'){const mode=P.mimoMode(c.model),q=search.trim().toLowerCase();const all=mode==='preset'?P.vocab.MIMO_VOICES.map(([id,name])=>({id,name})):mode==='clone'?c.params.samples.filter(x=>String(x.name).trim()).map(x=>({id:String(x.name).trim(),name:String(x.name).trim()+' · 克隆样本'})):[];
    return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)):all,more:false,token:'',note:mode==='design'?'音色设计模型没有音色列表：在「音色」一栏写音色描述':mode==='clone'?'克隆样本在 MiMo 引擎里上传':'MiMo 内置音色'};}

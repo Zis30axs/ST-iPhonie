@@ -40,7 +40,7 @@ import { vibeKey, readVibeFile, imageVibe, mergeVibe, encodingFor, withEncoding,
 const AUDIO = Symbol('audio');
 
 export const BACKEND_API_VERSION = '1.0.0';
-const ENGINES = ['fish', 'mini', 'eleven', 'mimo'];
+const ENGINES = ['fish', 'mini', 'eleven', 'mimo', 'custom'];
 /** A small JPEG data URI of a base64 picture, for the vibe list; '' where pictures cannot be drawn (no canvas). */
 async function vibeThumbnail(base64) {
     try {
@@ -103,6 +103,8 @@ export class TTSBackend {
         this.persist = persist;
         this.notify = notify;
         this.providers = providers;
+        // 自己的接口 that does not let web pages ask it: asked through the tavern's own proxy, with the tavern's login.
+        if (!this.providers.proxy) this.providers.proxy = (url, init, signal) => this.imageFetch('/proxy/' + encodeURIComponent(url), { ...init, credentials: 'same-origin', headers: { ...init.headers, ...this.tavernHeaders() }, signal });
         // Voice balances (ElevenLabs, Fish) read for the engine cards; a new audio marks them out of date.
         this.balances = new Map();
         // Several Fish keys: when one gives way to the next, the balance shown belongs to the old key.

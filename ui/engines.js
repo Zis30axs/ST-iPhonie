@@ -3,6 +3,7 @@ import {createView, esc, engines, btn, field, input, select, textArea, toggle, h
 const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
 import {icon, spark} from './icons.js';
 import {fly} from './carry.js';
+import {CUSTOM_TEMPLATES} from '../core/custom-voice.js';
 
 export function enginesApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'engines'), drafts = new Map();
@@ -74,17 +75,20 @@ export function enginesApp(ctx) {
       ? [['SOURCE', custom ? 'CUSTOM API' : 'TAVERN'], ['MODEL', custom ? t.presets.find(p => p.id === t.active)?.model || '未填写' : '跟随酒馆']]
       : nai
       ? [['TIER', subscription ? TIERS[subscription.tier] || '未知' : '—'], ['ANLAS', subscription ? String(subscription.anlas) : '—']]
+      : id === 'custom'
+        ? [['API', (api.getState().connections.custom.params.url || '').replace(/^https?:\/\//, '').split('/')[0] || '未填写'], ['VOICES', (api.getState().connections.custom.params.voices || []).length + ' 个']]
       : PRICED.includes(id) && saved
         ? [['MODEL', api.getState().connections[id].model], [id === 'eleven' ? 'CREDITS' : 'BALANCE', balanceText(id)]]
         : [['MODEL', api.getState().connections[id].model], ['ROLES', api.getState().routes.filter(r => r.engine === id && r.voice).length + ' 个角色']];
     const front = frontOf(id) === id;
     const attrs = tag === 'button' ? `data-action="engine" data-engine="${id}" aria-label="${name}，${front ? '点一下打开' : '点一下抽到最前面'}"` : `data-engine="${id}"`;
     const dots = comfy ? '' : `•••• •••• •••• ${api.keyHint?.(id) || '••••'}`;
-    const number = vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
+    const ownApi = id === 'custom' ? (api.getState().connections.custom.params.url || '').replace(/^https?:\/\//, '') : '';
+    const number = id === 'custom' ? (ownApi || '还没填接口地址 · 点卡片去填写') : vector ? (em.enabled ? (saved ? dots : '未绑定密钥 · 本地接口可以不填') : '没开 · 记忆用本地检索') : comfy ? d.comfy.url.replace(/^https?:\/\//, '') : llm ? (custom ? (saved ? dots : '未绑定密钥 · 点卡片去填写') : '用酒馆当前连接的模型') : saved ? dots : '未绑定密钥 · 点卡片去填写';
     return `<${tag} class="bank-card${tag === 'div' ? ' detail-card' : ''}" ${attrs}>${spark()}
       <span class="card-top"><span class="card-name">${name}</span><span class="card-kind">${IMAGE.includes(id) ? 'IMAGE' : llm ? 'TEXT' : vector ? 'VECTOR' : 'VOICE'}${icon('nfc')}</span></span>
       <span class="card-chip"></span>
-      <span class="card-number${number.startsWith('•') || comfy ? '' : ' none'}${comfy ? ' address' : ''}">${number}</span>
+      <span class="card-number${number.startsWith('•') || comfy || ownApi ? '' : ' none'}${comfy || ownApi ? ' address' : ''}">${number}</span>
       <span class="card-bottom">${fields.map(([k, value]) => `<span><span class="k">${k}</span><span class="v">${esc(value)}</span></span>`).join('')}<span class="card-brand">ST-iPhonie</span></span></${tag}>`;
   }
 
@@ -282,8 +286,9 @@ export function enginesApp(ctx) {
       return [`正在用 ${names[s.draw.engine] || 'NovelAI'}`, `${ready}/${g.ids.length}`];
     }
     if (g.id === 'voice') {
-      const ready = g.ids.filter(id => api.keyStatus(id)).length, voiced = s.routes.filter(r => r.voice).length;
-      return [ready ? `${ready} 家绑定了密钥 · ${voiced} 个角色有音色` : '还没有绑定密钥', `${ready}/${g.ids.length}`];
+      // 自己的接口 is ready once it has an address (a key is optional there).
+      const ready = g.ids.filter(id => id === 'custom' ? !!s.connections.custom?.params?.url : api.keyStatus(id)).length, voiced = s.routes.filter(r => r.voice).length;
+      return [ready ? `${ready} 家能用 · ${voiced} 个角色有音色` : '还没有绑定密钥', `${ready}/${g.ids.length}`];
     }
     const custom = s.text.source === 'custom', vector = s.embed?.enabled;
     return [`${custom ? '自定义接口' : '酒馆主模型'}写字 · 记忆${vector ? '按意思找（向量）' : '本地检索'}`, `${(custom ? 1 : 0) + (vector ? 1 : 0)}/2`];
@@ -360,23 +365,29 @@ export function enginesApp(ctx) {
       + card(engine, 'div')
       + groupTitle('连接')
       + `<div class="group pad">
-          <div class="setting-row"><span>密钥</span><span class="key-state ${saved ? 'ok' : 'no'}">${saved ? keyState(engine) : '还没有填写'}</span></div>
+          <div class="setting-row"><span>密钥</span><span class="key-state ${saved ? 'ok' : 'no'}">${saved ? keyState(engine) : engine === 'custom' ? '不用密钥的接口可以不填' : '还没有填写'}</span></div>
           ${keyRows(engine)}
           ${field(saved ? '添加密钥' : 'API Key', textArea('key', '', `rows="2" class="code" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥，会加在后面' : '粘贴密钥；有多个账号可以每行一个'}"`), '可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
           <div class="key-actions">${btn('add-key', icon('key') + (saved ? '添加' : '保存密钥'), 'primary')}${saved ? btn('clear-key', '全部清除', 'danger') : ''}</div>
-          ${field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || '角色没有单独指定模型时使用这里的模型。')}
+          ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || '角色没有单独指定模型时使用这里的模型。') : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
           ${engine === 'fish' ? fishRelay() : ''}
           <div class="actions">${btn('read-voices', icon('refresh') + '读取音色列表', 'secondary')}</div><p class="hint" data-connection-status></p>
         </div>`
+      + (engine === 'custom' ? customTemplates() : '')
       + balanceGroup()
-      + groupTitle('参数')
+      + groupTitle(engine === 'custom' ? '接口和音色' : '参数')
       + schema.groups.map((g, i) => `<details data-group="${engine}:${g.id}" ${i === 0 ? 'open' : ''}><summary>${esc(g.title)}</summary><div>${g.fields.map(f => control(f, c)).join('')}</div></details>`).join('')
       + `<details data-group="tags"><summary>情绪与语气标签</summary><div>${schema.tagNote ? `<p class="hint">${esc(schema.tagNote)}</p>` : ''}<div class="tags">${schema.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>${engine === 'mini' && c.model.startsWith('speech-2.8') ? '<div class="tags">' + ['laughs', 'chuckle', 'coughs', 'clear-throat', 'groans', 'breath', 'pant', 'inhale', 'exhale', 'gasps', 'sniffs', 'sighs', 'snorts', 'burps', 'lip-smacking', 'humming', 'hissing', 'emm', 'sneezes'].map(x => `<span class="tag">(${x})</span>`).join('') + '</div>' : ''}${schema.sounds?.length ? '<div class="tags">' + schema.sounds.map(x => `<span class="tag">(${esc(x)})</span>`).join('') + '</div>' : ''}<a href="${esc(schema.source)}" target="_blank" rel="noopener noreferrer">查看官方文档</a></div></details>`
       + `<div class="actions">${engine === 'fish' ? btn('references', '管理参考音频', 'secondary') : ''}${btn('request-preview', icon('eye') + '请求预览', 'text-button')}</div>`
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-connection', '保存配置', 'primary')}</div>`);
   }
 
+  /** 自己的接口: one-click formats of well-known self-hosted services (only the user's own address goes in). */
+  function customTemplates() {
+    return groupTitle('一键格式', help('用自己电脑（或者局域网里别的电脑）上跑的语音服务时，填上它的地址，点「按这个格式填」，下面的接口设置就填好了，再添加音色、保存。插件不带任何别人的服务器地址。\n\n别的服务：照它的接口文档，自己在下面填地址、请求体和回答的格式。'))
+      + `<div class="group pad">${CUSTOM_TEMPLATES.map(t => field(t.name, `<div class="music-selfhost">${input('voice-base-' + t.id, '', 'url', `placeholder="${esc(t.example)}" autocomplete="off" spellcheck="false"`)}${btn('voice-template', '按这个格式填', 'secondary small', `data-template="${esc(t.id)}"`)}</div>`, t.note)).join('')}</div>`;
+  }
   /** 向量模型: an OpenAI-compatible Embeddings API for 记忆 (core/embed.js). Off: 记忆 searches locally. */
   function renderEmbed() {
     const e = embedDraft, hint = api.keyHint('embed'), saved = !!hint;
@@ -700,6 +711,14 @@ export function enginesApp(ctx) {
         const field = v.root.querySelector('[data-field=key]');
         field.type = field.type === 'password' ? 'text' : 'password';
         el.textContent = field.type === 'password' ? '显示' : '隐藏';
+        break;
+      }
+      case 'voice-template': {
+        const t = CUSTOM_TEMPLATES.find(x => x.id === el.dataset.template), base = v.root.querySelector(`[data-field="voice-base-${el.dataset.template}"]`)?.value.trim().replace(/\/+$/, '') || '';
+        if (!t || !/^https?:\/\/[^\s/]+/i.test(base)) { ctx.notify('先填服务的地址，比如 ' + t?.example, {error: true}); break; }
+        draft().params = {...draft().params, ...t.fill(base)};
+        changed(); render();
+        ctx.notify('接口填好了：再在下面「音色」里添加音色，然后保存配置');
         break;
       }
       case 'read-voices': {

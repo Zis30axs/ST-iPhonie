@@ -1,7 +1,7 @@
 import {icon, spark} from './icons.js';
 
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-export const engines = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: '小米 MiMo'};
+export const engines = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: '小米 MiMo', custom: '自己的接口'};
 import {LANGUAGES, customLanguages} from '../core/languages.js';
 export const languages = LANGUAGES;
 /** Languages typed in by the user anywhere in the settings (default language and every role), for the chip list. */

@@ -41,7 +41,14 @@ const mimo={model:'mimo-v2.5-tts',models:['mimo-v2.5-tts','mimo-v2.5-tts-voicede
  group('clone','克隆样本',[rows('samples','克隆样本',[{...t('audio','音频文件'),type:'file'},t('name','名字')],20,'声音克隆模型用：上传 mp3 或 wav（编码后不超过 10 MB），起个名字，角色的音色填这个名字。文件保存在当前浏览器。')])
 ]};
 const mimoMode=model=>model.endsWith('voicedesign')?'design':model.endsWith('voiceclone')?'clone':'preset';
-const catalogs={fish,mini,eleven,mimo};
+// 自己的接口: any speech service with an HTTP API the user runs or has (GPT-SoVITS and the like). The address, the body
+// and the headers are templates: {{text}} {{lang}} {{emotion}} {{voice}} {{ref_text}} {{ref_lang}} {{key}}
+// (core/custom-voice.js fills them). The voices are the user's own list; a role's 音色 is one of their names.
+const custom={model:'custom',models:['custom'],source:'',groups:[
+ group('api','接口',[t('url','接口地址','比如 http://127.0.0.1:9880/tts。台词放在地址里（GET）时在那里写 {{text}}。本机和局域网的 http 地址也能用。'),s('method','请求方式','POST',[['POST','POST · 台词放在请求体里'],['GET','GET · 台词放在地址里']]),t('body','请求体','JSON。可以写 {{text}} 台词、{{lang}} 台词语言、{{emotion}} 情绪、{{voice}} 音色、{{ref_text}} 参考文本、{{ref_lang}} 参考语言。','textarea'),t('headers','额外请求头','每行一个「名字: 值」，可以写 {{key}}（密钥）。填了密钥、又没在这里写 {{key}} 时，自动加 Authorization: Bearer 密钥。','lines'),s('answer','回答是什么','audio',[['audio','音频本身'],['url','JSON 里的音频链接'],['base64','JSON 里的 base64 音频']]),t('path','在 JSON 的哪里','回答是 JSON 时填，用点隔开，比如 data.audio 或 audio_url。')]),
+ group('voices','音色',[rows('voices','音色',[t('name','名字'),t('voice','音色 / 参考音频'),{...t('ref_text','参考文本'),optional:true},{...t('ref_lang','参考语言'),optional:true}],100,'角色的「音色」选这里的名字。「音色 / 参考音频」填进 {{voice}}（音色 ID，或参考音频在后端那台电脑上的路径），参考文本、参考语言填进 {{ref_text}} {{ref_lang}}（参考语言空着就跟台词一样）。')])
+]};
+const catalogs={fish,mini,eleven,mimo,custom};
 function defaults(key){return Object.fromEntries(catalogs[key].groups.flatMap(g=>g.fields.map(f=>[f.key,structuredClone(f.value)])));}
 function allowed(key,field,c){let list=field.options||[];const p=c.params;
  if(key==='fish'&&field.key==='sample_rate'){const rates=p.format==='mp3'?[32000,44100]:p.format==='opus'?[48000]:[8000,16000,24000,32000,44100];list=list.filter(([v])=>rates.includes(v));}
@@ -112,11 +119,12 @@ const MIMO_STYLES=['开心','悲伤','愤怒','恐惧','惊讶','兴奋','委屈
 const MIMO_SOUNDS=['吸气','深呼吸','叹气','长叹一口气','喘息','屏息','紧张','害怕','激动','疲惫','撒娇','心虚','震惊','不耐烦','颤抖','声音颤抖','变调','破音','鼻音','气声','沙哑','笑','轻笑','大笑','冷笑','抽泣','呜咽','哽咽','嚎啕大哭'];
 const fishS1=model=>model==='s1';
 const elevenTagged=model=>/^eleven_v[34]/.test(model);
-function tags(key,model){return key==='mimo'?MIMO_STYLES:key==='mini'?['happy','sad','angry','fearful','disgusted','surprised','calm',...(model.startsWith('speech-2.6')?['fluent','whisper']:[])]:key==='eleven'?(elevenTagged(model)?ELEVEN_TAGS:['通过文字和标点表达情绪']):fishS1(model)?FISH_S1_EMOTIONS:['自然语言描述，如 happy、whispers sweetly、slightly sad'];}
+function tags(key,model){return key==='custom'?[]:key==='mimo'?MIMO_STYLES:key==='mini'?['happy','sad','angry','fearful','disgusted','surprised','calm',...(model.startsWith('speech-2.6')?['fluent','whisper']:[])]:key==='eleven'?(elevenTagged(model)?ELEVEN_TAGS:['通过文字和标点表达情绪']):fishS1(model)?FISH_S1_EMOTIONS:['自然语言描述，如 happy、whispers sweetly、slightly sad'];}
 // What the 情绪 field of a line may say, in Chinese or English, and the MiniMax emotion it means.
 const MINI_EMOTION_WORDS={happy:['happy','joyful','excited','cheerful','delighted','开心','高兴','快乐','喜悦','兴奋','愉快','欣喜','得意','雀跃','幸福','激动'],sad:['sad','upset','depressed','sorrowful','crying','难过','伤心','悲伤','沮丧','失落','委屈','哭泣','哽咽','低落','心疼'],angry:['angry','furious','annoyed','mad','生气','愤怒','恼火','不满','暴怒','气愤','不耐烦','烦躁'],fearful:['fearful','scared','afraid','nervous','anxious','害怕','恐惧','紧张','担心','不安','惊恐','慌张','焦虑'],disgusted:['disgusted','contemptuous','disdainful','厌恶','嫌弃','恶心','鄙视','轻蔑','不屑'],surprised:['surprised','shocked','astonished','惊讶','吃惊','震惊','意外','诧异','惊喜'],calm:['calm','gentle','neutral','soft','relaxed','平静','冷静','温柔','淡然','冷淡','平淡','轻声','温和','沉稳','认真','严肃'],fluent:['fluent','流畅','生动'],whisper:['whisper','whispering','whispers','低语','耳语','悄悄','小声']};
 /** One line for the engine card: how this model reads emotion and tags. */
 function tagNote(key,model){
+ if(key==='custom')return '台词的情绪不会写进台词里，要用就在请求体里写 {{emotion}}（比如接口有情绪参数时）。';
  if(key==='mimo')return '台词的情绪会自动写成句首的圆括号标签，如 (开心)，中文最准；原文里还可以在任意位置插方括号的细节标签，如 [轻笑]、[叹气]。'+(mimoMode(model)==='design'?'音色设计模型：角色的「音色」一栏写音色描述。':mimoMode(model)==='clone'?'声音克隆模型：角色的「音色」一栏写克隆样本的名字。':'');
  if(key==='mini')return '台词里的情绪会自动对应到下面这几个（中文也行）；对应不上时由模型自己判断。'+(model.startsWith('speech-2.8')?'原文里还能插下面这些圆括号语气声。':'');
  if(key==='eleven')return elevenTagged(model)?'原文里用方括号英文标签控制语气，如 [whispers]、[sarcastic]；台词的情绪会自动放在开头。'+(model==='eleven_v4'?'v4 只用稳定性和音色相似度两项设置。':''):'这个模型不读语气标签，情绪靠措辞和标点表达。';
@@ -126,7 +134,7 @@ function tagNote(key,model){
 function miniEmotion(model,emotion){const word=String(emotion||'').trim().toLowerCase();if(!word)return '';const found=Object.entries(MINI_EMOTION_WORDS).find(([,words])=>words.some(w=>word===w||word.includes(w)))?.[0]||'';return tags('mini',model).includes(found)?found:'';}
 /** Puts a line's 情绪 at the start of the text as the model's own tag, when the model reads tags and the text has none there. */
 const ENGLISH={fearful:'scared',whisper:'whispering',fluent:''};
-function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();if(!word||/^\s*[[(]/.test(text))return text;
+function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();if(key==='custom'||!word||/^\s*[[(]/.test(text))return text;
  // MiMo reads Chinese style words best: the 情绪 goes in as written.
  if(key==='mimo')return /^\s*[（]/.test(text)||word.length>20||/[()（）[\]]/.test(word)?text:`(${word})${text}`;
  // A Chinese 情绪 becomes the nearest English word, which both engines read best.

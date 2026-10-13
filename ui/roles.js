@@ -70,7 +70,7 @@ export function rolesApp(ctx) {
           ${mimo !== 'design' && (voiced || favorites().some(f => f.engine === r.engine)) ? `<div class="actions fav-actions">${favorites().some(f => f.engine === r.engine) ? btn('pick-favorite', icon('heart', true) + '从收藏夹选', 'chip-button') : ''}${voiced ? (isFavorite(r.engine, r.voice) ? '<small class="hint">这个音色已收藏</small>' : btn('pool-add', icon('heart') + '收藏这个音色', 'text-button')) : ''}</div>` : ''}
           ${mimo === 'design'
             ? field('音色描述', textArea('voice', r.voice, 'rows="3" placeholder="例如：二十岁出头的女生，声音清亮，带点慵懒，说话慢悠悠的"'), '用一到四句话描述：性别年龄、音色质感、情绪语气、语速节奏。不要写混响、回声这类后期效果，也不要写“普通”“正常”这种模糊的词。')
-            : field(mimo === 'clone' ? '克隆样本' : '音色 ID', input('voice', r.voice, 'text', `placeholder="${mimo === 'clone' ? '填克隆样本的名字，或从列表选择' : '粘贴音色 ID 或从列表选择'}" autocomplete="off"`))}
+            : field(mimo === 'clone' ? '克隆样本' : r.engine === 'custom' ? '音色' : '音色 ID', input('voice', r.voice, 'text', `placeholder="${mimo === 'clone' ? '填克隆样本的名字，或从列表选择' : r.engine === 'custom' ? '「自己的接口」里音色的名字，或从列表选择' : '粘贴音色 ID 或从列表选择'}" autocomplete="off"`))}
           ${field('模型', select('model', r.model || '', [['', '跟随引擎 · ' + c.model], ...schema.models.map(m => [m.id, m.id, !m.supported])]))}
           ${languageField('language', r.language || '', true, typedLanguages(api.getState()))}
         </div>
