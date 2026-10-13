@@ -2176,6 +2176,23 @@ export class TTSBackend {
         this.emit('library', { collection: 'favorites' });
         return favorite;
     }
+    /**
+     * 自己的接口 → 试一试: one line said with the first voice of the settings being edited (saved or not), so the
+     * address, the body and the answer can be checked before any role uses them. {voice, bytes, type}.
+     */
+    async customTest(connection) {
+        this.assertOpen();
+        this.player.stop('试一试自己的接口');
+        const unlock = Promise.resolve(this.player.sink.unlock());
+        const c = clone(connection || this.settings.connections.custom), voice = (c.params?.voices || []).find(v => String(v.name || '').trim());
+        const lang = languageCode(this.settings.general.defaultLanguage || 'zh').split('-')[0] || 'zh';
+        const text = ({ zh: '你好，这是一句试音。', ja: 'こんにちは、テストです。', en: 'Hello, this is a test.', ko: '안녕하세요, 테스트입니다.' })[lang] || '你好，这是一句试音。';
+        const request = buildRequest('custom', c, { voice: voice ? String(voice.name).trim() : '', language: lang }, { text, emotion: '' });
+        const [blob] = await Promise.all([this.providers.synthesize(request), unlock]);
+        this.assertOpen();
+        this.player.playBlob(blob, { speaker: voice ? String(voice.name).trim() : '自己的接口', engine: 'custom', line: { role: voice ? String(voice.name).trim() : '', text, translation: '', emotion: '' } });
+        return { voice: voice ? String(voice.name).trim() : '', bytes: blob.size, type: blob.type };
+    }
     async playFavorite(id) {
         this.assertOpen();
         // Unlock is called during the original click, before the database await.
@@ -2262,7 +2279,7 @@ export class TTSBackend {
             previewRequest: (engine, connection, route, line) => { const request = buildRequest(engine, connection || this.settings.connections[engine], route, line, this.providers.references); if (request.body.provider?.options?.['fish-audio']?.references) for (const ref of request.body.provider.options['fish-audio'].references) ref.audio = '[本地参考音频]'; if (request.body.audio?.voice?.startsWith?.('data:')) request.body.audio.voice = '[本地克隆样本：' + route.voice + ']'; return request; },
             status: () => this.player.snapshot(), subscribe: listener => this.subscribe(listener), levels: () => this.player.sink.levels(),
             pendingRole: () => this.player.pending, stop: () => this.player.stop(), toggle: () => this.player.toggle(), resume: () => this.player.continuePending(),
-            audition: route => this.audition(route), lineState: line => this.player.lineState(line),
+            audition: route => this.audition(route), customTest: connection => this.customTest(clone(connection || null)), lineState: line => this.player.lineState(line),
             setVolume: value => this.savePhone({ volume: value }), getVolume: () => this.player.getVolume(),
             cacheStats: () => this.cache.stats(), clearCache: () => this.clearCache(), listAudio: () => this.cache.list(),
             deleteAudio: async key => { if (this.player.requestKey === key) this.player.stop('音频已删除'); if (this.prepared?.key === key) this.prepared = null; await this.cache.remove(key); this.emit('library', { collection: 'cache' }); },

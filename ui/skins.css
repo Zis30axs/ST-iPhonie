@@ -70,6 +70,7 @@
   --mini:#c9a26a;--mini-ink:#7a5a2c;--mini-soft:#f3eadb;--mini-btn:#b58c52;--mini-on:#fff;
   --eleven:#c98f8c;--eleven-ink:#8a4f4d;--eleven-soft:#f4e4e1;--eleven-btn:#b67a77;--eleven-on:#fff;
   --mimo:#bf7254;--mimo-ink:#7e3d26;--mimo-soft:#f5e3db;--mimo-btn:#ad6347;--mimo-on:#fff;
+  --custom:#6f9a7c;--custom-ink:#3f6a4c;--custom-soft:#e2eee5;--custom-btn:#5e8a6b;--custom-on:#fff;
   --nai:#9b91b5;--nai-ink:#5b5277;--nai-soft:#ebe7f1;--nai-btn:#867ba3;--nai-on:#fff;
   --llm:#9aab7e;--llm-ink:#586a3e;--llm-soft:#ecf0e0;--llm-btn:#84985f;--llm-on:#fff;
   --embed:#9a8fbf;--embed-ink:#5a4f80;--embed-soft:#eeebf6;--embed-btn:#8a7fb3;--embed-on:#fff;
@@ -86,6 +87,7 @@
   --mini:#d4b483;--mini-ink:#ead3aa;--mini-soft:#3a3327;--mini-btn:#cda873;--mini-on:#1e1a12;
   --eleven:#d4a3a0;--eleven-ink:#ecc7c4;--eleven-soft:#3b2a2a;--eleven-btn:#cc9793;--eleven-on:#221615;
   --mimo:#d99577;--mimo-ink:#f0c3ae;--mimo-soft:#3d2a22;--mimo-btn:#d38b6c;--mimo-on:#24140d;
+  --custom:#93bd9f;--custom-ink:#c2e0ca;--custom-soft:#25352a;--custom-btn:#8ab696;--custom-on:#0f1d13;
   --nai:#b3aacb;--nai-ink:#d3cce5;--nai-soft:#302d3b;--nai-btn:#a79dc4;--nai-on:#1a1826;
   --llm:#a8bb86;--llm-ink:#d7e3c0;--llm-soft:#2d3525;--llm-btn:#a8bb86;--llm-on:#18200f;
   --embed:#b3a9d6;--embed-ink:#ddd6f2;--embed-soft:#2e2a3d;--embed-btn:#b3a9d6;--embed-on:#1b1726;

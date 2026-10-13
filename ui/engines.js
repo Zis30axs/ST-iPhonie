@@ -379,7 +379,7 @@ export function enginesApp(ctx) {
       + groupTitle(engine === 'custom' ? '接口和音色' : '参数')
       + schema.groups.map((g, i) => `<details data-group="${engine}:${g.id}" ${i === 0 ? 'open' : ''}><summary>${esc(g.title)}</summary><div>${g.fields.map(f => control(f, c)).join('')}</div></details>`).join('')
       + `<details data-group="tags"><summary>情绪与语气标签</summary><div>${schema.tagNote ? `<p class="hint">${esc(schema.tagNote)}</p>` : ''}<div class="tags">${schema.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>${engine === 'mini' && c.model.startsWith('speech-2.8') ? '<div class="tags">' + ['laughs', 'chuckle', 'coughs', 'clear-throat', 'groans', 'breath', 'pant', 'inhale', 'exhale', 'gasps', 'sniffs', 'sighs', 'snorts', 'burps', 'lip-smacking', 'humming', 'hissing', 'emm', 'sneezes'].map(x => `<span class="tag">(${x})</span>`).join('') + '</div>' : ''}${schema.sounds?.length ? '<div class="tags">' + schema.sounds.map(x => `<span class="tag">(${esc(x)})</span>`).join('') + '</div>' : ''}<a href="${esc(schema.source)}" target="_blank" rel="noopener noreferrer">查看官方文档</a></div></details>`
-      + `<div class="actions">${engine === 'fish' ? btn('references', '管理参考音频', 'secondary') : ''}${btn('request-preview', icon('eye') + '请求预览', 'text-button')}</div>`
+      + `<div class="actions">${engine === 'fish' ? btn('references', '管理参考音频', 'secondary') : ''}${engine === 'custom' ? btn('custom-test', icon('play', true) + '试一试', 'secondary') : ''}${btn('request-preview', icon('eye') + '请求预览', 'text-button')}</div>${engine === 'custom' ? '<p class="hint" data-custom-test></p>' : ''}`
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-connection', '保存配置', 'primary')}</div>`);
   }
 
@@ -719,6 +719,17 @@ export function enginesApp(ctx) {
         draft().params = {...draft().params, ...t.fill(base)};
         changed(); render();
         ctx.notify('接口填好了：再在下面「音色」里添加音色，然后保存配置');
+        break;
+      }
+      case 'custom-test': {
+        const out = () => v.root.querySelector('[data-custom-test]');
+        await v.busy(el, async () => {
+          if (out()) out().textContent = '正在请求……';
+          try {
+            const r = await api.customTest(draft());
+            if (out()) out().textContent = `✓ 接口通了，${r.voice ? `用音色「${r.voice}」` : ''}念了一句（${Math.round(r.bytes / 1024)} KB）。记得保存配置。`;
+          } catch (error) { if (out()) out().textContent = '✗ ' + error.message; }
+        });
         break;
       }
       case 'read-voices': {

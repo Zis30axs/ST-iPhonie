@@ -11,6 +11,7 @@
   --mini:#f2a93b;--mini-ink:#86520c;--mini-soft:#fff0d6;--mini-btn:#f2a93b;--mini-on:#3b2400;
   --eleven:#ec6f9f;--eleven-ink:#a3345f;--eleven-soft:#ffe4ee;--eleven-btn:#c2447a;--eleven-on:#fff;
   --mimo:#ff6a3d;--mimo-ink:#b13a12;--mimo-soft:#ffe6dc;--mimo-btn:#e4552a;--mimo-on:#fff;
+  --custom:#3fae7a;--custom-ink:#1d6b47;--custom-soft:#dcf3e7;--custom-btn:#2e9464;--custom-on:#fff;
   --nai:#7d80f2;--nai-ink:#3f43ad;--nai-soft:#ecebff;--nai-btn:#4f54c8;--nai-on:#fff;
   --llm:#23b19c;--llm-ink:#0f6e60;--llm-soft:#d8f6ef;--llm-btn:#1a9a87;--llm-on:#fff;
   --embed:#7c6cf0;--embed-ink:#4a3db8;--embed-soft:#ece9ff;--embed-btn:#6a5ae6;--embed-on:#fff;
@@ -28,6 +29,7 @@
   --mini:#f5b659;--mini-ink:#ffd08a;--mini-soft:#3b2f22;--mini-btn:#f5b659;--mini-on:#2e1c00;
   --eleven:#f58ab2;--eleven-ink:#ffb3cf;--eleven-soft:#45223f;--eleven-btn:#f58ab2;--eleven-on:#300a1c;
   --mimo:#ff8a62;--mimo-ink:#ffb79c;--mimo-soft:#46261d;--mimo-btn:#ff8a62;--mimo-on:#2e0e04;
+  --custom:#62cf9a;--custom-ink:#9eecc4;--custom-soft:#18392b;--custom-btn:#62cf9a;--custom-on:#06231a;
   --nai:#9ea1ff;--nai-ink:#c6c8ff;--nai-soft:#28295e;--nai-btn:#9ea1ff;--nai-on:#0b0c2a;
   --llm:#5fd6c1;--llm-ink:#9ff0e1;--llm-soft:#173f3f;--llm-btn:#5fd6c1;--llm-on:#062421;
   --embed:#a99cff;--embed-ink:#d3cbff;--embed-soft:#2a2550;--embed-btn:#a99cff;--embed-on:#140f33;
@@ -38,6 +40,7 @@
 [data-engine=mini]{--e:var(--mini);--e-ink:var(--mini-ink);--e-soft:var(--mini-soft);--e-btn:var(--mini-btn);--e-on:var(--mini-on)}
 [data-engine=eleven]{--e:var(--eleven);--e-ink:var(--eleven-ink);--e-soft:var(--eleven-soft);--e-btn:var(--eleven-btn);--e-on:var(--eleven-on)}
 [data-engine=mimo]{--e:var(--mimo);--e-ink:var(--mimo-ink);--e-soft:var(--mimo-soft);--e-btn:var(--mimo-btn);--e-on:var(--mimo-on)}
+[data-engine=custom]{--e:var(--custom);--e-ink:var(--custom-ink);--e-soft:var(--custom-soft);--e-btn:var(--custom-btn);--e-on:var(--custom-on)}
 [data-engine=nai]{--e:var(--nai);--e-ink:var(--nai-ink);--e-soft:var(--nai-soft);--e-btn:var(--nai-btn);--e-on:var(--nai-on)}
 [data-engine=llm]{--e:var(--llm);--e-ink:var(--llm-ink);--e-soft:var(--llm-soft);--e-btn:var(--llm-btn);--e-on:var(--llm-on)}
 [data-engine=embed]{--e:var(--embed);--e-ink:var(--embed-ink);--e-soft:var(--embed-soft);--e-btn:var(--embed-btn);--e-on:var(--embed-on)}

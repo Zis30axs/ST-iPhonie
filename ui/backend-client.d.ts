@@ -607,6 +607,8 @@ export interface BackendFacade {
     toggle(): void | Promise<void>;
     resume(): void | Promise<void>;
     audition(route: RouteInput): void;
+    /** 自己的接口 → 试一试: says one line with the first voice of these (unsaved) settings. */
+    customTest(connection?: unknown): Promise<{ voice: string; bytes: number; type: string }>;
     lineState(line: DialogueLine): Promise<LineState>;
     /** Persists the volume; valid values are 0 through 1. */
     setVolume(value: number): Promise<PhonePreferences>;
