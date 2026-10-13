@@ -355,8 +355,9 @@ export function chatApp(ctx) {
       ${panel ? toolsHTML() : ''}</div>`;
   }
   async function renderThread(ticket) {
-    thread = await api.getThread(threadId);
+    const loaded = await api.getThread(threadId);
     if (v.disposed || ticket !== epoch) return;
+    thread = loaded;
     if (!thread) { mode = 'list'; threadId = null; return render(); }
     if (thread.unread) api.markThreadRead(threadId).catch(() => {});
     const group = thread.type === 'group', contacts = api.chatContacts(true);

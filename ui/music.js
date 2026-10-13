@@ -22,7 +22,7 @@ const SOURCE_FIELDS = [
 
 export function musicApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'music');
-  let mode = 'main', tab = 'library', songs = [], results = [], searchErrors = [], query = '', searching = false, epoch = 0, editing = null, showLyrics = false, test = null;
+  let mode = 'main', tab = 'library', songs = [], results = [], searchErrors = [], query = '', searching = false, epoch = 0, editing = null, showLyrics = false, test = null, sourceTest = 0;
   const state = () => api.getState().music;
   const now = () => { try { return api.musicStatus?.() || null; } catch { return null; } };
 
@@ -212,21 +212,25 @@ export function musicApp(ctx) {
         break;
       }
       case 'test-source': {
-        const draft = readDraft(), list = structuredClone(state().sources), id = editing.index < 0 ? '__test__' : list[editing.index].id;
-        // Saved for the test (a new one temporarily, switched off), then put back as it was.
-        const before = structuredClone(list), trial = editing.index < 0 ? [...list, {...draft, id, enabled: false}] : list.map((x, k) => k === editing.index ? {...x, ...draft} : x);
-        test = {songs: []}; await v.busy(el, async () => {
+        const draft = structuredClone(readDraft()), editor = editing, ticket = ++sourceTest;
+        const current = () => !v.disposed && mode === 'source' && editing === editor && ticket === sourceTest;
+        // Test a snapshot of the draft without changing the saved sources.
+        await v.busy(el, async () => {
+          let result;
           try {
-            saveSources(trial);
-            const found = await api.searchMusic('晴天', id);
+            const found = await api.searchMusic('晴天', draft);
+            if (!current()) return;
             if (found.errors.length) throw Error(found.errors[0].message);
-            test = {songs: found.songs};
-            if (found.songs[0]) { try { test.link = await api.musicLink(id, found.songs[0].id); } catch (error) { test.linkError = error.message; } }
-            if (!found.songs.length) test.error = '连上了，但没读出歌：检查「搜索结果列表在哪」「歌曲 ID 在哪」「歌名在哪」';
-          } catch (error) { test = {error: error.message}; }
-          finally { if (editing?.index < 0 || JSON.stringify(trial) !== JSON.stringify(before)) { try { saveSources(before); } catch { /* the trial stays only if the old list cannot be saved */ } } }
+            result = {songs: found.songs};
+            const song = found.songs[0];
+            if (song) { try { result.link = await api.musicLink(draft, song.id, {title: song.title, artist: song.artist}); } catch (error) { result.linkError = error.message; } }
+            if (!found.songs.length) result.error = '连上了，但没读出歌：检查「搜索结果列表在哪」「歌曲 ID 在哪」「歌名在哪」';
+          } catch (error) { result = {error: error.message}; }
+          if (!current()) return;
+          test = result;
+          readDraft();
+          renderSource();
         });
-        renderSource();
         break;
       }
     }

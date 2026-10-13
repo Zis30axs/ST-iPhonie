@@ -222,11 +222,11 @@ export class LocalLibrary {
  /** Puts backup rows back with their ids and dates, checked like new ones, in one transaction (all or nothing).
   *  replace: the given stores are emptied first. A phone appearance pointing at a photo that is not there falls back
   *  to the default. Returns how many rows each store received. */
- async importRows(data,{replace=false}={}){
+ async importRows(data,{replace=false,merge}={}){
   const clean={};for(const [name,list] of Object.entries(data||{})){if(!STORES.includes(name))throw fail('备份里有未知的资料类型：'+name);if(!Array.isArray(list))throw fail('备份内容无效：'+name);clean[name]=list.map(row=>this.#backupRow(name,row));}
   return this.#mutate(({rows,put,remove})=>{
    const counts={};
-   for(const [name,list] of Object.entries(clean)){if(name==='phone')continue;if(replace)for(const id of [...rows[name].keys()])remove(name,id);for(const row of list)put(name,row);counts[name]=list.length;}
+   for(const [name,incoming] of Object.entries(clean)){if(name==='phone')continue;const list=replace&&merge?merge([...rows[name].values()].map(row=>publicRow(row)),name).map(row=>this.#backupRow(name,row)):incoming;if(replace)for(const id of [...rows[name].keys()])remove(name,id);for(const row of list)put(name,row);counts[name]=list.length;}
    const phone=clean.phone?.at(-1)||(replace&&clean.photos&&rows.phone.get('preferences'));
    if(phone){const next={...publicRow(phone)};delete next.id;if(next.wallpaper.kind==='photo'&&!rows.photos.has(next.wallpaper.photoId))next.wallpaper=defaults().wallpaper;next.icons={...next.icons};for(const [app,icon] of Object.entries(next.icons))if(icon.kind==='photo'&&!rows.photos.has(icon.photoId))delete next.icons[app];put('phone',{...next,id:'preferences'});if(clean.phone)counts.phone=1;}
    return counts;

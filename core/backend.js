@@ -10,6 +10,7 @@ import { normalizeCalls, buildCallRequest } from './call.js';
 import { normalizeText, activeText, customRequest, listModels, streamText, asMessages, TEXT_PRESET_ID } from './llm.js';
 import { normalizeEmbed, embedReady, embedTexts } from './embed.js';
 import { bookId, emptyBook, cleanBook, removeNode } from './memory.js';
+import { normalizeMemoryBooks, normalizeAssistantThreads } from './data-transfer.js';
 import { normalizeSync, runSync, removeSync, joinGone, SYNC_PARTS } from './sync.js';
 import { normalizePool } from './auto-voice.js';
 import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, PACK_FORMAT, SOUND_LIMITS, SOUND_KINDS } from './sounds.js';
@@ -70,6 +71,9 @@ async function smallVibeImage(base64) {
     } catch { return base64; }
 }
 const clone = value => structuredClone(value);
+const assistantTransferRows = docs => normalizeAssistantThreads(docs.filter(row => row.kind === 'assistant').map(thread => ({...thread,
+    memory: docs.find(row => row.id === bookId(thread.id) && row.memoryRevision === (thread.memoryRevision || 0)) || null,
+})));
 const engineCheck = engine => { if (!ENGINES.includes(engine)) throw Error('引擎无效'); };
 // Keys cover the voice engines, NovelAI for drawing, and llm (the phone's own text model).
 const keyCheck = engine => { if (engine !== 'nai' && engine !== 'llm' && engine !== 'gpt' && engine !== 'embed') engineCheck(engine); };
@@ -186,7 +190,9 @@ export class TTSBackend {
         if (want.includes('keys')) { const all = Object.fromEntries(this.keyStore.load()); if (!Object.keys(all).length) throw Error('这台浏览器里还没有保存密钥，备份里不用带'); keys = await sealKeys(all, password); }
         // Vibe groups live in the settings; they travel with the vibes too, so a backup of only the vibes keeps them.
         const vibeGroups = want.includes('vibes') ? clone(this.settings.draw.vibe.groups) : null;
-        const blob = await writeBackup({ version, settings, library, chats, moments, keys, vibeGroups });
+        const memories = want.includes('memories') ? await this.exportChatMemories() : null;
+        const assistant = want.includes('assistant') ? await this.exportAssistantThreads() : null;
+        const blob = await writeBackup({ version, settings, library, chats, moments, keys, vibeGroups, memories, assistant });
         const day = new Date(), pad = n => String(n).padStart(2, '0');
         return { blob, name: `ST-iPhonie 备份 ${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}` };
     }
@@ -232,6 +238,8 @@ export class TTSBackend {
         }
         if (want.has('chats') && backup.chats) { done.chats = await this.chats.importThreads(backup.chats, { replace }); this.emit('chat', { threadId: '' }); }
         if (want.has('moments') && backup.moments) { done.moments = await this.moments.importPosts(backup.moments, { replace }); this.emit('moments', {}); }
+        if (want.has('memories') && backup.memories) done.memories = await this.importChatMemories(backup.memories, {replace, restoring: true});
+        if (want.has('assistant') && backup.assistant) done.assistant = await this.importAssistantThreads(backup.assistant, {replace, restoring: true});
         if (keys) { let count = 0; for (const [engine, key] of Object.entries(keys)) { try { this.setKey(engine, key); count++; } catch { /* an engine this version does not know */ } } done.keys = count; }
         for (const collection of ['favorites', 'photos', 'notes']) if (collection in done) this.emit('library', { collection });
         if ('phone' in done || 'photos' in done) this.emit('phone', { preferences: await this.getPhone() });
@@ -241,7 +249,7 @@ export class TTSBackend {
     emit(type, data = {}) {
         if (this.closed) return;
         const event = { type, revision: this.revision, ...clone(data) };
-        if (!this.syncApplying && (type === 'chat' || type === 'moments' || (type === 'library' && ['notes', 'photos'].includes(data.collection)))) this.scheduleSync();
+        if (!this.syncApplying && (type === 'chat' || type === 'moments' || (['memory', 'assistant'].includes(type) && data.persisted) || (type === 'library' && ['notes', 'photos'].includes(data.collection)))) this.scheduleSync();
         for (const listener of this.listeners) { try { listener(clone(event)); } catch { /* One view cannot stop the other subscribers. */ } }
     }
     subscribe(listener) {
@@ -561,11 +569,16 @@ export class TTSBackend {
         } catch { return 'unknown'; }
     }
     /** Remembers deleted items (keys as in joinGone) so a sync does not bring them back from another device's copy. */
-    noteGone(part, keys) {
+    noteGone(part, keys, after = 0) {
         const list = [...new Set((keys || []).map(String).filter(Boolean))];
         if (!list.length) return;
-        const memory = this.#syncMemory(), now = Date.now();
+        const memory = this.#syncMemory(), now = Math.max(Date.now(), after + 1);
         this.#syncMemory({ ...memory, gone: joinGone([memory.gone, { [part]: Object.fromEntries(list.map(key => [key, now])) }], now) });
+    }
+    reviveSync(part, ids) {
+        const memory = this.#syncMemory(), keys = new Set(ids), gone = {...memory.gone, [part]: {...memory.gone?.[part]}};
+        for (const key of Object.keys(gone[part])) if (keys.has(key) || [...keys].some(id => key.startsWith(id + '/'))) delete gone[part][key];
+        this.#syncMemory({...memory, gone});
     }
     /** Runs a deletion of a part's items and remembers which went. */
     async dropping(part, list, task) {
@@ -590,6 +603,7 @@ export class TTSBackend {
         if (!this.settings.sync.enabled || !this.syncFiles || this.closed) return;
         clearTimeout(this.syncTimer);
         this.syncState.pending = true;
+        if (this.syncState.busy) return;
         this.syncTimer = setTimeout(() => { this.syncNow().catch(() => {}); }, delay);
     }
     /** Deletes the phone's copy in the tavern (this device keeps everything); the next sync starts from scratch. */
@@ -611,10 +625,12 @@ export class TTSBackend {
         if (this.syncState.busy) return this.syncState.running;
         clearTimeout(this.syncTimer);
         const stores = {
-            read: async part => part === 'chats' ? this.chats.exportThreads() : part === 'moments' ? this.moments.exportPosts() : (await this.library.exportRows([part]))[part],
+            read: async part => part === 'chats' ? this.chats.exportThreads() : part === 'moments' ? this.moments.exportPosts() : part === 'memories' ? this.exportChatMemories() : part === 'assistant' ? this.exportAssistantThreads() : (await this.library.exportRows([part]))[part],
             write: async (part, items, options) => {
                 if (part === 'chats') await this.chats.importThreads(items, options);
                 else if (part === 'moments') await this.moments.importPosts(items, options);
+                else if (part === 'memories') await this.importChatMemories(items, {...options, notifySync: false});
+                else if (part === 'assistant') await this.importAssistantThreads(items, {...options, notifySync: false});
                 else await this.library.importRows({ [part]: items }, options);
             },
             photoBlob: row => row.blob,
@@ -623,24 +639,30 @@ export class TTSBackend {
         this.emit('sync', this.syncStatus());
         this.syncState.running = (async () => {
             try {
-                this.syncApplying = true;
-                const result = await runSync({ stores, files: this.syncFiles, memory: this.#syncMemory(), device: this.#device(), deviceName: deviceName || this.syncDeviceName || '' });
+                const result = await runSync({ stores, files: this.syncFiles, memory: this.#syncMemory(), readGone: () => this.#syncMemory().gone, device: this.#device(), deviceName: deviceName || this.syncDeviceName || '' });
                 // Deletions made while it ran are kept too.
                 this.#syncMemory({ ...result.memory, gone: joinGone([result.memory.gone, this.#syncMemory().gone]) });
-                this.syncState = { ...this.syncState, busy: false, error: '', lastAt: Date.now(), remote: result.remote, lastResult: { pulled: result.pulled, pushed: result.pushed, merged: result.merged } };
+                const preferences = [...result.pulled, ...result.merged].includes('photos') ? await this.getPhone() : null;
+                this.syncState = { ...this.syncState, error: '', lastAt: Date.now(), remote: result.remote, lastResult: { pulled: result.pulled, pushed: result.pushed, merged: result.merged } };
+                // Only these refresh notifications came from syncing. User writes during network waits stay dirty.
+                this.syncApplying = true;
                 for (const part of [...result.pulled, ...result.merged]) {
                     if (part === 'chats') this.emit('chat', { threadId: '' });
                     else if (part === 'moments') this.emit('moments', {});
+                    else if (part === 'memories') this.emit('memory', {threadId: '', reset: true});
+                    else if (part === 'assistant') this.emit('assistant', {threadId: '', restored: true});
                     else this.emit('library', { collection: part });
                 }
-                if ([...result.pulled, ...result.merged].includes('photos')) this.emit('phone', { preferences: await this.getPhone() });
+                if (preferences) this.emit('phone', { preferences });
                 return clone(result);
             } catch (error) {
                 this.syncState = { ...this.syncState, busy: false, error: error.message || '同步失败' };
                 throw error;
             } finally {
                 this.syncApplying = false;
+                this.syncState.busy = false;
                 delete this.syncState.running;
+                if (this.syncState.pending) this.scheduleSync(200);
                 this.emit('sync', this.syncStatus());
             }
         })();
@@ -712,19 +734,85 @@ export class TTSBackend {
         try { return await listModels({ text: { url }, key: this.embedKey }); } catch (error) { throw Error(error.message.replace(/^文字模型/, '向量模型')); }
     }
     /** A chat's memory book (an empty one when nothing is written yet). */
-    async memoryBook(threadId) { return (await this.memoryStore.get(bookId(threadId))) || emptyBook(threadId); }
+    async exportChatMemories() { return normalizeMemoryBooks(await this.memoryStore.list('memory')); }
+    async exportAssistantThreads() { return assistantTransferRows(await this.apps.list()); }
+    async importChatMemories(rows, {replace = false, merge, restoring = false, notifySync = true} = {}) {
+        const incoming = normalizeMemoryBooks(rows), changed = new Set();
+        await this.memoryStore.transformKinds(['memory', 'vectors'], docs => {
+            const current = normalizeMemoryBooks(docs.filter(row => row.kind === 'memory'));
+            const selected = normalizeMemoryBooks(merge ? merge(current) : incoming);
+            const next = new Map((replace ? [] : current).map(row => [row.id, row]));
+            for (const row of selected) {
+                const old = current.find(item => item.id === row.id);
+                next.set(row.id, restoring ? {...row, at: Math.max(Date.now(), (old?.at || 0) + 1)} : row);
+            }
+            // A replaced/forgotten book stays as an empty record so old devices cannot revive its summaries.
+            if (replace && restoring) for (const old of current) if (!next.has(old.id)) next.set(old.id, {...emptyBook(old.threadId, old.name), at: Math.max(Date.now(), old.at + 1)});
+            for (const old of current) if (JSON.stringify(old) !== JSON.stringify(next.get(old.id))) changed.add(old.threadId);
+            for (const row of next.values()) if (!current.some(old => old.id === row.id)) changed.add(row.threadId);
+            return [...next.values(), ...docs.filter(row => row.kind === 'vectors' && !changed.has(row.threadId))];
+        });
+        if (restoring) this.reviveSync('memories', incoming.map(row => row.id));
+        for (const threadId of changed) this.emit('memory', {threadId, reset: true, persisted: notifySync});
+        return incoming.length;
+    }
+    async importAssistantThreads(rows, {replace = false, merge, restoring = false, notifySync = true} = {}) {
+        const incoming = normalizeAssistantThreads(rows), changed = new Set(), removed = new Set();
+        const restoringIds = new Set(restoring ? incoming.map(row => row.id) : []);
+        const gone = this.#syncMemory().gone?.assistant || {};
+        let removedAfter = 0;
+        await this.apps.transformKinds(['assistant', 'memory', 'vectors'], docs => {
+            const current = assistantTransferRows(docs), byId = new Map(docs.map(row => [row.id, row]));
+            const selected = normalizeAssistantThreads(merge ? merge(current) : incoming);
+            const next = new Map((replace ? [] : current).map(row => [row.id, row]));
+            for (const row of selected) next.set(row.id, row);
+            const result = docs.filter(row => row.kind !== 'assistant' && !String(row.threadId || '').startsWith('assistant:'));
+            for (const row of current) if (!next.has(row.id)) { changed.add(row.id); removed.add(row.id); removedAfter = Math.max(removedAfter, row.restoredAt || 0, row.updatedAt || 0); }
+            for (const row of next.values()) {
+                const old = byId.get(row.id), exported = current.find(item => item.id === row.id);
+                if (!restoringIds.has(row.id) && JSON.stringify(row) === JSON.stringify(exported)) {
+                    result.push(old, ...[bookId(row.id), 'vec:' + row.id].map(id => byId.get(id)).filter(Boolean));
+                    continue;
+                }
+                changed.add(row.id);
+                const {memory, ...thread} = row;
+                thread.revision = Math.max(Date.now(), (old?.revision || 0) + 1);
+                thread.memoryRevision = Math.max(Date.now(), (old?.memoryRevision || 0) + 1);
+                if (restoringIds.has(row.id)) thread.at = thread.updatedAt = thread.restoredAt = Math.max(Date.now() + 1, (old?.updatedAt || 0) + 1, (gone[row.id] || 0) + 1, (row.restoredAt || 0) + 1);
+                result.push(thread);
+                if (memory) result.push({...memory, memoryRevision: thread.memoryRevision});
+            }
+            return result;
+        });
+        if (restoring) { this.noteGone('assistant', [...removed], removedAfter); this.reviveSync('assistant', incoming.map(row => row.id)); }
+        for (const threadId of changed) this.emit('assistant', {threadId, restored: true, memoryReset: true, deleted: removed.has(threadId), persisted: notifySync});
+        return incoming.length;
+    }
+    async memoryBook(threadId) { return (await this.memoryStore.get(bookId(threadId))) || {...emptyBook(threadId), at: 0}; }
     /** Changes a chat's book in one transaction: change(book) returns the new book. Made first when missing. */
-    async memoryChange(threadId, change, name = '') {
+    async memoryChange(threadId, change, name = '', expectedBook) {
         this.assertOpen();
         const id = bookId(threadId);
-        if (!await this.memoryStore.get(id)) await this.memoryStore.put([emptyBook(threadId, name)]);
-        const saved = await this.memoryStore.change(id, doc => { const next = cleanBook(change(structuredClone(doc)), Date.now()); for (const key of Object.keys(doc)) if (key !== 'scope') delete doc[key]; Object.assign(doc, next); });
-        this.emit('memory', { threadId });
+        let saved;
+        await this.memoryStore.transformKinds(['memory'], docs => {
+            const current = docs.find(row => row.id === id) || {...emptyBook(threadId), at: 0};
+            if (expectedBook && JSON.stringify(cleanBook(current, current.at)) !== JSON.stringify(cleanBook(expectedBook, expectedBook.at))) throw Error('聊天记忆已变化，这次整理没有写入');
+            if (!current.name) current.name = name;
+            saved = cleanBook({...change(clone(current)), threadId}, Math.max(Date.now(), current.at + 1));
+            return [...docs.filter(row => row.id !== id), saved];
+        });
+        this.emit('memory', { threadId, persisted: true });
         return saved;
     }
     memoryVectors(threadId) { return this.memoryStore.get('vec:' + threadId); }
     memorySaveVectors(threadId, doc) { return this.memoryStore.put([{ ...doc, id: 'vec:' + threadId, kind: 'vectors', threadId, at: Date.now() }]); }
-    async memoryForget(threadId) { await this.memoryStore.remove(bookId(threadId)); await this.memoryStore.remove('vec:' + threadId); this.emit('memory', { threadId }); }
+    async memoryForget(threadId) {
+        await this.memoryStore.transformKinds(['memory', 'vectors'], docs => {
+            const old = docs.find(row => row.id === bookId(threadId));
+            return [...docs.filter(row => row.id !== bookId(threadId) && row.id !== 'vec:' + threadId), {...emptyBook(threadId), at: Math.max(Date.now(), (old?.at || 0) + 1)}];
+        });
+        this.emit('memory', { threadId, reset: true, persisted: true });
+    }
     /** Model ids of the custom API (also a free connection check). `draft`: options not saved yet. */
     textModels(draft) { const text = activeText(this.textWith(draft)); return listModels({ text, key: this.textKeys.get(text.id) || '' }); }
 
@@ -1385,13 +1473,19 @@ export class TTSBackend {
             return read(proxied);
         }
     }
-    musicSource(id) { const s = this.settings.music.sources.find(x => x.id === id); if (!s) throw Error('这个音源已经不在了'); return s; }
+    musicSource(id) {
+        // A draft can be tried without changing saved sources or notifying other views.
+        if (id && typeof id === 'object') return validateSource(normalizeSource(clone(id)));
+        const s = this.settings.music.sources.find(x => x.id === id);
+        if (!s) throw Error('这个音源已经不在了');
+        return clone(s);
+    }
     /** Searches the enabled sources (or one): {songs: [{source, sourceName, id, title, artist}], errors: [{source, message}]}. */
     async searchMusic(query, sourceId = '') {
         this.assertOpen();
         const words = String(query || '').trim().slice(0, 100);
         if (!words) throw Error('写一下想听的歌');
-        const sources = this.settings.music.sources.filter(s => sourceId ? s.id === sourceId : s.enabled);
+        const sources = sourceId && typeof sourceId === 'object' ? [this.musicSource(sourceId)] : clone(this.settings.music.sources.filter(s => sourceId ? s.id === sourceId : s.enabled));
         if (!sources.length) throw Error('还没有能用的音源：先在「音乐 → 设置 → 音源」里添加一个');
         const songs = [], errors = [];
         await Promise.all(sources.map(async s => {
@@ -1606,11 +1700,63 @@ export class TTSBackend {
         const thread = await this.apps.get(assistantId(id));
         return thread?.kind === 'assistant' ? assertAssistantThread(thread) : null;
     }
+    // Assistant books share the conversation's database so edits and summary commits can
+    // check the same revision in one transaction. Chat books keep their existing database.
+    async assistantMemoryData(id, vector = false) {
+        this.assertOpen(); assistantId(id);
+        const key = vector ? 'vec:' + id : bookId(id), rows = await this.apps.getMany([id, key]);
+        const thread = rows.get(id), doc = rows.get(key);
+        if (thread?.kind !== 'assistant' || !doc || doc.memoryRevision !== (thread.memoryRevision || 0)) return vector ? null : emptyBook(id);
+        return doc;
+    }
+    assistantMemoryBook(id) { return this.assistantMemoryData(id); }
+    assistantMemoryVectors(id) { return this.assistantMemoryData(id, true); }
+    async assistantMemoryChange(id, change, name = '', expectedRevision, expectedMemoryRevision) {
+        this.assertOpen(); assistantId(id);
+        const key = bookId(id);
+        const saved = await this.apps.changeRelated(id, [key], (thread, docs) => {
+            assertAssistantThread(thread);
+            if ((expectedRevision !== undefined && (thread.revision || 0) !== expectedRevision) || (expectedMemoryRevision !== undefined && (thread.memoryRevision || 0) !== expectedMemoryRevision)) throw Error('助手会话或记忆已变化，这次整理没有写入');
+            const old = docs.get(key), current = old?.memoryRevision === (thread.memoryRevision || 0) ? old : emptyBook(id, name);
+            const next = {...cleanBook(change(clone(current))), memoryRevision: thread.memoryRevision || 0};
+            next.threadId = id; next.id = key;
+            thread.at = thread.updatedAt = Math.max(Date.now(), (thread.updatedAt || 0) + 1);
+            docs.set(key, next); return next;
+        });
+        this.emit('memory', {threadId: id, persisted: true});
+        return saved;
+    }
+    async assistantMemorySaveVectors(id, doc, expectedRevision, expectedMemoryRevision) {
+        this.assertOpen(); assistantId(id);
+        const key = 'vec:' + id;
+        return this.apps.changeRelated(id, [key], (thread, docs) => {
+            assertAssistantThread(thread);
+            if ((expectedRevision !== undefined && (thread.revision || 0) !== expectedRevision) || (expectedMemoryRevision !== undefined && (thread.memoryRevision || 0) !== expectedMemoryRevision)) throw Error('助手会话或记忆已变化，检索缓存没有写入');
+            const next = {...clone(doc), id: key, kind: 'vectors', threadId: id, at: Date.now(), memoryRevision: thread.memoryRevision || 0};
+            docs.set(key, next); return next;
+        });
+    }
+    async assistantMemoryRevise(id, change = null) {
+        this.assertOpen(); assistantId(id);
+        const key = bookId(id), vector = 'vec:' + id;
+        const saved = await this.apps.changeRelated(id, [key, vector], (thread, docs) => {
+            assertAssistantThread(thread);
+            const old = docs.get(key), current = old?.memoryRevision === (thread.memoryRevision || 0) ? old : emptyBook(id, thread.title);
+            const next = change ? cleanBook(change(clone(current))) : null;
+            thread.memoryRevision = (thread.memoryRevision || 0) + 1;
+            thread.at = thread.updatedAt = Math.max(Date.now(), (thread.updatedAt || 0) + 1);
+            if (next) { next.threadId = id; next.id = key; next.memoryRevision = thread.memoryRevision; }
+            docs.set(key, next); docs.set(vector, null);
+            return next || emptyBook(id, thread.title);
+        });
+        this.emit('memory', {threadId: id, reset: true, persisted: true}); return saved;
+    }
+    assistantMemoryForget(id) { return this.assistantMemoryRevise(id).then(() => {}); }
     async newAssistantThread() {
         this.assertOpen();
         const now = Date.now(), thread = { id: 'assistant:' + crypto.randomUUID(), kind: 'assistant', title: '新对话', createdAt: now, updatedAt: now, at: now, messages: [] };
         const [saved] = await this.apps.put([thread]);
-        this.emit('assistant', { threadId: saved.id });
+        this.emit('assistant', { threadId: saved.id, persisted: true });
         return saved;
     }
     async appendAssistantMessage(id, value, expectedLastId, expectedRevision) {
@@ -1630,17 +1776,22 @@ export class TTSBackend {
             thread.revision = (thread.revision || 0) + 1;
             thread.at = thread.updatedAt = now;
         });
-        this.emit('assistant', { threadId: saved.id });
+        this.emit('assistant', { threadId: saved.id, persisted: true });
         return saved;
     }
     async mutateAssistantThread(id, mutate, {history = true} = {}) {
         this.assertOpen();
-        const saved = await this.apps.change(assistantId(id), thread => {
+        const saved = await this.apps.changeRelated(assistantId(id), [bookId(id), 'vec:' + id], (thread, docs) => {
             assertAssistantThread(thread); mutate(thread);
-            if (history) thread.revision = (thread.revision || 0) + 1;
+            if (history) {
+                thread.revision = (thread.revision || 0) + 1;
+                thread.memoryRevision = (thread.memoryRevision || 0) + 1;
+                docs.set(bookId(id), null); docs.set('vec:' + id, null);
+            }
             thread.at = thread.updatedAt = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
+            return thread;
         });
-        this.emit('assistant', { threadId: saved.id }); return saved;
+        this.emit('assistant', { threadId: saved.id, persisted: true, ...(history ? {memoryReset: true} : {}) }); return saved;
     }
     async renameAssistantThread(id, title) {
         if (typeof title !== 'string' || !title.trim() || title.trim().length > ASSISTANT_LIMITS.title) throw Error('会话名字请填写 1–80 个字符');
@@ -1685,25 +1836,20 @@ export class TTSBackend {
         });
     }
     async clearAssistantThread(id) {
-        this.assertOpen();
-        const saved = await this.apps.change(assistantId(id), thread => {
-            assertAssistantThread(thread);
+        return this.mutateAssistantThread(id, thread => {
             thread.messages = [];
-            thread.revision = (thread.revision || 0) + 1;
             thread.titleEdited = false;
             thread.title = '新对话';
-            thread.at = thread.updatedAt = Math.max(Date.now(), Number(thread.updatedAt || thread.at) + 1);
         });
-        this.emit('assistant', { threadId: saved.id });
-        return saved;
     }
     async deleteAssistantThread(id) {
         this.assertOpen();
         const threadId = assistantId(id), thread = await this.apps.get(threadId);
         if (!thread) return false;
         assertAssistantThread(thread);
-        await this.apps.remove(threadId);
-        this.emit('assistant', { threadId, deleted: true });
+        await this.apps.removeMany([threadId, bookId(threadId), 'vec:' + threadId]);
+        this.noteGone('assistant', [threadId], Math.max(thread.restoredAt || 0, thread.updatedAt || 0));
+        this.emit('assistant', { threadId, deleted: true, persisted: true });
         return true;
     }
     // ---------- 朋友圈 ----------
@@ -2130,7 +2276,15 @@ export class TTSBackend {
             deleteAssistantMessage: (id, mid) => this.deleteAssistantMessage(id, mid),
             selectAssistantVariant: (id, mid, selected) => this.selectAssistantVariant(id, mid, selected),
             deleteAssistantThread: id => this.deleteAssistantThread(id), clearAssistantThread: id => this.clearAssistantThread(id),
-            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId) => this.searchMusic(query, sourceId), musicLink: (sourceId, songId, hint) => this.musicLink(sourceId, songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
+            assistantMemoryBook: id => this.assistantMemoryBook(id),
+            assistantMemoryEdit: (id, nodeId, text) => {
+                const value = String(text ?? '').trim();
+                if (value.length < 2 || value.length > 6000) throw Error('记忆内容请填写 2–6000 个字符');
+                return this.assistantMemoryRevise(id, book => { const node = book.nodes.find(n => n.id === nodeId); if (!node) throw Error('这条记忆已经不在了'); node.text = value; node.edited = true; return book; });
+            },
+            assistantMemoryRemove: (id, nodeId) => this.assistantMemoryRevise(id, book => removeNode(book, nodeId)),
+            assistantMemoryForget: id => this.assistantMemoryForget(id),
+            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId) => this.searchMusic(query, clone(sourceId)), musicLink: (sourceId, songId, hint) => this.musicLink(clone(sourceId), songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
             listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),

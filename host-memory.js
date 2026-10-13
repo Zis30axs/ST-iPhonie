@@ -42,7 +42,7 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
           await backend.memoryChange(threadId, current => batch.length
             ? addNode(current, {level: 0, text, from: batch[0].at, to: batch.at(-1).at, count: batch.length}, {through: batch.at(-1)})
             // The nodes merged may have been deleted or merged meanwhile: only those still open are covered.
-            : addNode(current, {level: merge.level, text, covers: merge.nodes.map(n => n.id).filter(id => roots(current).some(r => r.id === id))}), name);
+            : addNode(current, {level: merge.level, text, covers: merge.nodes.map(n => n.id).filter(id => roots(current).some(r => r.id === id))}), name, book);
           written++;
         }
         note(threadId, {busy: false, error: '', at: Date.now()});
@@ -166,7 +166,7 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
   }
   // The phone's chats change: worked out again (the tavern side calls refreshStory once the phone's data is open, and
   // when the open card or the settings change).
-  const unsubscribe = backend.subscribe?.(event => { if (event.type === 'chat' && !event.typing) refreshStory(); });
+  const unsubscribe = backend.subscribe?.(event => { if (event.type === 'chat' && !event.typing || event.type === 'memory' && event.reset) refreshStory(); });
 
   /** 更早的剧情: what the picked memory plugins put into the tavern's extension prompts. */
   function storyMemory() { return storyMemoryText(context()?.extensionPrompts, options().storyKeys); }

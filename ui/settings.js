@@ -27,11 +27,11 @@ export function settingsApp(ctx) {
   }
   // Backup: pick the parts, see how much each holds, and save one file.
   async function renderBackup(ticket) {
-    const [library, threads, moments] = await Promise.all([api.libraryStats().catch(() => null), api.listThreads().catch(() => null), api.listMoments().catch(() => null)]);
+    const [library, threads, moments, assistant] = await Promise.all([api.libraryStats().catch(() => null), api.listThreads().catch(() => null), api.listMoments().catch(() => null), api.assistantThreads().catch(() => null)]);
     if (v.disposed || ticket !== epoch) return;
     const s = api.getState(), n = (value, unit) => value === null || value === undefined ? '读不到' : `${value} ${unit}`;
-    const counts = {settings: `${s.routes.length} 个角色 · ${s.presets.length} 个配音预设`, chats: n(threads?.length, '段'), moments: n(moments?.length, '条'), notes: n(library?.notes, '条'), photos: n(library?.photos, '张'), favorites: n(library?.favorites, '段'), vibes: library ? `${library.vibes} 个 · ${s.draw.vibe.groups.length} 组` : '读不到', keys: savedKeys() ? `这台浏览器里的 ${savedKeys()} 个密钥` : '这台浏览器里还没有密钥'};
-    v.draw(heading('备份', help('备份是一个 .json 文件，可以存在电脑、手机或网盘里。\n密钥默认不放进去；打开「密钥」后会用你设的密码加密，恢复时输入同一个密码才能取出来，没有密码的人拿到文件也看不到密钥。\n语音缓存不备份，需要时会重新生成。相册、收藏和 Vibe 多的话，文件会比较大。'), 'Backup')
+    const counts = {settings: `${s.routes.length} 个角色 · ${s.presets.length} 个配音预设`, chats: n(threads?.length, '段'), memories: '各段聊天的摘要、阶段总结和长期总览', assistant: n(assistant?.length, '段会话'), moments: n(moments?.length, '条'), notes: n(library?.notes, '条'), photos: n(library?.photos, '张'), favorites: n(library?.favorites, '段'), vibes: library ? `${library.vibes} 个 · ${s.draw.vibe.groups.length} 组` : '读不到', keys: savedKeys() ? `这台浏览器里的 ${savedKeys()} 个密钥` : '这台浏览器里还没有密钥'};
+    v.draw(heading('备份', help('备份是一个 .json 文件，可以存在电脑、手机或网盘里。\n聊天记录和聊天记忆可以分别选择；助手会话连同各自的记忆一起保存。助手已发送的图片和文字附件随会话保存，生成的图片需同时勾选「相册」。向量检索缓存不备份，恢复后需要时重建。\n密钥默认不放进去；打开「密钥」后会用你设的密码加密，恢复时输入同一个密码才能取出来，没有密码的人拿到文件也看不到密钥。\n语音缓存不备份，需要时会重新生成。相册、收藏和 Vibe 多的话，文件会比较大。'), 'Backup')
       + `<div class="group">${Object.entries(api.backupParts()).map(([key, label]) => key === 'keys' && !savedKeys() ? `<div class="setting-row"><span class="row-text"><strong>${esc(label)}</strong><small>这台浏览器里还没有密钥</small></span></div>` : partRow(key, label, counts[key], backup.parts.has(key))).join('')}</div>`
       + (backup.parts.has('keys') ? keyPasswordFields() : '')
       + `<div class="actions">${btn('make-backup', icon('download') + '生成备份文件', 'primary', canBackup() ? '' : 'disabled')}</div>`);
@@ -47,7 +47,7 @@ export function settingsApp(ctx) {
   // Restore: what the chosen file holds, which parts to take, and whether to merge or replace.
   function renderRestore() {
     const {info, parts, replace} = restore, sum = info.summary, labels = api.backupParts();
-    const counts = {settings: sum.settings && `${sum.settings.roles} 个角色 · ${sum.settings.presets} 个配音预设`, chats: sum.chats !== null && `${sum.chats} 段`, moments: sum.moments != null && `${sum.moments} 条`, notes: sum.notes !== null && `${sum.notes} 条`, photos: sum.photos !== null && `${sum.photos} 张`, favorites: sum.favorites !== null && `${sum.favorites} 段`, vibes: sum.vibes != null && `${sum.vibes.vibes} 个 · ${sum.vibes.groups} 组`, keys: sum.keys != null && `${sum.keys} 个密钥（要输入备份时的密码）`};
+    const counts = {settings: sum.settings && `${sum.settings.roles} 个角色 · ${sum.settings.presets} 个配音预设`, chats: sum.chats !== null && `${sum.chats} 段`, memories: sum.memories != null && `${sum.memories} 份记忆`, assistant: sum.assistant != null && `${sum.assistant} 段会话`, moments: sum.moments != null && `${sum.moments} 条`, notes: sum.notes !== null && `${sum.notes} 条`, photos: sum.photos !== null && `${sum.photos} 张`, favorites: sum.favorites !== null && `${sum.favorites} 段`, vibes: sum.vibes != null && `${sum.vibes.vibes} 个 · ${sum.vibes.groups} 组`, keys: sum.keys != null && `${sum.keys} 个密钥（要输入备份时的密码）`};
     const when = info.createdAt ? new Date(info.createdAt).toLocaleString('zh-CN', {hour12: false}) : '未知';
     v.draw(heading('恢复', '', 'Restore')
       + `<div class="group pad"><p class="help-copy">备份时间：${esc(when)}${info.version ? ` · 插件 ${esc(info.version)}` : ''}</p></div>`
@@ -56,11 +56,11 @@ export function settingsApp(ctx) {
       + (parts.has('keys') ? `<div class="group pad">${field('备份密码', input('restore-password', restore.password || '', 'password', 'autocomplete="current-password"'), '输入备份时设的密码，才能取出里面的密钥。')}</div>` : '')
       + groupTitle('方式')
       + `<div class="segmented"><button data-action="restore-mode" data-value="merge" aria-pressed="${!replace}">合并</button><button data-action="restore-mode" data-value="replace" aria-pressed="${replace}">替换</button></div>`
-      + `<p class="hint">${replace ? '替换：选中的内容会先清空，再换成备份里的。' : '合并：现在的内容都保留，备份里同一条（同一张照片、同一段聊天）会覆盖现在的。'}设置和预设总是整体换成备份里的；密钥不受影响。</p>`
+      + `<p class="hint">${replace ? '替换：选中的内容会先清空，再换成备份里的。' : '合并：现在的内容都保留，备份里同一条（同一张照片、同一段聊天）会覆盖现在的。'}设置和预设总是整体换成备份里的；密钥不受影响。旧备份未包含的记忆部分不会被清空。</p>`
       + `<div class="actions">${btn('do-restore', icon('refresh') + '开始恢复', 'primary', parts.size ? '' : 'disabled')}</div>`);
   }
   const partRow = (key, label, detail, on) => `<div class="setting-row"><span class="row-text"><strong>${esc(label)}</strong><small>${esc(detail)}</small></span><input class="switch" type="checkbox" data-part="${key}" aria-label="${esc(label)}" ${on ? 'checked' : ''}></div>`;
-  const restored = done => [done.keys && `${done.keys} 个密钥`, done.settings && '设置和预设', done.chats && `${done.chats} 段聊天`, done.moments && `${done.moments} 条朋友圈`, done.notes && `${done.notes} 条备忘录`, done.photos && `${done.photos} 张照片`, done.favorites && `${done.favorites} 段收藏`, done.vibes && `${done.vibes} 个 Vibe`].filter(Boolean).join('、');
+  const restored = done => [done.keys && `${done.keys} 个密钥`, done.settings && '设置和预设', done.chats && `${done.chats} 段聊天`, done.memories && `${done.memories} 份聊天记忆`, done.assistant && `${done.assistant} 段助手会话`, done.moments && `${done.moments} 条朋友圈`, done.notes && `${done.notes} 条备忘录`, done.photos && `${done.photos} 张照片`, done.favorites && `${done.favorites} 段收藏`, done.vibes && `${done.vibes} 个 Vibe`].filter(Boolean).join('、');
 
   /** 保存到酒馆: the switch, and when it is on, when it last synced and what the tavern holds. */
   function syncGroup() {
@@ -73,7 +73,7 @@ export function settingsApp(ctx) {
       : st.lastAt ? '上次同步 ' + time(st.lastAt) : st.pending ? '有改动，马上同步' : '还没同步过';
     const remote = st.remote?.savedAt ? `酒馆里的是${st.remote.deviceName ? ' ' + st.remote.deviceName + ' ' : ''}在 ${time(st.remote.savedAt)} 存的` : '';
     return groupTitle('保存到酒馆')
-      + `<div class="group">${toggle('syncEnabled', '保存到酒馆', st.enabled, '聊天记录、朋友圈、备忘录和相册存进酒馆里你账号的文件夹（data/你的用户名/user/files）。换一台设备、换个浏览器打开酒馆，小手机里的东西都还在；清了浏览器数据也不会丢。有改动几秒后自动保存，打开小手机时自动读取别的设备的新内容。两台设备都改了同一段聊天或同一条朋友圈时，会合并成一份（消息和评论都保留）；只有一边改过就直接用那一边的。密钥不会存进去；语音缓存和收藏的语音也不存，需要时重新生成。')}
+      + `<div class="group">${toggle('syncEnabled', '保存到酒馆', st.enabled, '聊天记录、聊天记忆、助手会话与记忆、朋友圈、备忘录和相册存进酒馆里你账号的文件夹（data/你的用户名/user/files）。换一台设备、换个浏览器打开酒馆，小手机里的东西都还在；清了浏览器数据也不会丢。有改动几秒后自动保存，打开小手机时自动读取别的设备的新内容。两台设备都改了同一段聊天或同一条朋友圈时，会合并成一份（消息和评论都保留）；只有一边改过就直接用那一边的。助手已发送的附件随会话保存，生成的图片保存在相册。密钥不会存进去；语音缓存、收藏的语音和向量检索缓存也不存，需要时重新生成。')}
         ${st.enabled ? `<div class="setting-row"><span class="row-text"><strong data-sync-state>${esc(state)}</strong>${remote ? `<small>${esc(remote)}</small>` : ''}</span>${btn('sync-now', icon('refresh') + '立即同步', 'chip-button', st.busy || !st.available ? 'disabled' : '')}</div>` : ''}
         ${st.available ? `<div class="setting-row"><span class="row-text"><strong>删除酒馆里的那份</strong><small>只删酒馆里存的，这台设备上的不动</small></span>${btn('sync-clear', icon('trash') + '删除', 'chip-button', st.busy ? 'disabled' : '')}</div>` : ''}</div>`
       ;
@@ -182,7 +182,7 @@ export function settingsApp(ctx) {
         <details class="tool-fold" data-group="storage-clear"><summary>${icon('trash')}清理<small>语音缓存 · 相册里的绘图（绘图 App、正文、查手机、朋友圈）· 正文图片</small></summary><div>
           <div class="actions" style="margin-top:0">${btn('clear-cache', icon('trash') + '清理语音缓存', 'danger')}${btn('clear-drawn', icon('trash') + '清除相册里的绘图', 'danger', drawn?.count ? '' : 'disabled')}${chatPictures ? btn('clear-chat-pictures', icon('trash') + '清除正文图片', 'danger', chatPictures.count ? '' : 'disabled') : ''}</div></div></details>
         ${syncGroup()}
-        ${groupTitle('备份与恢复')}<div class="group"><button class="list-row" data-action="backup"><span><strong>备份到文件</strong><small>设置、角色音色、聊天记录、相册和收藏存成一个文件，换设备或误删时能找回</small></span>${icon('next')}</button><label class="list-row file-button"><span><strong>从文件恢复</strong><small>选一个 ST-iPhonie 备份文件</small></span>${icon('next')}<input type="file" data-backup-file accept=".json,application/json" aria-label="选择备份文件"></label></div>
+        ${groupTitle('备份与恢复')}<div class="group"><button class="list-row" data-action="backup"><span><strong>备份到文件</strong><small>设置、聊天记录与记忆、助手会话与记忆、相册和收藏存成一个文件，换设备或误删时能找回</small></span>${icon('next')}</button><label class="list-row file-button"><span><strong>从文件恢复</strong><small>选一个 ST-iPhonie 备份文件</small></span>${icon('next')}<input type="file" data-backup-file accept=".json,application/json" aria-label="选择备份文件"></label></div>
         ${groupTitle('帮助')}<div class="group"><button class="list-row" data-action="self-check"><span><strong>自检</strong><small>出问题时看看是哪里不对，可以把报告发给帮你的人</small></span>${icon('next')}</button></div>
         <div class="actions">${btn('about', '关于 ST-iPhonie', 'text-button')}</div>`);
   }
@@ -201,7 +201,7 @@ export function settingsApp(ctx) {
       api.saveSync({enabled: el.checked});
       await render();
       // Off: the copy in the tavern stays unless it is deleted too.
-      if (!el.checked && api.syncStatus?.()?.available && await ctx.confirm('也删掉酒馆里的那份吗？', '关掉后小手机不再往酒馆存。酒馆里已经存的聊天记录、朋友圈、备忘录和相册还在，别的设备打开同步还能读到。点确定会把它们从酒馆删掉；这台设备上的内容不受影响。')) await clearTavernCopy();
+      if (!el.checked && api.syncStatus?.()?.available && await ctx.confirm('也删掉酒馆里的那份吗？', '关掉后小手机不再往酒馆存。酒馆里已经存的聊天记录与记忆、助手会话与记忆、朋友圈、备忘录和相册还在，别的设备打开同步还能读到。点确定会把它们从酒馆删掉；这台设备上的内容不受影响。')) await clearTavernCopy();
       return;
     }
     if (['voiceEnabled', 'hideStoryWaves', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion', 'stripVoice', 'voiceExample'].includes(key)) { api.updateGeneral({[key]: el.checked}); if (key === 'stripVoice') await render(); }
@@ -281,7 +281,7 @@ export function settingsApp(ctx) {
       case 'lock': ctx.lock(); break;
       case 'self-check': case 'run-check': await runCheck(); break;
       case 'backup': backup = {parts: new Set(Object.keys(api.backupParts()).filter(part => part !== 'keys')), password: '', again: ''}; await render(); break;
-      case 'sync-clear': if (await ctx.confirm('删除酒馆里的那份？', '酒馆里存的聊天记录、朋友圈、备忘录和相册会删掉，别的设备再同步时就读不到了。这台设备上的内容不受影响；同步开着的话，之后会重新存一份。')) await clearTavernCopy(); break;
+      case 'sync-clear': if (await ctx.confirm('删除酒馆里的那份？', '酒馆里存的聊天记录与记忆、助手会话与记忆、朋友圈、备忘录和相册会删掉，别的设备再同步时就读不到了。这台设备上的内容不受影响；同步开着的话，之后会重新存一份。')) await clearTavernCopy(); break;
       case 'sync-now': { const st = await api.syncNow(); const r = st.lastResult || {}; ctx.notify(r.pulled?.length || r.merged?.length ? '已读取别的设备的新内容' + (r.pushed?.length ? '，也保存了这里的改动' : '') : r.pushed?.length ? '已保存到酒馆' : '已经是最新的了'); await render(); break; }
       case 'make-backup':
         await v.busy(el, async () => {

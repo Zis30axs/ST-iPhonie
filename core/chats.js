@@ -42,6 +42,7 @@ function cleanMessage(m, id, at) {
   const from = clip(m.from, 40).trim();
   if (!from) throw fail('消息缺少发送人');
   const out = {id, from, kind, text: clip(m.text, CHAT_STORE_LIMITS.text), at};
+  if (Number.isFinite(m.updatedAt) && m.updatedAt > 0) out.updatedAt = m.updatedAt;
   if (kind === 'voice') { out.translation = clip(m.translation, CHAT_STORE_LIMITS.text); out.emotion = clip(m.emotion, 100); }
   if (kind === 'photo' && m.photoId) out.photoId = clip(m.photoId, 512);
   if (kind === 'photo' && m.imageTags) out.imageTags = clip(m.imageTags, 600);
@@ -201,8 +202,9 @@ export class ChatStore {
     return this.#change(id, row => {
       const m = row.messages.find(x => x.id === messageId);
       if (!m) throw fail('这条消息已不存在', 'MISSING');
+      m.updatedAt = Math.max(this.#now(), (m.updatedAt || m.at || 0) + 1);
       if (patch.recall) {
-        for (const key of Object.keys(m)) if (!['id', 'from', 'at'].includes(key)) delete m[key];
+        for (const key of Object.keys(m)) if (!['id', 'from', 'at', 'updatedAt'].includes(key)) delete m[key];
         Object.assign(m, {kind: 'recall', text: ''});
         return;
       }
@@ -249,9 +251,9 @@ export class ChatStore {
     return rows.map(row => this.#public(row));
   }
   /** Puts backup threads back with their ids, checked like new ones, in one transaction. replace: other threads go. */
-  async importThreads(threads, {replace = false} = {}) {
+  async importThreads(threads, {replace = false, merge} = {}) {
     if (!Array.isArray(threads)) throw fail('备份里的聊天记录无效');
-    const now = this.#now(), rows = threads.map(t => {
+    const now = this.#now(), prepare = values => values.map(t => {
       if (!t || typeof t !== 'object' || !t.id) throw fail('备份里的聊天记录无效');
       const members = [...new Set((Array.isArray(t.members) ? t.members : []).map(m => clip(m, 40).trim()).filter(Boolean))].slice(0, CHAT_STORE_LIMITS.members);
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
@@ -259,11 +261,18 @@ export class ChatStore {
       return {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true,
         unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {})};
     });
-    return this.#tx('readwrite', (store, done) => {
-      const write = () => { for (const row of rows) store.put(row); done(rows.length); };
-      if (!replace) { write(); return; }
-      const req = store.index('scope').getAllKeys(this.#scope);
-      req.onsuccess = () => { for (const key of req.result) store.delete(key); write(); };
+    const rows = prepare(threads);
+    return this.#tx('readwrite', (store, done, abort) => {
+      const write = incoming => { for (const row of incoming) store.put(row); done(incoming.length); };
+      if (!replace) { write(rows); return; }
+      const req = store.index('scope').getAll(this.#scope);
+      req.onsuccess = () => {
+        try {
+          const incoming = merge ? prepare(merge(req.result.map(row => this.#public(row)))) : rows;
+          for (const row of req.result) store.delete([this.#scope, row.id]);
+          write(incoming);
+        } catch (error) { abort(error); }
+      };
     });
   }
   close() { this.#closed = true; this.#db?.close(); this.#db = null; }

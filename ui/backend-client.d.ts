@@ -123,12 +123,15 @@ export interface AssistantSettings {
     stream: boolean;
     /** 智能界面: the model may add small native UI (choices, cards, tables, forms) to replies. */
     visuals: boolean;
+    /** Recent messages sent verbatim while assistant memory is enabled. */
+    history: number;
+    memory: MemoryOptions;
 }
 export interface AssistantAttachment { kind: 'text' | 'image'; name: string; size: number; text?: string; data?: string; }
 export interface AssistantMeta { image?: {photoId: string; prompt: string}; elapsedMs: number; requestedModel: string; reportedModel: string; provider: string; reasoning: string; reasoningMs?: number; reasoningFormat?: {prefix: string; suffix: string}; }
 export interface AssistantVariant { text: string; at: number; meta?: AssistantMeta; }
 export interface AssistantMessage extends AssistantVariant { id: string; role: 'user' | 'assistant'; attachments?: AssistantAttachment[]; editedAt?: number; variants?: AssistantVariant[]; selected?: number; }
-export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
+export interface AssistantThread { id: string; kind: 'assistant'; title: string; titleEdited?: boolean; revision?: number; memoryRevision?: number; restoredAt?: number; createdAt: number; updatedAt: number; at: number; messages: AssistantMessage[]; }
 export interface AssistantThreadSummary extends Omit<AssistantThread, 'messages'> { messageCount: number; preview: string; }
 /** 画风预设: artist and fixed tags sent to NovelAI. */
 export interface DrawStyle { id: string; name: string; artist: string; positive: string; negative: string; }
@@ -618,9 +621,9 @@ export interface BackendFacade {
     /** parts may include 'keys', which needs `password` (at least 6 characters): the keys are sealed with it. */
     exportBackup(parts: string[], version?: string, options?: { password?: string }): Promise<{ blob: Blob; name: string }>;
     /** What a backup file holds; rejects when it is not an ST-iPhonie backup. */
-    inspectBackup(file: Blob): Promise<{ version: string; createdAt: number; summary: { settings: { roles: number; presets: number } | null; chats: number | null; moments: number | null; notes: number | null; photos: number | null; favorites: number | null; vibes: { vibes: number; groups: number } | null; keys: number | null } }>;
+    inspectBackup(file: Blob): Promise<{ version: string; createdAt: number; summary: { settings: { roles: number; presets: number } | null; chats: number | null; memories: number | null; assistant: number | null; moments: number | null; notes: number | null; photos: number | null; favorites: number | null; vibes: { vibes: number; groups: number } | null; keys: number | null } }>;
     /** Restores the chosen parts; replace empties those kinds of data first. Returns how many of each came back. */
-    importBackup(file: Blob, options: { parts: string[]; replace?: boolean; password?: string }): Promise<{ settings?: boolean; chats?: number; moments?: number; notes?: number; photos?: number; favorites?: number; vibes?: number; vibeGroups?: number; references?: number; phone?: number; keys?: number }>;
+    importBackup(file: Blob, options: { parts: string[]; replace?: boolean; password?: string }): Promise<{ settings?: boolean; chats?: number; memories?: number; assistant?: number; moments?: number; notes?: number; photos?: number; favorites?: number; vibes?: number; vibeGroups?: number; references?: number; phone?: number; keys?: number }>;
     /** The audio of a favorite, a cached line, or a line with its speaker's current voice, named for saving.
      *  Rejects when that line has not been generated yet. */
     audioFile(ref: { favorite: string } | { key: string } | { line: { role: string; text: string; emotion?: string; translation?: string } }): Promise<{ blob: Blob; name: string }>;
@@ -668,8 +671,8 @@ export interface BackendFacade {
     saveSounds(patch: Partial<SoundSettings>): SoundSettings;
     saveMusic(patch: Partial<MusicSettings>): MusicSettings;
     /** Searches the enabled music sources (or one). */
-    searchMusic(query: string, sourceId?: string): Promise<{ songs: MusicFound[]; errors: { source: string; message: string }[] }>;
-    musicLink(sourceId: string, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
+    searchMusic(query: string, sourceId?: string | Partial<MusicSource>): Promise<{ songs: MusicFound[]; errors: { source: string; message: string }[] }>;
+    musicLink(sourceId: string | Partial<MusicSource>, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     musicLyric(sourceId: string, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     listSongs(): Promise<MusicSong[]>;
     songBlob(id: string): Promise<Blob | null>;
@@ -779,6 +782,11 @@ export interface BackendFacade {
     /** Deletes a summary; what it covered is sent to the model again. */
     memoryRemove(threadId: string, nodeId: string): Promise<MemoryBook>;
     memoryForget(threadId: string): Promise<void>;
+    /** Assistant memory is isolated per conversation from character chats. */
+    assistantMemoryBook(threadId: string): Promise<MemoryBook>;
+    assistantMemoryEdit(threadId: string, nodeId: string, text: string): Promise<MemoryBook>;
+    assistantMemoryRemove(threadId: string, nodeId: string): Promise<MemoryBook>;
+    assistantMemoryForget(threadId: string): Promise<void>;
     /** read: the chat is on screen, so new replies do not count as unread. */
     appendChat(id: string, messages: ChatMessageInput[], options?: { read?: boolean }): Promise<ChatThread>;
     /** 删除好友: the chat is put away and later messages from them arrive as 好友申请. */
@@ -907,6 +915,8 @@ export interface BackendAPI extends BackendFacade {
     /** 立即整理: writes up what is due in the chat's memory; resolves with how many summaries were written. */
     memoryTidy(threadId: string): Promise<number>;
     memoryStatus(threadId: string): MemoryStatus;
+    assistantMemoryTidy(threadId: string): Promise<number>;
+    assistantMemoryStatus(threadId: string): MemoryStatus;
     /** The extension prompts injected now (other plugins'), to pick which hold story memory; name: a known memory plugin. */
     storySources(): Array<{ key: string; name: string; chars: number; preview: string; picked: boolean }>;
     peekBusy(): boolean;

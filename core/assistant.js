@@ -2,6 +2,7 @@
 // none of it is part of these settings or documents.
 import {DEFAULT_FORMAT, isPlaceholderRole} from './protocol.js';
 import {languageName} from './languages.js';
+import {normalizeMemory} from './memory.js';
 
 export const ASSISTANT_LIMITS = Object.freeze({messages: 500, text: 100_000, entries: 50, entryText: 20_000, title: 80, presets: 100, tavernEntries: 500, variants: 20, attachments: 8, fileBytes: 10 * 1024 * 1024, totalBytes: 20 * 1024 * 1024});
 const presetId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(id) && !['__proto__','constructor','prototype'].includes(id);
@@ -12,7 +13,7 @@ const text = (value, max, fallback = '') => typeof value === 'string' ? value.sl
 const entry = (id, title, value) => ({id, title, text: value, enabled: true});
 
 export function defaultAssistant() {
-  return {source: 'builtin', activePreset: 'companion', stream: true, visuals: true, readContext: false, tavernPreset: '', tavernEntries: {}, presets: [
+  return {source: 'builtin', activePreset: 'companion', stream: true, visuals: true, readContext: false, history: 30, memory: {...normalizeMemory(), story: false, storyKeys: []}, tavernPreset: '', tavernEntries: {}, presets: [
     {id: 'companion', name: '助手', entries: [
       entry('identity', '助手身份', '你是用户的聊天助手，可以陪用户闲聊、一起讨论想法，回答问题并提出具体建议。用自然、亲切的中文交流，按话题决定回复长短。'),
       entry('drawing', '生图协作', '和用户一起讨论画面、构图、风格与提示词。只讨论能力或方案时先回答，不直接生成。用户明确要求画图或确认方案后，可以在回复中插入图片，并用自然的文字承接前后内容；不要只回复图片已生成。根据已生成图片的提示词继续讨论，不假装看到了没有提供给你的图片像素。'),
@@ -44,19 +45,23 @@ export function normalizeAssistant(value) {
     Object.fromEntries(Object.entries(entries).filter(([id, enabled]) => safeKey(id) && id.length <= 200 && typeof enabled === 'boolean').slice(0, ASSISTANT_LIMITS.tavernEntries)),
   ]));
   return {source: value.source === 'tavern' ? 'tavern' : 'builtin', activePreset: presets.some(p => p.id === value.activePreset) ? value.activePreset : base.activePreset,
-    presets, tavernPreset: text(value.tavernPreset, 200), tavernEntries, stream: value.stream !== false, visuals: value.visuals !== false, readContext: value.readContext === true};
+    presets, tavernPreset: text(value.tavernPreset, 200), tavernEntries, stream: value.stream !== false, visuals: value.visuals !== false, readContext: value.readContext === true,
+    history: Number.isFinite(Number(value.history)) ? Math.max(2, Math.min(500, Math.round(Number(value.history)))) : base.history,
+    memory: {...normalizeMemory(value.memory), story: false, storyKeys: []}};
 }
 
 /** User edits are validated before normalizing so invalid/oversized edits are never silently lost. */
 export function validateAssistantPatch(patch) {
   if (!record(patch)) throw Error('助手设置格式无效');
-  const allowed = ['source', 'activePreset', 'presets', 'tavernPreset', 'tavernEntries', 'readContext', 'stream', 'visuals'];
+  const allowed = ['source', 'activePreset', 'presets', 'tavernPreset', 'tavernEntries', 'readContext', 'stream', 'visuals', 'history', 'memory'];
   if (Object.keys(patch).some(key => !allowed.includes(key))) throw Error('助手设置包含不支持的字段');
   if ('source' in patch && !['builtin', 'tavern'].includes(patch.source)) throw Error('请选择助手预设来源');
   if ('activePreset' in patch && !presetId(patch.activePreset)) throw Error('请选择有效的助手预设');
   if ('stream' in patch && typeof patch.stream !== 'boolean') throw Error('流式显示开关无效');
   if ('visuals' in patch && typeof patch.visuals !== 'boolean') throw Error('智能界面开关无效');
   if ('readContext' in patch && typeof patch.readContext !== 'boolean') throw Error('读取上下文开关无效');
+  if ('history' in patch && (!Number.isInteger(patch.history) || patch.history < 2 || patch.history > 500)) throw Error('助手最近消息数请填写 2–500');
+  if ('memory' in patch && !record(patch.memory)) throw Error('助手记忆设置格式无效');
   if ('tavernPreset' in patch && (typeof patch.tavernPreset !== 'string' || patch.tavernPreset.length > 200)) throw Error('酒馆预设名称无效');
   if ('presets' in patch) {
     if (!Array.isArray(patch.presets) || patch.presets.length + (patch.presets.some(p => p?.id === 'companion') ? 0 : 1) > ASSISTANT_LIMITS.presets) throw Error('助手预设列表无效');

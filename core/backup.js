@@ -2,11 +2,15 @@
 // Keys go in only when the user asks, encrypted with a password of theirs (PBKDF2-SHA-256 → AES-GCM); without the
 // password they cannot be read. The file is assembled in pieces, so a large album is not first built as one huge string.
 
-export const BACKUP_FORMAT = 1;
+import {normalizeMemoryBooks, normalizeAssistantThreads} from './data-transfer.js';
+
+export const BACKUP_FORMAT = 2;
 /** The parts a backup can hold, in the order they are shown. settings brings the reference audio and the phone's look. */
 export const BACKUP_PARTS = Object.freeze({
   settings: '设置、预设和角色音色',
   chats: '聊天记录',
+  memories: '聊天记忆',
+  assistant: '助手会话与记忆',
   moments: '朋友圈',
   notes: '备忘录',
   photos: '相册',
@@ -15,7 +19,7 @@ export const BACKUP_PARTS = Object.freeze({
   keys: '密钥（用密码加密）'
 });
 /** Which library stores each part covers. */
-export const PART_STORES = Object.freeze({settings: ['references', 'phone'], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], chats: [], moments: [], keys: []});
+export const PART_STORES = Object.freeze({settings: ['references', 'phone'], notes: ['notes'], photos: ['photos'], favorites: ['favorites'], vibes: ['vibes'], chats: [], memories: [], assistant: [], moments: [], keys: []});
 /** Parts chosen by default: keys only when the user turns them on. */
 export const DEFAULT_BACKUP_PARTS = Object.freeze(Object.keys(BACKUP_PARTS).filter(part => part !== 'keys'));
 export const KEY_PASSWORD_MIN = 6;
@@ -73,13 +77,16 @@ async function rowJSON(row) {
 
 /**
  * Builds the backup file.
- * data: {version, settings?: object, library?: {store: rows[]}, chats?: threads[], moments?: posts[], vibeGroups?: groups[]}
+ * data: {version, settings?: object, library?: {store: rows[]}, chats?: threads[], memories?: books[],
+ *   assistant?: threads with memory (book or null)[], moments?: posts[], vibeGroups?: groups[]}
  */
-export async function writeBackup({version = '', settings = null, library = {}, chats = null, moments = null, keys = null, vibeGroups = null}) {
+export async function writeBackup({version = '', settings = null, library = {}, chats = null, memories = null, assistant = null, moments = null, keys = null, vibeGroups = null}) {
   const pieces = [JSON.stringify({app: 'ST-iPhonie', kind: 'backup', format: BACKUP_FORMAT, version, createdAt: Date.now()}).slice(0, -1), ',"data":{'];
   const fields = [];
   if (settings) fields.push(['settings', JSON.stringify(settings)]);
   if (chats) fields.push(['chats', JSON.stringify(chats)]);
+  if (memories !== null) fields.push(['memories', JSON.stringify(normalizeMemoryBooks(memories))]);
+  if (assistant !== null) fields.push(['assistant', JSON.stringify(normalizeAssistantThreads(assistant))]);
   if (moments) fields.push(['moments', JSON.stringify(moments)]);
   if (keys) fields.push(['keys', JSON.stringify(keys)]);
   if (vibeGroups) fields.push(['vibeGroups', JSON.stringify(vibeGroups)]);
@@ -94,14 +101,18 @@ export async function writeBackup({version = '', settings = null, library = {}, 
   return new Blob(pieces, {type: 'application/json'});
 }
 
-/** Reads a backup file back: {version, createdAt, settings, chats, library: {store: rows[]}, summary}. Throws a plain
+/** Reads a backup file back: {version, createdAt, settings, chats, memories, assistant, library: {store: rows[]}, summary}. Throws a plain
  *  Chinese message for files that are not ST-iPhonie backups. */
 export async function readBackup(file) {
   if (!isBlob(file) || !file.size) throw fail('请选择备份文件');
   let parsed;
   try { parsed = JSON.parse(await file.text()); } catch { throw fail('这不是有效的备份文件（读不出内容）'); }
-  if (parsed?.app !== 'ST-iPhonie' || parsed.kind !== 'backup' || !parsed.data || typeof parsed.data !== 'object') throw fail('这不是 ST-iPhonie 的备份文件');
+  if (parsed?.app !== 'ST-iPhonie' || parsed.kind !== 'backup' || !parsed.data || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) throw fail('这不是 ST-iPhonie 的备份文件');
   if (parsed.format > BACKUP_FORMAT) throw fail('这个备份来自更新版本的插件，请先更新插件再恢复');
+  if (!Number.isInteger(parsed.format) || parsed.format < 1) throw fail('备份格式版本无效');
+  // Missing sections stay null, so restoring an older file cannot clear data it never contained.
+  const memories = parsed.data.memories === undefined ? null : normalizeMemoryBooks(parsed.data.memories);
+  const assistant = parsed.data.assistant === undefined ? null : normalizeAssistantThreads(parsed.data.assistant);
   const library = {};
   for (const store of ['notes', 'photos', 'favorites', 'vibes', 'references', 'phone']) {
     const rows = parsed.data[store];
@@ -115,6 +126,8 @@ export async function readBackup(file) {
   const summary = {
     settings: settings ? {roles: settings.routes?.length || 0, presets: settings.presets?.length || 0} : null,
     chats: chats ? chats.length : null,
+    memories: memories ? memories.length : null,
+    assistant: assistant ? assistant.length : null,
     moments: moments ? moments.length : null,
     notes: library.notes ? library.notes.length : null,
     photos: library.photos ? library.photos.length : null,
@@ -122,5 +135,5 @@ export async function readBackup(file) {
     vibes: library.vibes ? {vibes: library.vibes.length, groups: vibeGroups?.length || 0} : null,
     keys: parsed.data.keys?.data ? (Array.isArray(parsed.data.keys.engines) ? parsed.data.keys.engines.length : 0) : null
   };
-  return {version: String(parsed.version || ''), createdAt: Number(parsed.createdAt) || 0, settings, chats, moments, library, vibeGroups, keys: parsed.data.keys?.data ? parsed.data.keys : null, summary};
+  return {version: String(parsed.version || ''), createdAt: Number(parsed.createdAt) || 0, settings, chats, memories, assistant, moments, library, vibeGroups, keys: parsed.data.keys?.data ? parsed.data.keys : null, summary};
 }

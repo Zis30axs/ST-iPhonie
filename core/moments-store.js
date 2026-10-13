@@ -148,18 +148,25 @@ export class MomentStore {
   /** Every post, for a backup. */
   async exportPosts() { return this.list(); }
   /** Puts backup posts back with their ids, checked like new ones, in one transaction. replace: other posts go. */
-  async importPosts(posts, {replace = false} = {}) {
+  async importPosts(posts, {replace = false, merge} = {}) {
     if (!Array.isArray(posts)) throw fail('备份里的朋友圈无效');
-    const now = this.#now(), rows = posts.slice(0, MOMENTS_LIMITS.posts).map(p => {
+    const now = this.#now(), prepare = values => values.slice(0, MOMENTS_LIMITS.posts).map(p => {
       if (!p || typeof p !== 'object' || !p.id) throw fail('备份里的朋友圈无效');
       const at = Number.isFinite(p.at) ? p.at : now;
       return {scope: this.#scope, ...cleanPost(p, clip(p.id, 512), at),
         comments: (Array.isArray(p.comments) ? p.comments : []).slice(-MOMENTS_LIMITS.comments).map(c => cleanComment(c, clip(c?.id || this.#id(), 512), Number.isFinite(c?.at) ? c.at : at))};
     });
-    return this.#tx('readwrite', (store, done) => {
-      const write = () => { for (const row of rows) store.put(row); done(rows.length); };
-      if (!replace) { write(); return; }
-      this.#all(store, existing => { for (const row of existing) store.delete([this.#scope, row.id]); write(); });
+    const rows = prepare(posts);
+    return this.#tx('readwrite', (store, done, abort) => {
+      const write = incoming => { for (const row of incoming) store.put(row); done(incoming.length); };
+      if (!replace) { write(rows); return; }
+      this.#all(store, existing => {
+        try {
+          const incoming = merge ? prepare(merge(existing.map(row => this.#public(row)))) : rows;
+          for (const row of existing) store.delete([this.#scope, row.id]);
+          write(incoming);
+        } catch (error) { abort(error); }
+      });
     });
   }
   close() { this.#closed = true; this.#db?.close(); this.#db = null; }
