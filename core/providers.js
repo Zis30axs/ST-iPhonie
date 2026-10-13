@@ -187,12 +187,21 @@ export class Providers{
   * ask it (no CORS) is asked again through the tavern's own proxy (this.proxy, set by the backend).
   */
  async speakCustom(request,signal){
+  // One at a time: a model is switched for this line and must not be switched again by another before it is said.
+  const turn=(this.customTurn||Promise.resolve()).catch(()=>{}).then(()=>this.speakCustomNow(request,signal));
+  this.customTurn=turn;return turn;
+ }
+ async speakCustomNow(request,signal){
   const {url,init}=customInit(request,this.keys.get('custom')||'');
-  const send=async target=>{try{return await fetchWithPolicy(this.fetcher,target,init,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
-   const relayed=await this.proxy(target,init,signal).catch(()=>null);if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
+  const send=async(target,how=init)=>{try{return await fetchWithPolicy(this.fetcher,target,how,signal);}catch(error){if(signal?.aborted||!this.proxy||!/无法连接/.test(error.message))throw error;
+   const relayed=await this.proxy(target,how,signal).catch(()=>null);if(!relayed)throw Error('连不上自己的接口：地址不对、服务没开，或者它不让网页直接访问（可以在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆）');
    if(relayed.status===403&&/CORS proxy is disabled/i.test(await relayed.clone().text().catch(()=>'')))throw Error('自己的接口不让网页直接访问：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true 再重启酒馆');return relayed;}};
+  // 换模型: only when this voice's model is not the one loaded last.
+  const loaded=(request.before||[]).join('\n');
+  if(loaded&&this.customLoaded!==loaded){this.customLoaded='';for(const step of request.before){const {url:target,init:get}=customInit({...request,url:step,method:'GET',body:undefined});const r=await send(target,get).catch(e=>{throw Error('换模型失败：'+e.message);});
+   if(!r.ok){const said=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,160);throw Error('换模型失败（HTTP '+r.status+'）'+(said?'：'+said:'')+'：检查音色里模型的路径');}await r.body?.cancel?.().catch(()=>{});}this.customLoaded=loaded;}
   const response=await send(url);
-  return readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link)});
+  return readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link,{method:'GET',headers:init.headers})});
  }
  /** ElevenLabs 音效 (text to sound effects): an English description to an MP3. seconds 0: ElevenLabs picks; loop: an ambience that loops seamlessly. */
  async soundEffect({text,seconds=0,loop=false},signal=new AbortController().signal){

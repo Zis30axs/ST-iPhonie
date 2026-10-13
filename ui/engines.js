@@ -3,7 +3,7 @@ import {createView, esc, engines, btn, field, input, select, textArea, toggle, h
 const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
 import {icon, spark} from './icons.js';
 import {fly} from './carry.js';
-import {CUSTOM_TEMPLATES} from '../core/custom-voice.js';
+import {CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage} from '../core/custom-voice.js';
 
 export function enginesApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'engines'), drafts = new Map();
@@ -374,7 +374,7 @@ export function enginesApp(ctx) {
           ${engine === 'fish' ? fishRelay() : ''}
           <div class="actions">${btn('read-voices', icon('refresh') + '读取音色列表', 'secondary')}</div><p class="hint" data-connection-status></p>
         </div>`
-      + (engine === 'custom' ? customTemplates() : '')
+      + (engine === 'custom' ? customImport() + customTemplates() : '')
       + balanceGroup()
       + groupTitle(engine === 'custom' ? '接口和音色' : '参数')
       + schema.groups.map((g, i) => `<details data-group="${engine}:${g.id}" ${i === 0 ? 'open' : ''}><summary>${esc(g.title)}</summary><div>${g.fields.map(f => control(f, c)).join('')}</div></details>`).join('')
@@ -383,6 +383,23 @@ export function enginesApp(ctx) {
       + `<div class="savebar"><span class="save-state" data-save-state>${dirty ? '未保存' : '已保存'}</span>${btn('save-connection', '保存配置', 'primary')}</div>`);
   }
 
+  const FOLDER_KEY = 'sttts.voiceFolder';
+  const lastFolder = () => { try { return ctx.win.localStorage.getItem(FOLDER_KEY) || ''; } catch { return ''; } };
+  /** 自己的接口: a folder of GPT-SoVITS characters (one folder each: .ckpt, .pth, reference audios) in one go. */
+  function customImport() {
+    return groupTitle('从文件夹导入', help('GPT-SoVITS 的角色文件夹（每个角色一个文件夹，里面有 .ckpt、.pth 模型和参考音频）可以一次导入：填这个文件夹在电脑上的位置，再点「选择文件夹」选同一个文件夹。\n\n只读文件名，不会上传任何文件。每个角色变成一个音色：模型路径、参考音频、参考文本（从文件名里读）、参考语言都会填好；同名的音色换成新的。还没填接口的话，会按 GPT-SoVITS 的默认地址填好。导入后，名字和角色一样的角色可以一起换成「自己的接口」。\n\n要在电脑上导入：手机上选不了电脑里的文件夹。导入一次以后手机上也能用。'))
+      + `<div class="group pad">${field('文件夹在电脑上的位置', input('voice-folder', lastFolder(), 'text', 'placeholder="比如 E:\\GPT-SoVITS\\MyCharacters" autocomplete="off" spellcheck="false"'))}
+        <div class="actions">${btn('voice-folder-pick', icon('import') + '选择文件夹', 'secondary')}</div><input type="file" data-voice-folder webkitdirectory directory multiple hidden></div>`;
+  }
+  /** After an import: roles named like a voice may switch to 自己的接口 with it. */
+  async function matchRoles(voices) {
+    const loose = s => String(s).toLowerCase().replace(/\s+/g, '');
+    const pairs = api.getState().routes.map(r => [r, voices.find(v => loose(v.name) === loose(r.name)) || voices.find(v => loose(r.name).length >= 2 && loose(v.name).startsWith(loose(r.name)))]).filter(([r, v]) => v && !(r.engine === 'custom' && r.voice === v.name));
+    if (!pairs.length) return 0;
+    if (!await ctx.confirm('给角色配上这些音色？', pairs.map(([r, v]) => `${r.name} → ${v.name}`).join('\n') + '\n\n这些角色会换成「自己的接口」，原来的引擎和音色还记着，换回去就恢复。')) return 0;
+    for (const [r, v] of pairs) api.saveRoute({...r, engine: 'custom', voice: v.name});
+    return pairs.length;
+  }
   /** 自己的接口: one-click formats of well-known self-hosted services (only the user's own address goes in). */
   function customTemplates() {
     return groupTitle('一键格式', help('用自己电脑（或者局域网里别的电脑）上跑的语音服务时，填上它的地址，点「按这个格式填」，下面的接口设置就填好了，再添加音色、保存。插件不带任何别人的服务器地址。\n\n别的服务：照它的接口文档，自己在下面填地址、请求体和回答的格式。'))
@@ -537,6 +554,22 @@ export function enginesApp(ctx) {
   }
   v.on('input', '[data-param]', el => { if (!['checkbox', 'file'].includes(el.type) && el.tagName !== 'SELECT') return updateParam(el, false); });
   v.on('change', '[data-param]', el => updateParam(el, true));
+  // 从文件夹导入: the picked folder's file names → voices; saved at once, then roles named alike may take them.
+  v.on('change', '[data-voice-folder]', async el => {
+    const files = [...(el.files || [])], root = v.root.querySelector('[data-field="voice-folder"]')?.value.trim() || lastFolder();
+    el.value = '';
+    if (!files.length) return;
+    const lang = shortLanguage(api.getState().general.defaultLanguage) || 'zh';
+    const {voices, skipped} = voicesFromFolder(files.map(f => f.webkitRelativePath || f.name), root, {prefer: lang});
+    if (!voices.length) { ctx.notify('这个文件夹里没找到角色：要选放着一个个角色文件夹的那一层', {error: true}); return; }
+    const c = draft(), kept = (c.params.voices || []).filter(x => !voices.some(n => n.name === String(x.name).trim()));
+    c.params = {...c.params, voices: [...kept, ...voices].slice(0, 200)};
+    if (!String(c.params.url || '').trim()) c.params = {...c.params, ...CUSTOM_TEMPLATES[0].fill('http://127.0.0.1:9880')};
+    api.saveConnection('custom', c); dirty = false; render();
+    ctx.notify(`导入了 ${voices.length} 个角色${skipped.length ? `（${skipped.join('、')} 没找到参考音频）` : ''}，已保存`);
+    const n = await matchRoles(voices);
+    if (n) { render(); ctx.notify(`${n} 个角色换成了自己的接口`); }
+  });
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
       case 'image-save': saveImageForm(); break;
@@ -711,6 +744,13 @@ export function enginesApp(ctx) {
         const field = v.root.querySelector('[data-field=key]');
         field.type = field.type === 'password' ? 'text' : 'password';
         el.textContent = field.type === 'password' ? '显示' : '隐藏';
+        break;
+      }
+      case 'voice-folder-pick': {
+        const root = v.root.querySelector('[data-field="voice-folder"]')?.value.trim() || '';
+        if (!/^(?:[a-z]:[\\/]|\/|\\\\)/i.test(root)) { ctx.notify('先填这个文件夹在电脑上的位置，比如 E:\\GPT-SoVITS\\MyCharacters', {error: true}); break; }
+        try { ctx.win.localStorage.setItem(FOLDER_KEY, root); } catch { /* typed again next time */ }
+        v.root.querySelector('[data-voice-folder]')?.click();
         break;
       }
       case 'voice-template': {

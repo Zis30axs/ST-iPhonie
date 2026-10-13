@@ -2188,7 +2188,8 @@ export class TTSBackend {
         const lang = languageCode(this.settings.general.defaultLanguage || 'zh').split('-')[0] || 'zh';
         const text = ({ zh: '你好，这是一句试音。', ja: 'こんにちは、テストです。', en: 'Hello, this is a test.', ko: '안녕하세요, 테스트입니다.' })[lang] || '你好，这是一句试音。';
         const request = buildRequest('custom', c, { voice: voice ? String(voice.name).trim() : '', language: lang }, { text, emotion: '' });
-        const [blob] = await Promise.all([this.providers.synthesize(request), unlock]);
+        // A first line may load the voice's model: as long as a line in the story may take (two minutes).
+        const [blob] = await Promise.all([this.providers.synthesize(request, new AbortController().signal), unlock]);
         this.assertOpen();
         this.player.playBlob(blob, { speaker: voice ? String(voice.name).trim() : '自己的接口', engine: 'custom', line: { role: voice ? String(voice.name).trim() : '', text, translation: '', emotion: '' } });
         return { voice: voice ? String(voice.name).trim() : '', bytes: blob.size, type: blob.type };
