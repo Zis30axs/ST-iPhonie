@@ -1,5 +1,5 @@
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -1376,7 +1376,7 @@ export class TTSBackend {
         this.assertOpen();
         const s = this.musicSource(sourceId), link = readLink(s, await this.musicFetch(fillSource(s.url, { id: songId })));
         if (!link) throw Error(`「${s.name}」没有给出这首歌的播放链接（可能要会员，或者「链接在哪」填得不对）`);
-        return link;
+        return playable(link, globalThis.location?.protocol);
     }
     async musicLyric(sourceId, songId) {
         const s = this.musicSource(sourceId);

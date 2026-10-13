@@ -2255,3 +2255,4 @@ button.aui-card:active{transform:scale(.98)}
 .music-no-lyric small{font-size:11.5px}
 @media (prefers-reduced-motion:reduce){.music-now .music-cover{animation:none}}
 .music-lyrics{overflow-x:hidden}
+.music-selfhost{display:flex;gap:8px;align-items:center}.music-selfhost input{flex:1;min-width:0}.music-selfhost button{flex:none;white-space:nowrap}

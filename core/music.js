@@ -84,8 +84,22 @@ export const fill = (template, values) => String(template).replace(/\{\{(query|i
 export function readLink(source, json) {
   const value = typeof json === 'string' ? json : pick(json, source.urlPath);
   const link = typeof value === 'string' ? value.trim() : '';
-  return /^https?:\/\//i.test(link) ? link.replace(/^http:\/\//i, 'https://') : '';
+  return /^https?:\/\//i.test(link) ? link : '';
 }
+/** A server on this computer or this home network (a backend the user runs: its links stay http). */
+export const nearby = link => { try { return /^(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|\[::1\]$|[^.]+$)/i.test(new URL(link).hostname); } catch { return false; } };
+/** An http link on a page opened over https would be blocked: upgraded, unless it is the user's own nearby server. */
+export const playable = (link, pageProtocol = 'http:') => pageProtocol === 'https:' && /^http:\/\//i.test(link) && !nearby(link) ? link.replace(/^http:\/\//i, 'https://') : link;
+
+/**
+ * Backends the user runs themselves (on their computer, or in Termux on the phone): only the layout of their answers
+ * ships here, never an address — the user types where their own server is.
+ */
+export const SELF_HOSTED = Object.freeze([
+  {id: 'netease-api', name: '网易云音乐 API（NeteaseCloudMusicApi 这类，自己搭的）', example: 'http://localhost:3000',
+    fill: base => ({name: '网易云（我的后端）', search: base + '/cloudsearch?keywords={{query}}&limit=20', url: base + '/song/url/v1?id={{id}}&level=standard', lyric: base + '/lyric?id={{id}}',
+      listPath: 'result.songs', idPath: 'id', titlePath: 'name', artistPath: 'ar', urlPath: 'data[0].url', lyricPath: 'lrc.lyric'})}
+]);
 
 // ---------- Lyrics ----------
 /** LRC text as [{at (seconds), text}], in time order; plain lyrics give none. */
