@@ -28,12 +28,26 @@ result.push({start:from,end:at,translation:said,role:values.角色.trim(),emotio
 function looseLines(message,found,excluded){const out=[];for(const m of message.matchAll(/<tts>([^<]{1,6000}?)<\/tts>/g)){const at=m.index,end=at+m[0].length;if(found.some(l=>at<l.end&&end>l.start)||excluded.some(([a,b])=>at<b&&end>a))continue;const parts=m[1].split('|');if(parts.length<2||parts.length>3)continue;const role=decodeText(parts[0]).trim(),emotion=parts.length===3?decodeText(parts[1]).trim():'',text=decodeText(parts.at(-1)).trim();if(!role||role.length>100||emotion.length>100||isPlaceholderRole(role)||!text.trim())continue;
 const before=Math.max(0,...found.map(l=>l.end).filter(e=>e<=at),...out.map(l=>l.end)),quoted=/“([^“”]{1,2000})”\s*$/.exec(message.slice(before,at));
 out.push({start:quoted?at-quoted[0].length:at,end,translation:(quoted?decodeText(quoted[1]):text).trim(),role,emotion,text});}return out;}
+// A Chinese line the model split in two — the beginning quoted, the rest only in the tag (“今天天气真不错”<tts>澄音|开心|
+// 我们出去约会吧！</tts>) — or quoted only partly (the tag holds the whole line): the whole line is shown and spoken.
+// Only for a Chinese tag (Han characters, no kana, hangul or Latin words): a translation of another language is left
+// alone, and so is a Chinese pair that says the same thing in other words (they share most characters, Cantonese too).
+const voiceOnly=t=>String(t).replace(/\[[^\]]*\]|<[^>]*>|\((?:[a-z][a-z\s'-]*)\)/gi,'');
+const coreText=t=>voiceOnly(t).replace(/[\s\p{P}\p{S}]/gu,'');
+const chineseText=t=>{const c=coreText(t);return /\p{Script=Han}/u.test(c)&&!/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(c)&&!/[a-z]{3,}/i.test(c);};
+export function mendLine(line){const t=coreText(line.translation),x=coreText(line.text);
+if(!t||!x||t===x||t.includes(x)||!chineseText(line.text)||!chineseText(line.translation))return line;
+if(x.includes(t))return {...line,translation:voiceOnly(line.text).trim()};
+const a=new Set(t),b=new Set(x),shared=[...a].filter(c=>b.has(c)).length/Math.min(a.size,b.size);
+if(shared>=0.3)return line;
+const head=line.translation.trim(),joint=/[\p{P}]$/u.test(head)?'':'，';
+return {...line,translation:head+joint+voiceOnly(line.text).trim(),text:head+joint+line.text.trim()};}
 export function parseDialogue(message,format=DEFAULT_FORMAT){const {literals,names}=compileFormat(format);message=String(message);if(message.length>500000)return [];
 // A straight quote right outside a curly one ("“你好”"<tts>…) counts as a second curly quote. Same length, so positions hold.
 if(literals[0]==='“')message=message.replace(/"(?=“)/g,'“').replace(/(?<=”)"/g,'”');
 const family=tagFamily(format);if(family)message=repaired(message);
 const excluded=codeSpans(message),found=exactLines(message,literals,names,excluded);
-return family?[...found,...looseLines(message,found,excluded)].sort((a,b)=>a.start-b.start):found;}
+return (family?[...found,...looseLines(message,found,excluded)].sort((a,b)=>a.start-b.start):found).map(mendLine);}
 /** Voice tags in a reply that were not read as lines (lines: what was read), each with why, for the hint under the
  *  reply and the self-check. */
 export function dialogueProblems(message,lines=[]){const text=String(message);if(!/<tts\b/i.test(text)||text.length>500000)return [];const fixed=repaired(text.replace(/"(?=“)/g,'“').replace(/(?<=”)"/g,'”')),excluded=codeSpans(fixed),problems=[];
@@ -52,7 +66,7 @@ export function dialogueContract(format){return [
 '完整覆盖：问候、短答、感叹、打断、对白中的连续句子都要带标签；不要只给部分对白加标签。旁白、动作、环境和未说出口的心理活动保持普通正文。',
 '一一配对：一组中文译文紧接一个语音标签，二者对应同一个说话者的同一段连续发言。每句意思、事实、称呼、否定、提问和先后顺序都必须完整对应。译文不能只译开头、概括大意、截短或用省略号代替剩余内容；朗读文本不得增加译文中没有的句子、解释或情节。',
 '分段对应：长台词按句或短意群拆成多组，每组都保留完整中文译文及对应原语言文本。换说话者或中间插入动作/旁白时另起一组，不把多个人的发言塞进同一个标签。',
-'中文台词：当原语言就是中文时，去掉引擎声音标签和停顿标记后，标签内台词与标签前中文译文应一致；不要另写一个加长版本。其他语言使用忠实、完整的自然中文翻译，不按字数比例机械删减。',
+'中文台词（最容易出错，务必遵守）：原语言就是中文时，标签前的引号里和标签里写的是同一整句话，把整句完整写两遍（去掉引擎声音标签和停顿标记后，两边一字不差）。绝不能把一句话拆成两半——前半句放引号里、后半句只放标签里——那样读者只看得到前半句。错误：“今天天气真不错”<tts>小林|开心|我们出去约会吧，那一定很棒！</tts>；正确：“今天天气真不错，我们出去约会吧，那一定很棒！”<tts>小林|开心|今天天气真不错，我们出去约会吧，那一定很棒！</tts>。句子太长就拆成几组，每组引号里和标签里各自完整。其他语言使用忠实、完整的自然中文翻译，不按字数比例机械删减。',
 '发声范围：语气词和停顿仅使用该角色引擎/模型支持的写法，不把动作或心理描写夹进朗读文本。角色字段填写实际姓名，不能照抄 {角色} 或 {{角色}} 等占位符。',
 '格式完整：每一组都填写译文、角色、情绪、文本并闭合标签；字段内的特殊分隔符用 HTML 实体转义（例如 &quot;、&lt;、&gt;、&amp;），完整标签不要写进代码块。',
 '输出前自行核对：每段发声是否都有完整标签；每组译文与朗读内容是否逐句对应且无漏译、无增写；所有标签是否闭合。直接输出检查后的正文，不输出核对过程。'
