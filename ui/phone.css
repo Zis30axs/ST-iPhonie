@@ -2197,9 +2197,11 @@ button.aui-card:active{transform:scale(.98)}
 .music-now{margin:0 0 14px;padding:14px;border-radius:22px;background:linear-gradient(150deg,color-mix(in srgb,var(--pink) 22%,var(--card)),var(--card) 60%);box-shadow:var(--shadow);display:grid;gap:10px}
 .music-now.idle{display:flex;align-items:center;gap:12px}
 .music-now-top{display:flex;align-items:center;gap:12px;min-width:0}
-.music-cover{flex:none;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);color:#fff;box-shadow:inset 0 0 0 18px rgba(0,0,0,.08)}
+/* The colored disc turns on its own layer behind; the note on it stays upright. */
+.music-cover{flex:none;position:relative;isolation:isolate;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.music-cover::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:50%;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);box-shadow:inset 0 0 0 18px rgba(0,0,0,.08)}
 .music-cover svg{width:24px;height:24px}
-.music-cover.spin{animation:music-spin 8s linear infinite}
+.music-cover.spin::before{animation:music-spin 8s linear infinite}
 @keyframes music-spin{to{transform:rotate(360deg)}}
 .music-now-text{display:grid;min-width:0}
 .music-now-text strong{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2222,7 +2224,7 @@ button.aui-card:active{transform:scale(.98)}
 .music-search input{flex:1;min-width:0;border:2px solid var(--line);border-radius:999px;padding:10px 14px;background:var(--card);color:var(--ink);font:inherit}
 .music-source span{flex:1;min-width:0}
 .music-test-row{margin:4px 0;font-size:13px}
-@media (prefers-reduced-motion:reduce){.music-cover.spin{animation:none}}
+@media (prefers-reduced-motion:reduce){.music-cover.spin::before{animation:none}}
 .song-card{display:flex;align-items:center;gap:10px;width:min(240px,100%);padding:10px 12px;border:0;border-radius:16px;background:linear-gradient(135deg,#ff8ab3,#e8507a);color:#fff;text-align:left;font:inherit;cursor:pointer;box-shadow:0 4px 12px -6px rgba(232,80,122,.6)}
 .song-card .sg-disc{flex:none;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.22);display:grid;place-items:center}
 .song-card .sg-disc svg{width:20px;height:20px}
@@ -2238,8 +2240,9 @@ button.aui-card:active{transform:scale(.98)}
 /* 音乐 on the lock screen and in the control center */
 .music-tile{display:flex;align-items:center;gap:8px}
 .music-tile .music-tile-open{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.music-tile-disc{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);color:#fff;animation:music-spin 8s linear infinite;animation-play-state:paused}
-.music-tile[data-playing="1"] .music-tile-disc{animation-play-state:running}
+.music-tile-disc{flex:none;position:relative;isolation:isolate;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.music-tile-disc::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:50%;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);animation:music-spin 8s linear infinite;animation-play-state:paused}
+.music-tile[data-playing="1"] .music-tile-disc::before{animation-play-state:running}
 .music-tile-disc svg{width:18px;height:18px}
 .music-tile-text{display:grid;min-width:0}
 .music-tile-text strong,.music-tile-text small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2251,9 +2254,11 @@ button.aui-card:active{transform:scale(.98)}
 @media (prefers-reduced-motion:reduce){.music-tile-disc{animation:none}}
 .lockscreen .music-tile.widget{flex-direction:row;align-items:center;justify-content:flex-start;text-align:left;gap:8px}
 .music-tile-text small{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.music-now .music-cover{border:0;padding:0;cursor:pointer;font:inherit;animation:music-spin 8s linear infinite;animation-play-state:paused}
-.music-now[data-playing="1"] .music-cover{animation-play-state:running}
-.music-now.idle .music-cover{cursor:default;animation:none}
+.music-now .music-cover{border:0;padding:0;background:transparent;cursor:pointer;font:inherit}
+.music-now .music-cover::before{animation:music-spin 8s linear infinite;animation-play-state:paused}
+.music-now[data-playing="1"] .music-cover::before{animation-play-state:running}
+.music-now.idle .music-cover{cursor:default}
+.music-now.idle .music-cover::before{animation:none}
 .music-now .music-cover:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
 .music-now.lyric-view .music-lyrics{max-height:240px;margin:2px -4px;padding:40px 4px}
 .music-lyrics .music-lyric{display:block;width:100%;margin:2px 0;padding:4px 6px;border:0;border-radius:10px;background:transparent;color:var(--ink2);font:inherit;font-size:13px;line-height:1.5;text-align:center;cursor:pointer;transition:color .3s,transform .3s,background-color .2s}
@@ -2261,6 +2266,6 @@ button.aui-card:active{transform:scale(.98)}
 .music-lyrics .music-lyric.now{color:var(--ink);font-weight:800;transform:scale(1.06)}
 .music-no-lyric{color:var(--ink2);font-size:13px;line-height:1.6}
 .music-no-lyric small{font-size:11.5px}
-@media (prefers-reduced-motion:reduce){.music-now .music-cover{animation:none}}
+@media (prefers-reduced-motion:reduce){.music-now .music-cover::before,.music-tile-disc::before{animation:none}}
 .music-lyrics{overflow-x:hidden}
 .music-selfhost{display:flex;gap:8px;align-items:center}.music-selfhost input{flex:1;min-width:0}.music-selfhost button{flex:none;white-space:nowrap}
