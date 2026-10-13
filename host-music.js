@@ -1,7 +1,7 @@
 // 音乐 on the tavern page: one <audio> that plays the 歌单, search results, the story's background music (<bgm>) and
 // songs characters share, so it goes on while the phone is put away. While a voice line plays it is turned down (when
 // 说台词时调小 is on). What is playing is told to the story and the phone chats (一起听), and shown on the island.
-import {parseBgm, bgmRule, musicPromptPlan, listeningNote, parseLyrics, lyricAt, MUSIC_LIMITS} from './core/music.js';
+import {parseBgm, bgmRule, musicPromptPlan, listeningNote, parseLyrics, lyricAt, matchScore, MUSIC_LIMITS} from './core/music.js';
 
 const RECENT_KEY = 'sttts.bgmRecent', PLAYED_KEY = 'sttts.bgmPlayed', DUCK = 0.3;
 const label = t => t ? (t.artist ? `${t.title} - ${t.artist}` : t.title) : '';
@@ -26,7 +26,8 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       audio.addEventListener('pause', () => { if (phase === 'playing') set('paused'); });
       audio.addEventListener('ended', () => { if (track?.from === 'bgm') { audio.currentTime = 0; audio.play().catch(() => {}); } else next(); });
       audio.addEventListener('timeupdate', () => { const now = Date.now(); if (now - lastEmit > 900) emit(); });
-      audio.addEventListener('error', () => { if (track && phase !== 'idle') set('error', '这首歌放不出来（链接失效，或者是试听版）'); });
+      // While loading, start() hears of it (play() fails) and tries the other sources.
+      audio.addEventListener('error', () => { if (track && ['playing', 'paused'].includes(phase)) set('error', '这首歌放不出来（链接失效，或者是试听版）'); });
       level();
     }
     return audio;
@@ -44,23 +45,48 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     Object.assign(t, found, {title: t.title || found.title, artist: t.artist || found.artist});
     return source(t);
   }
+  /** The same song on the enabled sources (same title), the ones not tried yet; other sources first. */
+  async function others(t, tried) {
+    if (!t.title || !opts().sources?.some(s => s.enabled)) return [];
+    const {songs} = await backend.searchMusic([t.title, t.artist].filter(Boolean).join(' ')).catch(() => ({songs: []}));
+    return songs.map(s => ({s, n: matchScore(s, t)})).filter(x => x.n >= 2 && !tried.has(x.s.source + '|' + x.s.id))
+      .sort((a, b) => b.n - a.n || (a.s.source === t.source) - (b.s.source === t.source)).map(x => x.s);
+  }
   async function start(t) {
     const mine = ++ticket, el = element();
     if (!el) throw Error('这个浏览器不能放音乐');
     track = t; lyrics = parseLyrics(t.lyric || ''); set('loading', '正在找这首歌……');
-    try {
-      const got = await source(t);
-      if (mine !== ticket || closed) { if (got.own) URL.revokeObjectURL(got.src); return; }
-      if (url.startsWith('blob:')) URL.revokeObjectURL(url);
-      url = got.src; el.src = url; level();
-      await el.play();
-      if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId, {title: t.title, artist: t.artist}).then(text => { if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } });
-    } catch (error) {
-      if (mine !== ticket) return;
-      const blocked = error?.name === 'NotAllowedError';
-      set(blocked ? 'paused' : 'error', blocked ? '浏览器要先点一下页面才能放声音，点播放就好' : error.message);
-      if (!blocked) throw error;
+    // Source links expire and a source may refuse a song now and then: the song is then looked for on the other
+    // sources (and the same one again under another ID) before giving up.
+    const tried = new Set();
+    let failure = null, spare = null;
+    for (let round = 0; round < 6; round++) {
+      try {
+        const got = await source(t);
+        if (mine !== ticket || closed) { if (got.own) URL.revokeObjectURL(got.src); return; }
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+        url = got.src; el.src = url; level();
+        await el.play();
+        if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId, {title: t.title, artist: t.artist}).then(text => { if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } });
+        return;
+      } catch (error) {
+        if (mine !== ticket) return;
+        if (error?.name === 'NotAllowedError') { set('paused', '浏览器要先点一下页面才能放声音，点播放就好'); return; }
+        failure ||= error;
+        if (t.origin === 'file' || !t.source) break;
+        if (t.source) tried.add(t.source + '|' + t.songId);
+        spare ??= await others(t, tried);
+        if (mine !== ticket) return;
+        const alt = spare.find(s => !tried.has(s.source + '|' + s.id));
+        if (!alt) break;
+        Object.assign(t, {origin: 'source', source: alt.source, songId: alt.id});
+        set('loading', `换个音源再找（${alt.sourceName || '音源'}）……`);
+      }
     }
+    const said = failure?.name === 'NotSupportedError' ? '这首歌放不出来（链接失效，或者是试听版）' : failure?.message || '这首歌放不出来';
+    const error = Error(tried.size > 1 ? `${said}；别的音源也试过了` : said);
+    set('error', error.message);
+    throw error;
   }
   /** Plays a list from one of its songs (the 歌单, search results); a single song is a list of one. */
   function playList(list, at = 0) {
@@ -78,7 +104,8 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
     if (!track || !audio) return Promise.resolve();
     if (phase === 'playing') { audio.pause(); return Promise.resolve(); }
     if (phase === 'error') return start(track).catch(e => notice(e.message));
-    return audio.play().catch(() => set('paused', '浏览器还不让放声音，再点一下播放'));
+    // Paused a long time, the link may have run out: it is fetched again.
+    return audio.play().catch(e => e?.name === 'NotAllowedError' ? set('paused', '浏览器还不让放声音，再点一下播放') : start(track).catch(err => notice(err.message)));
   }
 
   // ---------- 正文点歌 ----------

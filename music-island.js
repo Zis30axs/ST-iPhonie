@@ -1,7 +1,8 @@
 // 音乐小窗 on the tavern page, like a dynamic island: while a song plays and the phone is put away, a small black pill
 // floats over the story — a turning disc, the lyric line being sung (or the song) and a little wave. A tap opens it into
 // a card (the song, the lines around, play/pause, next, ✕); a tap elsewhere takes it back in. A double tap opens the
-// phone's 音乐. Drag it anywhere (the place is remembered); ✕ puts it away until the next song. It steps aside while the
+// phone's 音乐. Drag it anywhere (the place is remembered, by its middle: a longer or shorter line grows or shrinks it
+// evenly on both sides, so it stays where it was put); ✕ puts it away until the next song. It steps aside while the
 // call island is up.
 
 const KEY = 'sttts.musicIsland';
@@ -23,13 +24,16 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
       <button type="button" class="mi-btn" data-mi="toggle"></button><button type="button" class="mi-btn" data-mi="next" aria-label="下一首">${NEXT}</button><button type="button" class="mi-btn mi-close" data-mi="close" aria-label="收起">${CLOSE}</button></div>
       <div class="mi-lyrics" aria-live="polite"><p data-mi-prev></p><p class="now" data-mi-now></p><p data-mi-next></p></div></div>`;
   doc.body.append(el);
-  let place = null, dismissed = '', now = null, built = '', expanded = false, tapTimer = 0;
+  let place = null, dismissed = '', now = null, built = '', expanded = false, tapTimer = 0, width = 0;
   try { place = JSON.parse(win.localStorage.getItem(KEY) || 'null'); } catch { /* top middle */ }
+  // {cx, y}: the middle across and the top, as parts of the window. (Kept before 0.7.40 as {x, y}, the left edge.)
   function where() {
-    if (!place || !Number.isFinite(place.x) || !Number.isFinite(place.y)) { el.style.left = '50%'; el.style.top = 'max(10px, env(safe-area-inset-top))'; el.style.transform = 'translateX(-50%)'; return; }
+    el.style.transform = 'translateX(-50%)';
     const w = el.offsetWidth || 200, h = el.offsetHeight || 40, vw = win.innerWidth, vh = win.innerHeight;
-    el.style.transform = 'none';
-    el.style.left = Math.min(vw - w - 6, Math.max(6, place.x * vw)) + 'px';
+    width = w;
+    if (place && !Number.isFinite(place.cx) && Number.isFinite(place.x)) place = {cx: place.x + w / 2 / vw, y: place.y};
+    if (!place || !Number.isFinite(place.cx) || !Number.isFinite(place.y)) { el.style.left = '50%'; el.style.top = 'max(10px, env(safe-area-inset-top))'; return; }
+    el.style.left = Math.min(vw - w / 2 - 6, Math.max(w / 2 + 6, place.cx * vw)) + 'px';
     el.style.top = Math.min(vh - h - 6, Math.max(6, place.y * vh)) + 'px';
   }
   const key = s => s?.track ? `${s.track.title}|${s.track.artist}` : '';
@@ -61,20 +65,21 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
     if (!show) { el.hidden = true; setExpanded(false); return; }
     draw(now);
     if (el.hidden) { el.hidden = false; where(); }
+    else if (el.offsetWidth !== width) where(); // near an edge, a longer line must not go off the screen
   }
 
   let drag = null, lastTap = 0;
   el.addEventListener('pointerdown', e => {
     if (e.button > 0 || e.target.closest('button')) return;
     const r = el.getBoundingClientRect();
-    drag = {id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, x0: e.clientX, y0: e.clientY, live: false};
+    drag = {id: e.pointerId, dx: e.clientX - (r.left + r.width / 2), dy: e.clientY - r.top, x0: e.clientX, y0: e.clientY, live: false};
     try { el.setPointerCapture(e.pointerId); } catch { /* gone */ }
   });
   el.addEventListener('pointermove', e => {
     if (!drag || e.pointerId !== drag.id) return;
     if (!drag.live && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return;
     drag.live = true; el.dataset.dragging = '';
-    place = {x: (e.clientX - drag.dx) / win.innerWidth, y: (e.clientY - drag.dy) / win.innerHeight};
+    place = {cx: (e.clientX - drag.dx) / win.innerWidth, y: (e.clientY - drag.dy) / win.innerHeight};
     where();
   });
   el.addEventListener('pointerup', e => {
