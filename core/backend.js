@@ -1,5 +1,5 @@
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -35,6 +35,8 @@ import { ChatStore, money } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
 import { vibeKey, readVibeFile, imageVibe, mergeVibe, encodingFor, withEncoding, vibeSummary, vibeParameters, singleFile, bundleFile, chatu8File, strength as vibeStrength, MAX_FREE_VIBES, VIBE_ANLAS } from './vibes.js';
+/** musicFetch's answer when a 取歌地址 gave the song itself. */
+const AUDIO = Symbol('audio');
 
 export const BACKEND_API_VERSION = '1.0.0';
 const ENGINES = ['fish', 'mini', 'eleven', 'mimo'];
@@ -1361,7 +1363,12 @@ export class TTSBackend {
     }
     /** A web address read from the page, else (it does not allow pages to read it) through the tavern's own proxy. */
     async musicFetch(url, as = 'json') {
-        const read = async response => { if (!response.ok) throw Object.assign(Error(`HTTP ${response.status}`), { status: response.status }); return as === 'json' ? response.json() : response.text(); };
+        const read = async response => {
+            if (!response.ok) throw Object.assign(Error(`HTTP ${response.status}`), { status: response.status });
+            // Asked for a link and given the song itself: no need to download it here.
+            if (as === 'link' && isAudio(response.headers?.get?.('content-type'))) { response.body?.cancel?.().catch?.(() => {}); return AUDIO; }
+            return as === 'text' ? response.text() : response.json();
+        };
         // A server plugin on the tavern itself: with the tavern's login and checks; there is no proxy to try then.
         if (onTavern(url)) {
             let response;
@@ -1396,7 +1403,13 @@ export class TTSBackend {
     /** A playable link for a song of a source. */
     async musicLink(sourceId, songId, hint = {}) {
         this.assertOpen();
-        const s = this.musicSource(sourceId), link = readLink(s, await this.musicFetch(fillSource(s.url, { id: songId, title: hint.title, artist: hint.artist })));
+        const s = this.musicSource(sourceId), address = fillSource(s.url, { id: songId, title: hint.title, artist: hint.artist });
+        // The address itself is the song: played as it is (the tavern's own address stays as it is, the page's origin).
+        const own = () => onTavern(address) ? address : playable(address, globalThis.location?.protocol);
+        if (s.direct) return own();
+        const answer = await this.musicFetch(address, 'link');
+        if (answer === AUDIO) return own();
+        const link = readLink(s, answer);
         if (!link) throw Error(`「${s.name}」没有给出这首歌的播放链接（可能要会员，或者「链接在哪」填得不对）`);
         return playable(link, globalThis.location?.protocol);
     }

@@ -32,7 +32,9 @@ export function normalizeSource(value = {}, i = 0) {
     enabled: value.enabled !== false,
     search: clip(value.search, 1000).trim(), url: clip(value.url, 1000).trim(), lyric: clip(value.lyric, 1000).trim(),
     listPath: path(value.listPath), idPath: path(value.idPath) || 'id', titlePath: path(value.titlePath) || 'name',
-    artistPath: path(value.artistPath) || 'artist', urlPath: path(value.urlPath) || 'url', lyricPath: path(value.lyricPath) || 'lyric'
+    artistPath: path(value.artistPath) || 'artist', urlPath: path(value.urlPath) || 'url', lyricPath: path(value.lyricPath) || 'lyric',
+    // 取歌地址 answers with the audio itself (or sends on to it), not with JSON: the address is played as it is.
+    direct: value.direct === true
   };
 }
 export function validateSource(s) {
@@ -90,6 +92,8 @@ export function readLink(source, json) {
   const link = typeof value === 'string' ? value.trim() : '';
   return /^https?:\/\//i.test(link) ? link : '';
 }
+/** An answer that is the song itself (a stream, or a redirect that ended at the file) rather than JSON about it. */
+export const isAudio = type => /^(?:audio|video)\/|octet-stream|mpegurl/i.test(String(type || ''));
 /** A server on this computer or this home network (a backend the user runs: its links stay http). */
 export const nearby = link => { try { return /^(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|\[::1\]$|[^.]+$)/i.test(new URL(link).hostname); } catch { return false; } };
 /** An http link on a page opened over https would be blocked: upgraded, unless it is the user's own nearby server. */

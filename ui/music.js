@@ -114,12 +114,17 @@ export function musicApp(ctx) {
     v.draw(heading(editing.index < 0 ? '添加音源' : '编辑音源', '', 'Source')
       + (editing.index < 0 ? groupTitle('自己搭的后端', help('在自己电脑上、或者手机的 Termux 里跑音乐接口程序（比如网易云音乐 API 这一类）的话，填上它的地址，下面的格式会自动填好。酒馆里装了提供音乐接口的服务端插件的话，地址写成酒馆自己的地址（以 / 开头，比如 /api/plugins/插件名/search?…），会带着酒馆的登录去问。插件不带任何别人的服务器地址。\n\n电脑上跑的后端，手机要用电脑的局域网地址（比如 http://192.168.1.5:3000）。会员歌要看你的后端有没有登录。')) + `<div class="group pad">${SELF_HOSTED.map(t => `<div class="field"><span>${esc(t.name)}</span><div class="music-selfhost">${t.local ? '<small class="hint" style="flex:1;margin:0">装在你酒馆里，不用填地址</small>' : input('base-' + t.id, '', 'url', `placeholder="${esc(t.example)}" autocomplete="off" spellcheck="false"`)}${btn('fill-template', t.local ? '填好' : '按这个格式填', 'secondary small', `data-template="${esc(t.id)}"`)}</div></div>`).join('')}</div>` : '')
       + `<div class="group pad">${SOURCE_FIELDS.map(([k, l, ph]) => field(l, input('src-' + k, d[k] || '', k.endsWith('Path') || k === 'name' ? 'text' : 'url', `placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"`))).join('')}</div>
+      <div class="group">${toggle('src-direct', '取歌地址直接就是音频', d.direct === true, '有的接口取歌时不回 JSON，而是直接给音频，或者跳转到音频文件（比如 Meting 这类、go-music-api 的 /stream）。打开后，取歌地址填好歌曲 ID 就直接拿来播放，「播放链接在哪」不用管。不打开时，接口给的是音频也会自动认出来（要能读到它）。')}</div>
       <div class="actions">${btn('test-source', icon('search') + '用「晴天」试一试', 'secondary')}</div>
       ${test ? `<div class="group pad music-test">${test.error ? `<p class="hint">${esc(test.error)}</p>` : `<p class="hint">搜到 ${test.songs.length} 首${test.link ? '，第一首的播放链接也拿到了' : ''}：</p>${test.songs.slice(0, 5).map(s => `<p class="music-test-row">${esc(label(s))}</p>`).join('')}${test.linkError ? `<p class="hint">取播放链接时：${esc(test.linkError)}</p>` : ''}`}</div>` : ''}
       <div class="savebar">${btn('cancel-source', '取消', 'secondary')}${btn('save-source', '保存', 'primary')}</div>
       ${editing.index >= 0 ? `<div class="actions">${btn('delete-source', '删除这个音源', 'danger')}</div>` : ''}`);
   }
-  const readDraft = () => { for (const [k] of SOURCE_FIELDS) { const el = v.root.querySelector(`[data-field="src-${k}"]`); if (el) editing.draft[k] = el.value.trim(); } return editing.draft; };
+  const readDraft = () => {
+    for (const [k] of SOURCE_FIELDS) { const el = v.root.querySelector(`[data-field="src-${k}"]`); if (el) editing.draft[k] = el.value.trim(); }
+    const direct = v.root.querySelector('[data-field="src-direct"]'); if (direct) editing.draft.direct = direct.checked;
+    return editing.draft;
+  };
   function saveSources(list) { api.saveMusic({sources: list}); }
 
   async function search() {
