@@ -152,6 +152,8 @@ export function chatApp(ctx) {
     }, typeTime(m, first));
   }
   const partner = () => thread.type === 'group' ? '群里' : thread.members[0];
+  /** The 带进剧情 count; a choice already waiting is replaced by the new one (only one goes into the story). */
+  const pickedLabel = n => { const before = pendingBring(); return `已选 ${n} 条${before ? `（会替换之前选的 ${before.count} 条）` : ''}`; };
 
   // ---------- 消息 ----------
   function convRow(t, me) {
@@ -386,7 +388,7 @@ export function chatApp(ctx) {
         ${typer !== null ? `<div class="msg typing-row" data-engine="${typer ? engine(typer) : 'none'}">${avatar(typer || '…', typer ? engine(typer) : 'none', 34)}<div class="m-body"><div class="chat-bubble typing" aria-label="对方正在输入"><i></i><i></i><i></i></div></div></div>` : ''}</div></div>
       ${!group && thread.friend ? `<div class="friend-cut" role="status">${icon('alert')}<span>${thread.friend.by === 'me' ? `你已删除了${esc(thread.members[0])}` : `${esc(thread.members[0])}已把你从好友里删除了`}</span>${thread.friend.by === 'me' ? btn('refriend', '加回好友', 'chip-button', `data-id="${esc(thread.id)}"`) : btn('ask-friend', '发送好友申请', 'chip-button')}</div>` : ''}
       ${selecting
-        ? `<div class="bring-bar"><span>${selecting.size ? `已选 ${selecting.size} 条` : '点一条消息开始，再拖上下的条条多选'}</span>${btn('bring-go', '带进下一次正文', 'primary', selecting.size ? '' : 'disabled')}</div>`
+        ? `<div class="bring-bar"><span>${selecting.size ? pickedLabel(selecting.size) : '点一条消息开始，再拖上下的条条多选'}</span>${btn('bring-go', '带进下一次正文', 'primary', selecting.size ? '' : 'disabled')}</div>`
         : composerHTML()}
     </div>`);
     const msgs = v.root.querySelector('.msgs');
@@ -1120,7 +1122,7 @@ export function chatApp(ctx) {
       if (first && start) first.before(start);
       if (last && end) last.after(end);
       const label = v.root.querySelector('.bring-bar span');
-      if (label) label.textContent = `已选 ${picked.size} 条`;
+      if (label) label.textContent = pickedLabel(picked.size);
     }
     // Near the top or bottom edge the list scrolls on its own, so a long stretch can be taken in one drag.
     function scroll() {
@@ -1326,13 +1328,13 @@ export function chatApp(ctx) {
       case 'bring-go': {
         const count = selecting.size;
         if (!live) throw Error('在酒馆里打开小手机时才能带进剧情');
-        await api.chatBring(threadId, [...selecting]);
+        const done = await api.chatBring(threadId, [...selecting]);
         selecting = null;
-        ctx.notify(`下一次正文会带上这 ${count} 条消息`);
+        ctx.notify(`下一次正文会带上这 ${count} 条消息${done?.replaced ? `（之前选的 ${done.replaced} 条不带了）` : ''}${count > 60 ? '。选得比较多，模型可能抓不住重点，挑关键的几段效果更好；想让正文一直记得手机里聊过的事，可以打开「预设 → 聊天 → 记忆 → 正文也带上手机里的事」' : ''}`);
         render();
         break;
       }
-      case 'cancel-bring': api.chatCancelBring?.(); ctx.notify('已取消'); render(); break;
+      case 'cancel-bring': await api.chatCancelBring?.(); ctx.notify('已取消，这次不带聊天进正文'); render(); break;
       case 'contact-add': addContact(); break;
       case 'contact-edit': contactDraft = structuredClone(api.getState().chat.contacts.find(c => c.id === el.dataset.id)); mode = 'contact-edit'; render(); break;
       case 'contact-cancel': contactDraft = null; mode = 'list'; render(); break;

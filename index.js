@@ -312,7 +312,7 @@ function connect(source){
   chatDrawPhoto:(threadId,messageId,allowPaid)=>{check();return chats.drawPhoto(threadId,messageId,{allowPaid:allowPaid===true});},
   chatBring:(threadId,ids)=>{check();return chats.bring(threadId,ids);},
   chatPendingBring:()=>{check();return chats.pendingBring();},
-  chatCancelBring:()=>{check();chats.cancelBring();},
+  chatCancelBring:()=>{check();return chats.cancelBring();},
   chatTyping:threadId=>{check();return chats.typing(threadId);},
   chatAskFriend:(threadId,text)=>{check();return chats.askFriend(threadId,text);},
   momentsRefresh:()=>{check();return momentsHost.refresh();},

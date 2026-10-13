@@ -7,9 +7,15 @@ import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoCast} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 
-export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}}) {
+const BRING_KEY = 'sttts.bring';
+
+export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, storage = globalThis.localStorage}) {
   const busy = new Map();
-  let pending = null;
+  // What the next story reply brings along; kept over a page reload (it used to be lost without a word).
+  let pending = (() => { try { const p = JSON.parse(storage?.getItem(BRING_KEY) || 'null'); return p?.threadId && p.text ? p : null; } catch { return null; } })();
+  const keepBring = () => { try { if (pending) storage?.setItem(BRING_KEY, JSON.stringify(pending)); else storage?.removeItem(BRING_KEY); } catch { /* this visit only */ } };
+  /** The chat's note「N 条消息会带进下一次正文」goes when that choice is replaced, cancelled or used. */
+  const dropNote = p => p?.noteId ? backend.chatMutate(p.threadId, () => backend.chats.removeMessages(p.threadId, [p.noteId])).catch(() => {}) : Promise.resolve();
 
   const userName = () => context()?.name1 || '我';
   const userPersona = () => String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500);
@@ -110,10 +116,14 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     if (!thread) throw Error('这段聊天已不存在');
     const chosen = thread.messages.filter(m => ids.includes(m.id) && m.kind !== 'system');
     if (!chosen.length) throw Error('请先选择要带进剧情的消息');
-    const preset = activeChatPreset(settings().chat);
-    pending = {threadId, name: thread.name, count: chosen.length, text: bringText(preset, {thread, messages: chosen, user: userName()})};
-    await backend.chatMutate(threadId, () => backend.chats.append(threadId, [{from: 'me', kind: 'system', text: `${chosen.length} 条消息会带进下一次正文`}], {read: true}));
-    return {...pending};
+    const preset = activeChatPreset(settings().chat), before = pending;
+    // A new choice takes the place of the one before (only one goes into the story), and so does its note.
+    pending = null; keepBring();
+    await dropNote(before);
+    const saved = await backend.chatMutate(threadId, () => backend.chats.append(threadId, [{from: 'me', kind: 'system', text: `${chosen.length} 条消息会带进下一次正文`}], {read: true}));
+    pending = {threadId, name: thread.name, count: chosen.length, text: bringText(preset, {thread, messages: chosen, user: userName()}), noteId: saved?.messages?.at(-1)?.id || ''};
+    keepBring();
+    return {...pending, replaced: before ? before.count : 0};
   }
 
   /**
@@ -126,9 +136,10 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     const entry = {key: 'sttts.entry.bring', text: pending.text, position: {in_chat: 1, in_prompt: 0, before_prompt: 2}[i.position], depth: inChat ? i.depth : 0, role: inChat ? {system: 0, user: 1, assistant: 2}[i.role] : 0};
     if (type && !['quiet', 'impersonate'].includes(type) && !dryRun) {
       const used = pending;
-      pending = null;
+      pending = null; keepBring();
       notice(`和${used.name}的聊天已带进这次正文`);
-      backend.emit('chat', {threadId: used.threadId, bring: false});
+      dropNote(used).then(() => backend.chatMutate(used.threadId, () => backend.chats.append(used.threadId, [{from: 'me', kind: 'system', text: `${used.count} 条消息已带进正文`}], {read: true}))).catch(() => {})
+        .finally(() => backend.emit('chat', {threadId: used.threadId, bring: false}));
     }
     return [entry];
   }
@@ -298,6 +309,6 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     reply, bring, bringPlan, drawPhoto, storyPlan, storyReplied, askFriend,
     typing: threadId => busy.has(threadId),
     pendingBring: () => pending && {threadId: pending.threadId, name: pending.name, count: pending.count},
-    cancelBring: () => { const threadId = pending?.threadId; pending = null; if (threadId) backend.emit('chat', {threadId, bring: false}); }
+    cancelBring: () => { const p = pending; pending = null; keepBring(); return dropNote(p).finally(() => { if (p) backend.emit('chat', {threadId: p.threadId, bring: false}); }); }
   };
 }
