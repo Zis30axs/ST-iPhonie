@@ -2227,3 +2227,19 @@ button.aui-card:active{transform:scale(.98)}
 .qq-listening{position:relative;z-index:1;display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:5px 12px;border:0;border-radius:999px;background:var(--accent-soft);color:var(--accent-ink);font:inherit;font-size:12px;cursor:pointer;max-width:100%}
 .qq-listening svg{width:14px;height:14px;flex:none}
 .qq-listening span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 音乐 on the lock screen and in the control center */
+.music-tile{display:flex;align-items:center;gap:8px}
+.music-tile .music-tile-open{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.music-tile-disc{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from 0deg,#ff8ab3,#8fd8ff,#ffd36a,#ff8ab3);color:#fff;animation:music-spin 8s linear infinite;animation-play-state:paused}
+.music-tile[data-playing="1"] .music-tile-disc{animation-play-state:running}
+.music-tile-disc svg{width:18px;height:18px}
+.music-tile-text{display:grid;min-width:0}
+.music-tile-text strong,.music-tile-text small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.music-tile-text small{font-size:12px;opacity:.75}
+.music-tile-buttons{flex:none;display:flex;gap:4px}
+.music-tile-buttons button{width:32px;height:32px;border:0;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,currentColor 10%,transparent);color:inherit;cursor:pointer;padding:0}
+.music-tile-buttons button svg{width:15px;height:15px}
+.lockscreen .music-tile{margin-top:10px}
+@media (prefers-reduced-motion:reduce){.music-tile-disc{animation:none}}
+.lockscreen .music-tile.widget{flex-direction:row;align-items:center;justify-content:flex-start;text-align:left;gap:8px}
+.music-tile-text small{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
