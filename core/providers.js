@@ -2,7 +2,7 @@ import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
 import { TTSParameters as P } from './parameters.js';
 import { speakable } from './voice-fx.js';
-import { buildCustomRequest, customInit, readCustomAnswer, customVoices } from './custom-voice.js';
+import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList } from './custom-voice.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',custom:'自己的接口'};
 export const miniBase=c=>'https://'+(c.region==='cn'?'api.minimaxi.com':c.region==='uw'?'api-uw.minimax.io':'api.minimax.io');
 const object=value=>Object.prototype.toString.call(value)==='[object Object]';
@@ -203,6 +203,17 @@ export class Providers{
   const response=await send(url);
   return readCustomAnswer(response,request,{read:limitedBytes,load:link=>send(link,{method:'GET',headers:init.headers})});
  }
+ /** 自己的接口's voices: the ones added by hand, and (音色列表地址) the ones the service lists. */
+ async customVoiceList(c,search=''){
+  const own=customVoices(c),q=search.trim().toLowerCase();let listed=[],note='';
+  const url=String(c.params.listUrl||'').trim();
+  if(/^https?:\/\//i.test(url)){const {url:target,init}=customInit({url,method:'GET',headers:String(c.params.headers||'')},this.keys.get('custom')||'');
+   let r=await fetchWithPolicy(this.fetcher,target,init).catch(()=>null);if(!r&&this.proxy)r=await this.proxy(target,init).catch(()=>null);
+   if(!r)note='音色列表地址连不上';else if(!r.ok)note='音色列表地址回答 HTTP '+r.status;else{try{listed=readVoiceList(await r.json(),String(c.params.listPath||'').trim());}catch{note='音色列表回的不是 JSON';}}
+   listed=listed.filter(v=>!own.some(o=>o.id===v.id));}
+  const all=[...own,...listed];
+  return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)||v.id.toLowerCase().includes(q)):all,more:false,token:'',note:note||(all.length?(listed.length?`自己添加的 ${own.length} 个，服务列出的 ${listed.length} 个`:'自己的接口里添加的音色'):'还没有音色：在引擎 App 的「自己的接口」里添加，或者填音色列表地址')};
+ }
  /** ElevenLabs 音效 (text to sound effects): an English description to an MP3. seconds 0: ElevenLabs picks; loop: an ambience that loops seamlessly. */
  async soundEffect({text,seconds=0,loop=false},signal=new AbortController().signal){
   const body={text:String(text||'').slice(0,450),model_id:'eleven_text_to_sound_v2',prompt_influence:.4,...(seconds?{duration_seconds:Math.min(30,Math.max(.5,Number(seconds)))}:{}),...(loop?{loop:true}:{})};
@@ -218,7 +229,7 @@ export class Providers{
  /** What a voice list says about a voice besides its name (description, tags, gender and age, languages), for picking one. */
  static voiceInfo(engine,v){const list=x=>Array.isArray(x)?x.filter(y=>typeof y==='string'):[];const parts=engine==='fish'?[v.description,list(v.tags).join(' '),list(v.languages).join('/')]:engine==='mini'?[Array.isArray(v.description)?list(v.description).join('；'):v.description]:[Object.values(v.labels&&typeof v.labels==='object'?v.labels:{}).filter(x=>typeof x==='string').join(' '),v.description];return parts.filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim().replace(/\s+/g,' ')).join(' · ').slice(0,240);}
  async voices(engine,c,{search='',page=0,token=''}={}){
-  if(engine==='custom'){const q=search.trim().toLowerCase(),all=customVoices({params:{...P.defaults('custom'),...c?.params}});return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)):all,more:false,token:'',note:all.length?'自己的接口里添加的音色':'还没有音色：在引擎 App 的「自己的接口」里添加'};}
+  if(engine==='custom')return this.customVoiceList({params:{...P.defaults('custom'),...c?.params}},search);
   if(engine==='fish'&&P.fishOpenAI(c))throw Error('这个中转（OpenAI 格式）没有音色列表：在角色的「音色」里直接填 Fish 的音色 ID（fish.audio 网站上音色页面地址里那串字母数字）');
   if(engine==='mimo'){const mode=P.mimoMode(c.model),q=search.trim().toLowerCase();const all=mode==='preset'?P.vocab.MIMO_VOICES.map(([id,name])=>({id,name})):mode==='clone'?c.params.samples.filter(x=>String(x.name).trim()).map(x=>({id:String(x.name).trim(),name:String(x.name).trim()+' · 克隆样本'})):[];
    return {voices:q?all.filter(v=>v.name.toLowerCase().includes(q)):all,more:false,token:'',note:mode==='design'?'音色设计模型没有音色列表：在「音色」一栏写音色描述':mode==='clone'?'克隆样本在 MiMo 引擎里上传':'MiMo 内置音色'};}

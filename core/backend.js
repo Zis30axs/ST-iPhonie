@@ -2183,7 +2183,7 @@ export class TTSBackend {
     async customTest(connection) {
         this.assertOpen();
         this.player.stop('试一试自己的接口');
-        const unlock = Promise.resolve(this.player.sink.unlock());
+        const unlock = Promise.resolve(this.player.sink.unlock?.());
         const c = clone(connection || this.settings.connections.custom), voice = (c.params?.voices || []).find(v => String(v.name || '').trim());
         const lang = languageCode(this.settings.general.defaultLanguage || 'zh').split('-')[0] || 'zh';
         const text = ({ zh: '你好，这是一句试音。', ja: 'こんにちは、テストです。', en: 'Hello, this is a test.', ko: '안녕하세요, 테스트입니다.' })[lang] || '你好，这是一句试音。';

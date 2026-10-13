@@ -12,7 +12,12 @@ export const CUSTOM_TEMPLATES = Object.freeze([
   {id: 'gpt-sovits', name: 'GPT-SoVITS（api_v2）', example: 'http://127.0.0.1:9880',
     note: '在 GPT-SoVITS 文件夹里运行 api_v2.py（默认端口 9880）。音色的「参考音频」填参考音频在那台电脑上的路径，再填参考文本和参考语言。',
     fill: base => ({url: base + '/tts', method: 'POST', answer: 'audio', path: '', headers: '', before: `${base}/set_gpt_weights?weights_path={{model1}}\n${base}/set_sovits_weights?weights_path={{model2}}`,
-      body: JSON.stringify({text: '{{text}}', text_lang: '{{lang}}', ref_audio_path: '{{voice}}', prompt_text: '{{ref_text}}', prompt_lang: '{{ref_lang}}', text_split_method: 'cut5', media_type: 'wav', streaming_mode: false}, null, 2)})}
+      body: JSON.stringify({text: '{{text}}', text_lang: '{{lang}}', ref_audio_path: '{{voice}}', prompt_text: '{{ref_text}}', prompt_lang: '{{ref_lang}}', text_split_method: 'cut5', media_type: 'wav', streaming_mode: false}, null, 2)})},
+  // The format many speech relays speak (OpenAI's /v1/audio/speech): the voice is a name the service knows.
+  {id: 'openai', name: 'OpenAI 格式（/v1/audio/speech）', example: 'https://你的服务地址',
+    note: '很多语音中转站和公益站用这个格式：音色是站上角色的名字。填站给的地址（/v1 前面那部分），密钥填在上面。站能列出角色的话，再填「音色列表地址」。请求体里的 model 按站的说明改。',
+    fill: base => ({url: base + '/v1/audio/speech', method: 'POST', answer: 'audio', path: '', headers: '', before: '',
+      body: JSON.stringify({model: 'tts-1', input: '{{text}}', voice: '{{voice}}'}, null, 2)})}
 ]);
 
 const SLOT = /\{\{\s*(text|lang|emotion|voice|ref_text|ref_lang|model1|model2)\s*\}\}/g;
@@ -165,4 +170,38 @@ export function voicesFromFolder(paths, root, {prefer = ''} = {}) {
     voices.push({name, voice: full([name, ...ref.parts]), ref_text: ref.text, ref_lang: ref.lang, model1: model1 ? full([name, model1]) : '', model2: model2 ? full([name, model2]) : ''});
   }
   return {voices, skipped};
+}
+
+// ---------- 音色列表、报错提示 ----------
+/** The voices a service lists: names, or objects with an id / name; an object of names (GSVI-style) gives its keys. */
+export function readVoiceList(json, path = '') {
+  let list = path ? pick(json, path) : json;
+  if (!path && list && !Array.isArray(list) && typeof list === 'object') list = ['voices', 'data', 'characters', 'list', 'items', 'speakers'].map(k => list[k]).find(v => v && typeof v === 'object') ?? list;
+  if (list && !Array.isArray(list) && typeof list === 'object') list = Object.keys(list);
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const item of list.slice(0, 500)) {
+    const id = typeof item === 'string' ? item : item && typeof item === 'object' ? String(item.id ?? item.voice_id ?? item.voice ?? item.name ?? item.character ?? '') : '';
+    const name = typeof item === 'object' && item ? String(item.name ?? item.display_name ?? item.title ?? id) : id;
+    if (id.trim() && !out.some(v => v.id === id.trim())) out.push({id: id.trim(), name: name.trim() || id.trim()});
+  }
+  return out;
+}
+
+/** What to change when 自己的接口 fails, in plain words ('' when the message says it already). */
+export function customHint(message) {
+  const m = String(message || '');
+  if (/unpickling stack underflow|invalid load key|version.*(?:not|un)support/i.test(m)) return '这个模型是用更新版本的 GPT-SoVITS 训练的，现在开着的 GPT-SoVITS 读不了：换一个新版的 GPT-SoVITS，模型和设置都不用动。';
+  if (/No such file|not exist|找不到|cannot find|FileNotFoundError/i.test(m)) return '路径对不上：模型和参考音频的路径要写跑 GPT-SoVITS 的那台电脑上的完整路径，检查文件夹和文件名有没有改过。';
+  if (/3\s*[-~～到]\s*10|outside the .*range|参考音频.*秒/i.test(m)) return '参考音频要 3～10 秒：换一段长短合适的参考音频。';
+  if (/连不上自己的接口|无法连接/.test(m)) return '服务开着吗？地址和端口对吗？在手机上用的话，地址里不能写 127.0.0.1，要写电脑的局域网 IP（比如 192.168.1.5），GPT-SoVITS 启动时加 -a 0.0.0.0。';
+  if (/enableCorsProxy/.test(m)) return '';
+  if (/请求超时/.test(m)) return '第一次换模型可能要等一阵，再点一次试试；还是超时就看看服务的窗口有没有报错。';
+  if (/HTTP 40[13]/.test(m)) return '服务拒绝了：密钥不对或者没填，检查上面的密钥。';
+  if (/HTTP 404/.test(m)) return '地址的路径不对：检查接口地址后面那段（比如 GPT-SoVITS 是 /tts）。';
+  if (/HTTP 405/.test(m)) return '请求方式不对：试试把 POST 换成 GET，或者反过来。';
+  if (/HTTP 422|HTTP 400/.test(m)) return '服务看不懂请求：对照它的接口文档检查请求体里的名字；GPT-SoVITS 的话多半是参考音频或参考文本没填。';
+  if (/HTTP 5\d\d/.test(m)) return '服务自己出错了：看看服务的窗口里报了什么。';
+  if (/不是音频|不是 JSON|里没有/.test(m)) return '检查「回答是什么」和「在 JSON 的哪里」。';
+  return '';
 }
