@@ -38,7 +38,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
   /** The song's file or link: a 歌单 file, a source song (its link is fetched each time: they expire), or a name to look up. */
   async function source(t) {
     if (t.id && t.origin === 'file') { const blob = await backend.songBlob(t.id); if (!blob) throw Error('这首歌已经不在歌单里了'); return {src: URL.createObjectURL(blob), own: true}; }
-    if (t.source && t.songId) return {src: await backend.musicLink(t.source, t.songId)};
+    if (t.source && t.songId) return {src: await backend.musicLink(t.source, t.songId, {title: t.title, artist: t.artist})};
     const found = await backend.findSong({title: t.title, artist: t.artist});
     if (!found) throw Error(opts().sources?.some(s => s.enabled) ? `没找到「${label(t)}」` : `歌单里没有「${label(t)}」，也还没有添加音源`);
     Object.assign(t, found, {title: t.title || found.title, artist: t.artist || found.artist});
@@ -54,7 +54,7 @@ export function createMusicHost({context, settings, backend, notice = () => {}, 
       if (url.startsWith('blob:')) URL.revokeObjectURL(url);
       url = got.src; el.src = url; level();
       await el.play();
-      if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId).then(text => { if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } });
+      if (!lyrics.length && t.source && t.songId) backend.musicLyric(t.source, t.songId, {title: t.title, artist: t.artist}).then(text => { if (mine === ticket && text) { lyrics = parseLyrics(text); emit(); } });
     } catch (error) {
       if (mine !== ticket) return;
       const blocked = error?.name === 'NotAllowedError';

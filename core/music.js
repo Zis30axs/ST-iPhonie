@@ -36,12 +36,15 @@ export function normalizeSource(value = {}, i = 0) {
   };
 }
 export function validateSource(s) {
-  const web = v => /^https?:\/\/[^\s]+$/i.test(v);
-  if (!web(s.search) || !s.search.includes('{{query}}')) throw Error('「搜索地址」要以 http(s):// 开头，并且在放搜索词的地方写 {{query}}');
-  if (!web(s.url) || !s.url.includes('{{id}}')) throw Error('「取歌地址」要以 http(s):// 开头，并且在放歌曲 ID 的地方写 {{id}}');
-  if (s.lyric && (!web(s.lyric) || !s.lyric.includes('{{id}}'))) throw Error('「歌词地址」要以 http(s):// 开头，并且写 {{id}}（不需要歌词就空着）');
+  // A web address, or one on the tavern itself (/api/plugins/… of a server plugin the user installed).
+  const web = v => /^(?:https?:\/\/|\/(?!\/))[^\s]+$/i.test(v);
+  if (!web(s.search) || !s.search.includes('{{query}}')) throw Error('「搜索地址」要以 http(s):// 开头（酒馆自己的地址以 / 开头），并且在放搜索词的地方写 {{query}}');
+  if (!web(s.url) || !s.url.includes('{{id}}')) throw Error('「取歌地址」要以 http(s):// 开头（酒馆自己的地址以 / 开头），并且在放歌曲 ID 的地方写 {{id}}');
+  if (s.lyric && (!web(s.lyric) || !s.lyric.includes('{{id}}'))) throw Error('「歌词地址」要以 http(s):// 或 / 开头，并且写 {{id}}（不需要歌词就空着）');
   return s;
 }
+/** An address on the tavern itself (a server plugin): asked with the tavern's own login and checks. */
+export const onTavern = url => /^\/(?!\/)/.test(String(url));
 export function normalizeMusic(value) {
   const base = defaultMusic();
   if (!value || typeof value !== 'object') return base;
@@ -79,7 +82,8 @@ export function readSearch(source, json) {
     source: source.id, id: clip(pick(item, source.idPath) ?? '', 200), title: clip(names(pick(item, source.titlePath)), 200).trim(), artist: clip(names(pick(item, source.artistPath)), 200).trim()
   })).filter(s => s.id && s.title);
 }
-export const fill = (template, values) => String(template).replace(/\{\{(query|id)\}\}/g, (m, key) => encodeURIComponent(values[key] ?? ''));
+/** An address with {{query}} / {{id}} (and, for sources that like a hint, {{title}} / {{artist}}) filled in. */
+export const fill = (template, values) => String(template).replace(/\{\{(query|id|title|artist)\}\}/g, (m, key) => encodeURIComponent(values[key] ?? ''));
 /** The playable link in a 取歌 answer (a plain string answer, or the link itself, counts too). */
 export function readLink(source, json) {
   const value = typeof json === 'string' ? json : pick(json, source.urlPath);

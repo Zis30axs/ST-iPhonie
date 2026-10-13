@@ -1,5 +1,5 @@
 import { MomentStore } from './moments-store.js';
-import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
+import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
 import { ASSISTANT_LIMITS, normalizeAssistant, validateAssistantPatch, assistantId, assistantMessage, assertAssistantThread, assistantSummary } from './assistant.js';
 import { FORUM_LIMITS, buildForumRequest, cleanPost as cleanForumPost, cleanReply as cleanForumReply, startingHeat } from './forum.js';
@@ -1347,6 +1347,13 @@ export class TTSBackend {
     /** A web address read from the page, else (it does not allow pages to read it) through the tavern's own proxy. */
     async musicFetch(url, as = 'json') {
         const read = async response => { if (!response.ok) throw Object.assign(Error(`HTTP ${response.status}`), { status: response.status }); return as === 'json' ? response.json() : response.text(); };
+        // A server plugin on the tavern itself: with the tavern's login and checks; there is no proxy to try then.
+        if (onTavern(url)) {
+            let response;
+            try { response = await this.imageFetch(url, { credentials: 'same-origin', headers: this.tavernHeaders() }); } catch { throw Error('连不上酒馆里的这个地址'); }
+            if (response.status === 404) throw Error('酒馆里没有这个地址：服务端插件装好了吗？（config.yaml 里 enableServerPlugins 要是 true，装完要完全重启酒馆）');
+            return read(response).catch(error => { throw Error(`酒馆里的音源回答 ${error.message}`); });
+        }
         try { return await read(await this.imageFetch(url, { credentials: 'omit' })); }
         catch (error) {
             if (error?.status) throw Error(`音源回答 ${error.message}`);
@@ -1372,16 +1379,16 @@ export class TTSBackend {
         return { songs, errors };
     }
     /** A playable link for a song of a source. */
-    async musicLink(sourceId, songId) {
+    async musicLink(sourceId, songId, hint = {}) {
         this.assertOpen();
-        const s = this.musicSource(sourceId), link = readLink(s, await this.musicFetch(fillSource(s.url, { id: songId })));
+        const s = this.musicSource(sourceId), link = readLink(s, await this.musicFetch(fillSource(s.url, { id: songId, title: hint.title, artist: hint.artist })));
         if (!link) throw Error(`「${s.name}」没有给出这首歌的播放链接（可能要会员，或者「链接在哪」填得不对）`);
         return playable(link, globalThis.location?.protocol);
     }
-    async musicLyric(sourceId, songId) {
+    async musicLyric(sourceId, songId, hint = {}) {
         const s = this.musicSource(sourceId);
         if (!s.lyric) return '';
-        try { const value = pickPath(await this.musicFetch(fillSource(s.lyric, { id: songId })), s.lyricPath); return typeof value === 'string' ? value.slice(0, 60000) : ''; } catch { return ''; }
+        try { const value = pickPath(await this.musicFetch(fillSource(s.lyric, { id: songId, title: hint.title, artist: hint.artist })), s.lyricPath); return typeof value === 'string' ? value.slice(0, 60000) : ''; } catch { return ''; }
     }
     /** The 歌单: songs without their files. */
     async listSongs() { this.assertOpen(); return (await this.music.list('song')).map(({ blob, ...row }) => row); }
@@ -2091,7 +2098,7 @@ export class TTSBackend {
             deleteAssistantMessage: (id, mid) => this.deleteAssistantMessage(id, mid),
             selectAssistantVariant: (id, mid, selected) => this.selectAssistantVariant(id, mid, selected),
             deleteAssistantThread: id => this.deleteAssistantThread(id), clearAssistantThread: id => this.clearAssistantThread(id),
-            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId) => this.searchMusic(query, sourceId), musicLink: (sourceId, songId) => this.musicLink(sourceId, songId), musicLyric: (sourceId, songId) => this.musicLyric(sourceId, songId),
+            saveMusic: patch => this.saveMusic(clone(patch || {})), searchMusic: (query, sourceId) => this.searchMusic(query, sourceId), musicLink: (sourceId, songId, hint) => this.musicLink(sourceId, songId, clone(hint || {})), musicLyric: (sourceId, songId, hint) => this.musicLyric(sourceId, songId, clone(hint || {})),
             listSongs: () => this.listSongs(), songBlob: id => this.songBlob(id), addSongs: list => this.addSongs(list), updateSong: (id, patch) => this.updateSong(id, clone(patch || {})), deleteSongs: ids => this.deleteSongs([...(ids || [])]),
             saveSounds: patch => this.saveSounds(clone(patch)), listSounds: () => this.listSounds(), soundBlob: id => this.soundBlob(id), addSounds: list => this.addSounds(list), updateSound: (id, patch) => this.updateSound(id, clone(patch || {})), deleteSounds: ids => this.deleteSounds([...(ids || [])]),
             packInfo: () => this.packInfo(), soundMissing: () => this.soundMissing(), dismissMissing: (type, name) => this.dismissMissing(type, name), generateSound: input => this.generateSound(clone(input || {})), exportSounds: (ids, name) => this.exportSounds(ids ? [...ids] : null, name), importSounds: (file, options) => this.importSounds(file, clone(options || {})),

@@ -669,8 +669,8 @@ export interface BackendFacade {
     saveMusic(patch: Partial<MusicSettings>): MusicSettings;
     /** Searches the enabled music sources (or one). */
     searchMusic(query: string, sourceId?: string): Promise<{ songs: MusicFound[]; errors: { source: string; message: string }[] }>;
-    musicLink(sourceId: string, songId: string): Promise<string>;
-    musicLyric(sourceId: string, songId: string): Promise<string>;
+    musicLink(sourceId: string, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
+    musicLyric(sourceId: string, songId: string, hint?: { title?: string; artist?: string }): Promise<string>;
     listSongs(): Promise<MusicSong[]>;
     songBlob(id: string): Promise<Blob | null>;
     addSongs(list: ({ title: string; artist?: string; blob: Blob } | { title: string; artist?: string; source: string; songId: string })[]): Promise<MusicSong[]>;
