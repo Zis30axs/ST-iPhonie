@@ -4,6 +4,8 @@
 // that chat; × puts the card away until the next message. Dragged by its top (the place is remembered). It wears the
 // call island's look (style.css .sttts-call-island).
 
+import {joinStack, stackTop} from './island-stack.js';
+
 const KEY = 'sttts.msgIsland';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
@@ -37,12 +39,13 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
   try { place = JSON.parse(win.localStorage.getItem(KEY) || 'null'); } catch { /* the top middle */ }
 
   function where() {
-    if (!place || !Number.isFinite(place.x) || !Number.isFinite(place.y)) { el.style.left = '50%'; el.style.top = 'max(10px, env(safe-area-inset-top))'; el.style.transform = 'translateX(-50%)'; el.style.setProperty('--ci-from', 'translateX(-50%)'); return; }
+    if (!place || !Number.isFinite(place.x) || !Number.isFinite(place.y)) { el.style.left = '50%'; el.style.top = stackTop(el); el.style.transform = 'translateX(-50%)'; el.style.setProperty('--ci-from', 'translateX(-50%)'); return; }
     const w = el.offsetWidth || 320, vw = win.innerWidth, vh = win.innerHeight;
     el.style.transform = 'none'; el.style.setProperty('--ci-from', 'translate(0,0)');
     el.style.left = Math.min(vw - w - 6, Math.max(6, place.x * vw)) + 'px';
     el.style.top = Math.min(vh - 126, Math.max(6, place.y * vh)) + 'px';
   }
+  const leave = joinStack({el, order: 1, free: () => !place || !Number.isFinite(place.x) || !Number.isFinite(place.y), place: () => where()});
   const who = () => thread?.type === 'group' ? thread.name : thread?.members?.[0] || thread?.name || '';
   function build() {
     if (drawnFor === threadId) return;
@@ -164,6 +167,6 @@ export function createMessageIsland({doc = document, load, phoneOpen, openChat, 
     changed(id) { if (id === threadId && !el.hidden) reload(); },
     get shown() { return !el.hidden; },
     get threadId() { return threadId; },
-    dispose() { win.removeEventListener('resize', onResize); el.remove(); },
+    dispose() { leave(); win.removeEventListener('resize', onResize); el.remove(); },
   };
 }

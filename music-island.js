@@ -5,6 +5,8 @@
 // evenly on both sides, so it stays where it was put); ✕ puts it away until the next song. It steps aside while the
 // call island is up.
 
+import {joinStack, stackTop} from './island-stack.js';
+
 const KEY = 'sttts.musicIsland';
 const PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>';
 const PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
@@ -32,10 +34,11 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
     const w = el.offsetWidth || 200, h = el.offsetHeight || 40, vw = win.innerWidth, vh = win.innerHeight;
     width = w;
     if (place && !Number.isFinite(place.cx) && Number.isFinite(place.x)) place = {cx: place.x + w / 2 / vw, y: place.y};
-    if (!place || !Number.isFinite(place.cx) || !Number.isFinite(place.y)) { el.style.left = '50%'; el.style.top = 'max(10px, env(safe-area-inset-top))'; return; }
+    if (!place || !Number.isFinite(place.cx) || !Number.isFinite(place.y)) { el.style.left = '50%'; el.style.top = stackTop(el); return; }
     el.style.left = Math.min(vw - w / 2 - 6, Math.max(w / 2 + 6, place.cx * vw)) + 'px';
     el.style.top = Math.min(vh - h - 6, Math.max(6, place.y * vh)) + 'px';
   }
+  const leave = joinStack({el, order: 3, free: () => !place || !Number.isFinite(place.cx) || !Number.isFinite(place.y), place: where});
   const key = s => s?.track ? `${s.track.title}|${s.track.artist}` : '';
   const text = (sel, value) => { const p = el.querySelector(sel); if (p.textContent !== value) p.textContent = value; };
   function draw(s) {
@@ -108,5 +111,5 @@ export function createMusicIsland({doc = document, status, phoneOpen, callShown 
   const onResize = () => { if (!el.hidden) where(); };
   win.addEventListener('resize', onResize);
   return {refresh, get shown() { return !el.hidden; }, get expanded() { return expanded; },
-    dispose() { win.clearTimeout(tapTimer); doc.removeEventListener('pointerdown', away, true); win.removeEventListener('resize', onResize); el.remove(); }};
+    dispose() { leave(); win.clearTimeout(tapTimer); doc.removeEventListener('pointerdown', away, true); win.removeEventListener('resize', onResize); el.remove(); }};
 }

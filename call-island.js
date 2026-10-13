@@ -4,6 +4,8 @@
 // empty box's bubble asks for an answer, as in the phone. Drag it by its top (the place is remembered); a double tap
 // opens the phone on the call; the red button hangs up (or declines).
 
+import {joinStack, stackTop} from './island-stack.js';
+
 const KEY = 'sttts.callIsland';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -26,9 +28,10 @@ export function createCallIsland({doc = document, status, phoneOpen, open, hangu
   let call = null, timer = 0, built = '', place = null, typed = '', linesHTML = '';
   try { place = JSON.parse(win.localStorage.getItem(KEY) || 'null'); } catch { /* the top middle */ }
 
+  const free = () => !place || !Number.isFinite(place.x) || !Number.isFinite(place.y);
   function where() {
-    if (!place || !Number.isFinite(place.x) || !Number.isFinite(place.y)) {
-      el.style.left = '50%'; el.style.top = 'max(10px, env(safe-area-inset-top))'; el.style.transform = 'translateX(-50%)'; el.style.setProperty('--ci-from', 'translateX(-50%)');
+    if (free()) {
+      el.style.left = '50%'; el.style.top = stackTop(el); el.style.transform = 'translateX(-50%)'; el.style.setProperty('--ci-from', 'translateX(-50%)');
       return;
     }
     const w = el.offsetWidth || 300, h = el.offsetHeight || 60, vw = win.innerWidth, vh = win.innerHeight;
@@ -37,6 +40,7 @@ export function createCallIsland({doc = document, status, phoneOpen, open, hangu
     el.style.left = Math.min(vw - w - 6, Math.max(6, place.x * vw)) + 'px';
     el.style.top = Math.min(vh - Math.min(h, 120) - 6, Math.max(6, place.y * vh)) + 'px';
   }
+  const leave = joinStack({el, order: 0, free, place: where});
   function state(c) {
     if (c.state === 'ringing') return c.dir === 'in' ? '来电' : '呼叫中…';
     if (c.error) return '没有回应';
@@ -166,6 +170,6 @@ export function createCallIsland({doc = document, status, phoneOpen, open, hangu
   return {
     refresh,
     get shown() { return !el.hidden; },
-    dispose() { win.clearInterval(timer); win.removeEventListener('resize', onResize); el.remove(); },
+    dispose() { leave(); win.clearInterval(timer); win.removeEventListener('resize', onResize); el.remove(); },
   };
 }

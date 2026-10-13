@@ -205,3 +205,33 @@
 @keyframes sttts-mi-spin{to{transform:rotate(360deg)}}
 @keyframes sttts-mi-bar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1.6)}}
 @media (prefers-reduced-motion:reduce){.sttts-music-island,.sttts-music-island .mi-disc,.sttts-music-island .mi-bars i,.sttts-music-island .mi-card{animation:none!important;transition:none}}
+/* 台词小窗: the latest reply's lines, to hear one by one (over a visual-novel sprite too). */
+.sttts-voice-island{position:fixed;z-index:30995;width:max-content;max-width:min(260px,calc(100vw - 16px));padding:5px 12px 5px 5px;border-radius:999px;background:#000;color:#fff;box-shadow:0 8px 24px -8px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.08);font:12px/1.35 "PingFang SC","Microsoft YaHei",system-ui,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;animation:sttts-mi-in .45s cubic-bezier(.34,1.3,.64,1);transition:max-width .35s cubic-bezier(.34,1.2,.64,1),padding .35s cubic-bezier(.34,1.2,.64,1),border-radius .35s ease}
+.sttts-voice-island[hidden]{display:none}
+.sttts-voice-island[data-dragging]{cursor:grabbing}
+.sttts-voice-island .vi-pill{display:flex;align-items:center;gap:8px;height:26px}
+.sttts-voice-island .vi-ico{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#64d2ff,#5e5ce6);color:#fff}
+.sttts-voice-island .vi-ico svg{width:15px;height:15px}
+.sttts-voice-island .vi-line{min-width:0;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.sttts-voice-island .vi-bars{flex:none;display:none;align-items:center;gap:2px;height:14px}
+.sttts-voice-island[data-playing="1"] .vi-bars{display:flex}
+.sttts-voice-island .vi-bars i{width:2.5px;height:30%;border-radius:2px;background:#64d2ff;animation:sttts-mi-bar .9s ease-in-out infinite}
+.sttts-voice-island .vi-bars i:nth-child(2){animation-delay:-.3s;background:#a5a3ff}
+.sttts-voice-island .vi-bars i:nth-child(3){animation-delay:-.6s}
+.sttts-voice-island .vi-card{display:none}
+.sttts-voice-island[data-expanded="1"]{width:min(320px,calc(100vw - 16px));max-width:min(320px,calc(100vw - 16px));padding:10px 10px 8px;border-radius:26px}
+.sttts-voice-island[data-expanded="1"] .vi-pill{display:none}
+.sttts-voice-island[data-expanded="1"] .vi-card{display:block;animation:sttts-mi-open .3s ease}
+.sttts-voice-island .vi-head{display:flex;align-items:center;gap:8px;padding:0 2px 8px}
+.sttts-voice-island .vi-head b{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sttts-voice-island .vi-btn{flex:none;height:30px;min-width:30px;border:0;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0 10px;font:inherit;font-weight:700;cursor:pointer}
+.sttts-voice-island .vi-btn svg{width:14px;height:14px}
+.sttts-voice-island .vi-close{padding:0;width:30px;background:transparent;color:rgba(255,255,255,.55)}
+.sttts-voice-island .vi-list{max-height:min(46vh,320px);overflow-y:auto;overscroll-behavior:contain;display:grid;gap:4px;touch-action:pan-y}
+.sttts-voice-island .vi-row{display:grid;gap:1px;width:100%;padding:8px 10px;border:0;border-radius:14px;background:rgba(255,255,255,.07);color:#fff;text-align:left;font:inherit;cursor:pointer}
+.sttts-voice-island .vi-row b{font-size:11px;color:#64d2ff}
+.sttts-voice-island .vi-row span{font-size:13px;line-height:1.45}
+.sttts-voice-island .vi-row small{font-size:11px;color:rgba(255,255,255,.5)}
+.sttts-voice-island .vi-row[data-state=playing]{background:rgba(100,210,255,.22);box-shadow:inset 0 0 0 1px rgba(100,210,255,.5)}
+.sttts-voice-island .vi-row[data-state=paused]{box-shadow:inset 0 0 0 1px rgba(255,255,255,.3)}
+@media (prefers-reduced-motion:reduce){.sttts-voice-island,.sttts-voice-island .vi-bars i,.sttts-voice-island .vi-card{animation:none!important;transition:none}}

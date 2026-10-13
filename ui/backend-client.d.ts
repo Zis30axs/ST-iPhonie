@@ -55,6 +55,8 @@ export interface GeneralSettings {
     voiceExample?: boolean;
     /** 自动挑音色: a character met without a voice gets one picked by the text model (候选池 first). */
     autoVoice?: boolean;
+    /** 台词小窗: the latest reply's lines in a pill on the tavern page, to hear one by one (off by default). */
+    voiceIsland?: boolean;
 }
 export interface Injection {
     position: InjectionPosition;

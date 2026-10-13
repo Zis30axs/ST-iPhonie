@@ -165,6 +165,7 @@ export function settingsApp(ctx) {
           ${toggle('hideStoryWaves', '隐藏正文声波', s.general.hideStoryWaves === true, '正文只显示台词文字，不插入声波按钮，适合与部分美化卡一起使用。语音规则和音频仍然保留，可以在「听取」里生成、播放和导出。')}
           ${toggle('stripVoice', '发给模型时去掉旧配音标签', s.general.stripVoice !== false, '不改变酒馆里的正文显示；只是之后每次请求模型时，旧回复里的每句台词只留中文译文，标签和原文不发，省上下文，也不用自己写正则。旧回复全部去掉：留着的那条会被模型当成模板照着学，情绪和句式越写越固定；格式靠每次注入的语音规则就够了。出图块在「绘图」里另有同样的开关。')}
           ${s.general.stripVoice !== false ? toggle('voiceExample', '保留最近一条做示范', s.general.voiceExample === true, '最新一条带台词的回复不去掉，原样发给模型当格式示范。模型老是忘了写配音标签时再打开；打开后它容易照着这条学，越写越像。') : ''}
+          ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上开了视觉小说模式，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
           ${toggle('floatingEnabled', '悬浮入口', s.general.floatingEnabled, '在酒馆里显示可以拖动的小球，点开再点一次进入手机。')}
           ${toggle('waveformEnabled', '声波动效', s.general.waveformEnabled, '台词旁和手机里的声波随真实音频跳动。系统开启减少动态效果时保持静止。\n\n正文声波的颜色跟随酒馆主题：\n· 虚线小点：这个角色还没配音（斜体色）\n· 淡色：还没生成（正文色）\n· 引号色：已生成，可以播放\n· 引号色加底色：正在播放\n· 下划线色：已经播放过')}
           <div class="field"><div class="meter-label"><span>播放音量</span><output>${Math.round(phone.volume * 100)}%</output></div><input class="slider" type="range" data-field="volume" min="0" max="100" value="${Math.round(phone.volume * 100)}" aria-label="播放音量"></div>
@@ -204,7 +205,7 @@ export function settingsApp(ctx) {
       if (!el.checked && api.syncStatus?.()?.available && await ctx.confirm('也删掉酒馆里的那份吗？', '关掉后小手机不再往酒馆存。酒馆里已经存的聊天记录与记忆、助手会话与记忆、朋友圈、备忘录和相册还在，别的设备打开同步还能读到。点确定会把它们从酒馆删掉；这台设备上的内容不受影响。')) await clearTavernCopy();
       return;
     }
-    if (['voiceEnabled', 'hideStoryWaves', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion', 'stripVoice', 'voiceExample'].includes(key)) { api.updateGeneral({[key]: el.checked}); if (key === 'stripVoice') await render(); }
+    if (['voiceEnabled', 'hideStoryWaves', 'voiceIsland', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion', 'stripVoice', 'voiceExample'].includes(key)) { api.updateGeneral({[key]: el.checked}); if (key === 'stripVoice') await render(); }
     else if (key === 'drawEnabled') api.saveDraw({enabled: el.checked});
     else if (key === 'drawAuto') api.saveDraw({auto: el.checked});
     else if (key === 'drawGuard') api.saveDraw({guard: el.checked});
