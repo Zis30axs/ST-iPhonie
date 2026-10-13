@@ -162,13 +162,11 @@ export function chatApp(ctx) {
    */
   function bringSheet() {
     const waiting = pendingBring(), who = thread.type === 'group' ? `群聊「${thread.name}」` : thread.members[0];
-    const d = sheet('带进剧情', `<div class="group pad">
-        <p class="help-copy"><b>这一次</b>：挑几条消息，原样带进下一次正文，用一次就没了。适合刚聊完、想让正文马上接上的一段。</p>
-        <div class="actions">${btn('bring-pick', icon('book') + '选几条带进下一次正文', 'primary')}</div>
-        ${waiting ? `<p class="hint">${waiting.threadId === threadId ? '这段聊天' : `和${esc(waiting.name)}的聊天`}有 ${waiting.count} 条在等着带进下一次正文（再选会替换掉）。${btn('bring-cancel', '取消', 'text-button')}</p>` : ''}
+    const d = sheet('带进剧情', `<div class="group">
+        <div class="setting-row"><span>这一次${help('挑几条消息，原样带进下一次正文，用一次就没了。适合刚聊完、想让正文马上接上的一段。再选一次会替换掉之前选的。')}</span>${btn('bring-pick', '选几条', 'chip-button')}</div>
+        ${toggle('story-keep', '一直带着', thread.story === true, `每次写正文都带上你和${who}的聊天（整理好的记忆，加上还没整理的消息），正文一直记得你们在手机上聊过什么。会多占一些正文的字数，只给重要的聊天打开就好。`)}
       </div>
-      <div class="group pad"><p class="help-copy"><b>一直带着</b>：每次写正文都带上你和${esc(who)}的聊天（整理好的记忆，加上还没整理的消息），正文一直记得你们在手机上聊过什么。会多占一些正文的字数，只给重要的聊天打开就好。</p></div>
-      <div class="group">${toggle('story-keep', '一直带着', thread.story === true)}</div>`, {
+      ${waiting ? `<p class="hint">${waiting.threadId === threadId ? '这段聊天' : `和${esc(waiting.name)}的聊天`}有 ${waiting.count} 条等着带进下一次正文 ${btn('bring-cancel', '取消', 'text-button')}</p>` : ''}`, {
       'bring-pick': () => { d.close(); selecting = new Set(); panel = null; render(); },
       'bring-cancel': async () => { d.close(); await api.chatCancelBring?.(); ctx.notify('已取消，这次不带聊天进正文'); render(); }
     });
