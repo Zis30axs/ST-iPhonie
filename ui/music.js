@@ -107,7 +107,7 @@ export function musicApp(ctx) {
     v.draw(heading('音乐设置', '', 'Music')
       + groupTitle('背景音乐', help('打开后，剧情模型每次写正文时会按场景和情绪挑一首歌，写在正文开头（正文里显示成一个 ♪ 小标签）。\n\n点一下才放：点 ♪ 才开始放，再点暂停。\n自动放：新回复写完就自动换成它挑的歌，循环放到下一首。\n\n插件会先在你的歌单里找这首歌，找不到再用你添加的音源搜。'))
       + `<div class="group pad"><div class="segmented" style="margin:0" role="group" aria-label="背景音乐">${BGM_MODES.map(k => `<button data-action="bgm" data-mode="${k}" aria-pressed="${s.bgm === k}">${BGM_MODE_NAMES[k]}</button>`).join('')}</div>
-        ${s.bgm !== 'off' ? `${field('点歌规则', textArea('rule', s.rule, 'rows="9"'), '发给剧情模型的话。{{最近}} 会换成最近放过的歌（让它别重复），{{用户}} 换成你的名字。歌单里有歌时，会附上歌单让它优先选。')}<div class="actions" style="margin:0">${btn('save-rule', '保存规则', 'primary small')}${btn('reset-rule', '恢复默认', 'text-button')}</div>` : ''}</div>`
+</div>${s.bgm !== 'off' ? `<details data-group="music-rule"><summary>点歌规则 ${help('发给剧情模型的话。{{最近}} 会换成最近放过的歌（让它别重复），{{用户}} 换成你的名字。歌单里有歌时，会附上歌单让它优先选。改完点一下别处就保存了。')}<small class="fold-note">${s.rule === DEFAULT_BGM_RULE ? '默认' : '改过'}</small></summary><div class="fold-body">${textArea('rule', s.rule, 'rows="9" aria-label="点歌规则"')}<div class="actions" style="margin:6px 0 0">${btn('reset-rule', icon('refresh') + '恢复默认', 'text-button')}</div></div></details>` : ''}`
       + groupTitle('播放')
       + `<div class="group pad"><div class="field"><div class="meter-label"><span>音量</span><output>${Math.round(s.volume * 100)}%</output></div><input class="slider" type="range" min="0" max="100" step="5" value="${Math.round(s.volume * 100)}" data-music-volume aria-label="音量"></div>
         ${toggle('duck', '说台词时调小', s.duck, '朗读台词时音乐自动变小，念完恢复。')}
@@ -118,14 +118,16 @@ export function musicApp(ctx) {
   }
   function renderSource() {
     const d = editing.draft;
+    const sourceField = ([k, l, ph]) => field(l, input('src-' + k, d[k] || '', k.endsWith('Path') || k === 'name' ? 'text' : 'url', `placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"`));
     v.draw(heading(editing.index < 0 ? '添加音源' : '编辑音源', '', 'Source')
       + (editing.index < 0 ? groupTitle('自己搭的后端', help('在自己电脑上、或者手机的 Termux 里跑音乐接口程序（比如网易云音乐 API 这一类）的话，填上它的地址，下面的格式会自动填好。酒馆里装了提供音乐接口的服务端插件的话，地址写成酒馆自己的地址（以 / 开头，比如 /api/plugins/插件名/search?…），会带着酒馆的登录去问。插件不带任何别人的服务器地址。\n\n电脑上跑的后端，手机要用电脑的局域网地址（比如 http://192.168.1.5:3000）。会员歌要看你的后端有没有登录。')) + `<div class="group pad">${SELF_HOSTED.map(t => `<div class="field"><span>${esc(t.name)}</span><div class="music-selfhost">${t.local ? '<small class="hint" style="flex:1;margin:0">装在你酒馆里，不用填地址</small>' : input('base-' + t.id, '', 'url', `placeholder="${esc(t.example)}" autocomplete="off" spellcheck="false"`)}${btn('fill-template', t.local ? '填好' : '按这个格式填', 'secondary small', `data-template="${esc(t.id)}"`)}</div></div>`).join('')}</div>` : '')
-      + `<div class="group pad">${SOURCE_FIELDS.map(([k, l, ph]) => field(l, input('src-' + k, d[k] || '', k.endsWith('Path') || k === 'name' ? 'text' : 'url', `placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"`))).join('')}</div>
-      <div class="group">${toggle('src-direct', '取歌地址直接就是音频', d.direct === true, '有的接口取歌时不回 JSON，而是直接给音频，或者跳转到音频文件（比如 Meting 这类、go-music-api 的 /stream）。打开后，取歌地址填好歌曲 ID 就直接拿来播放，「播放链接在哪」不用管。不打开时，接口给的是音频也会自动认出来（要能读到它）。')}</div>
+      + `<div class="group pad">${SOURCE_FIELDS.slice(0, 3).map(sourceField).join('')}</div>
+      <details data-group="source-paths"><summary>歌词和结果在哪 ${help('按接口文档填：结果里列表、歌曲 ID、歌名、歌手、播放链接、歌词分别在哪（用点隔开的路径，比如 data.url）。用上面「自己搭的后端」一键填的话，这些都填好了。')}<small class="fold-note">${d.listPath || d.urlPath ? '填好了' : '空着自动找'}</small></summary><div class="fold-body">${SOURCE_FIELDS.slice(3).map(sourceField).join('')}
+        ${toggle('src-direct', '取歌地址直接就是音频', d.direct === true, '有的接口取歌时不回 JSON，而是直接给音频，或者跳转到音频文件（比如 Meting 这类、go-music-api 的 /stream）。打开后，取歌地址填好歌曲 ID 就直接拿来播放，「播放链接在哪」不用管。不打开时，接口给的是音频也会自动认出来（要能读到它）。')}</div></details>
       <div class="actions">${btn('test-source', icon('search') + '用「晴天」试一试', 'secondary')}</div>
       ${test ? `<div class="group pad music-test">${test.error ? `<p class="hint">${esc(test.error)}</p>` : `<p class="hint">搜到 ${test.songs.length} 首${test.link ? '，第一首的播放链接也拿到了' : ''}：</p>${test.songs.slice(0, 5).map(s => `<p class="music-test-row">${esc(label(s))}</p>`).join('')}${test.linkError ? `<p class="hint">取播放链接时：${esc(test.linkError)}</p>` : ''}`}</div>` : ''}
-      <div class="savebar">${btn('cancel-source', '取消', 'secondary')}${btn('save-source', '保存', 'primary')}</div>
-      ${editing.index >= 0 ? `<div class="actions">${btn('delete-source', '删除这个音源', 'danger')}</div>` : ''}`);
+      ${editing.index >= 0 ? `<div class="actions">${btn('delete-source', icon('trash') + '删除这个音源', 'text-button danger-text')}</div>` : ''}
+      <div class="savebar">${btn('cancel-source', '取消', 'secondary')}${btn('save-source', '保存', 'primary')}</div>`);
   }
   const readDraft = () => {
     for (const [k] of SOURCE_FIELDS) { const el = v.root.querySelector(`[data-field="src-${k}"]`); if (el) editing.draft[k] = el.value.trim(); }
@@ -157,6 +159,7 @@ export function musicApp(ctx) {
   v.on('input', '[data-music-seek]', el => { const p = v.root.querySelector('[data-music-pos]'); if (p) p.textContent = clock(Number(el.value)); });
   v.on('change', '[data-music-volume]', el => { api.saveMusic({volume: Number(el.value) / 100}); renderSettings(); });
   v.on('change', '[data-source-on]', el => { const list = structuredClone(state().sources); list[Number(el.dataset.sourceOn)].enabled = el.checked; try { saveSources(list); } catch (error) { ctx.notify(error.message, {error: true}); renderSettings(); } });
+  v.on('change', '[data-field=rule]', el => { api.saveMusic({rule: el.value || DEFAULT_BGM_RULE}); ctx.notify('点歌规则保存好了'); });
   v.on('change', '[data-field=duck],[data-field=share]', el => api.saveMusic({[el.dataset.field]: el.checked}));
   v.on('click', '[data-action]', async el => {
     const i = Number(el.dataset.i);
@@ -194,7 +197,6 @@ export function musicApp(ctx) {
         break;
       }
       case 'bgm': api.saveMusic({bgm: el.dataset.mode}); renderSettings(); break;
-      case 'save-rule': api.saveMusic({rule: v.root.querySelector('[data-field=rule]')?.value || DEFAULT_BGM_RULE}); ctx.notify('点歌规则保存好了'); break;
       case 'reset-rule': api.saveMusic({rule: DEFAULT_BGM_RULE}); renderSettings(); break;
       case 'add-source': editing = {index: -1, draft: normalizeSource({name: '', search: '', url: ''}, state().sources.length)}; editing.draft.name = ''; test = null; mode = 'source'; render(); break;
       case 'edit-source': editing = {index: i, draft: structuredClone(state().sources[i])}; test = null; mode = 'source'; render(); break;

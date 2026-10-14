@@ -272,24 +272,56 @@ export function chatApp(ctx) {
     if (!t) return null;
     return (await api.getThread(t.id))?.messages.findLast(m => m.kind === 'song' && m.from === name)?.song || null;
   }
-  /** 我: name, status, signature, and 个性装扮. */
-  function renderMe() {
-    const p = profile();
-    // The free looks, then the shop's: a bought one is put on like a free one; one not bought yet shows its price.
+  /** The looks of one kind (气泡, 挂件, 背景): the free ones, then the shop's (one not bought yet shows its price). */
+  function decoChips(key, list, value) {
     const w = api.wallet();
-    const chips = (key, list, value) => `<div class="deco-row">${[...Object.entries(list).map(([k, l]) => [k, l, null]), ...Object.entries(PREMIUM[key] || {}).map(([k, [l, price]]) => [k, l, price])].map(([k, l, price]) => { const owned = price === null || w.owned.includes(key + ':' + k); return `<button type="button" class="deco${price === null ? '' : ' premium'}" data-action="${owned ? 'me-set' : 'me-buy'}" data-key="${key}" data-value="${k}" data-name="${esc(l)}" data-price="${price ?? 0}" data-${key}="${k}" aria-pressed="${value === k}"><span class="deco-sample" aria-hidden="true">${key === 'frame' ? `<span class="me-av" style="--s:36px"><span class="avatar none" style="--s:36px"></span>${pendant(k)}</span>` : key === 'background' ? sceneArt(k) : ''}</span><span>${l}</span>${price === null ? '' : `<small class="deco-price">${owned ? '已拥有' : '¥' + price}</small>`}</button>`; }).join('')}</div>`;
+    return `<div class="deco-row">${[...Object.entries(list).map(([k, l]) => [k, l, null]), ...Object.entries(PREMIUM[key] || {}).map(([k, [l, price]]) => [k, l, price])].map(([k, l, price]) => { const owned = price === null || w.owned.includes(key + ':' + k); return `<button type="button" class="deco${price === null ? '' : ' premium'}" data-action="${owned ? 'me-set' : 'me-buy'}" data-key="${key}" data-value="${k}" data-name="${esc(l)}" data-price="${price ?? 0}" data-${key}="${k}" aria-pressed="${value === k}"><span class="deco-sample" aria-hidden="true">${key === 'frame' ? `<span class="me-av" style="--s:36px"><span class="avatar none" style="--s:36px"></span>${pendant(k)}</span>` : key === 'background' ? sceneArt(k) : ''}</span><span>${l}</span>${price === null ? '' : `<small class="deco-price">${owned ? '已拥有' : '¥' + price}</small>`}</button>`; }).join('')}</div>`;
+  }
+  const DECOS = {bubble: ['聊天气泡', BUBBLES], frame: ['头像挂件', FRAMES], background: ['聊天背景', BACKGROUNDS]};
+  const decoName = key => { const p = profile(), [, list] = DECOS[key]; if (key === 'background' && p.backgroundPhoto) return '相册里的照片'; return list[p[key]] || PREMIUM[key]?.[p[key]]?.[0] || p[key]; };
+  /** 我: the card (tap the picture to change it), name and signature, and one row each for the rest. */
+  function renderMe() {
+    const p = profile(), w = api.wallet();
     v.draw(heading('我', '', 'Me')
-      + `<div class="qq-card me" data-bubble="${esc(p.bubble)}"><span class="qq-card-cover" aria-hidden="true"></span>${myAvatar(84)}<h2>${esc(myName())}</h2><p>${esc(p.signature || '还没有个性签名')}</p><div class="qq-card-tags"><span class="chip">${statusLine()}</span></div></div>`
-      + `<div class="group pad"><div class="field"><span>头像</span><div class="actions" style="margin:0">${btn('avatar-pick', icon('image') + '换头像', 'secondary', 'data-key="me"')}</div><small class="hint">${esc(avatarState('me'))}</small></div>${field('名字', input('me-name', p.name, 'text', `maxlength="40" placeholder="${esc(api.userName?.() || '我')}（跟随酒馆里的用户名）"`))}${field('个性签名', input('me-signature', p.signature, 'text', 'maxlength="80" placeholder="写一句话"'))}
-        <div class="field"><span>状态</span><div class="deco-row">${Object.entries(PROFILE_STATUS).map(([k, l]) => `<button type="button" class="status-chip" data-action="me-set" data-key="status" data-value="${k}" aria-pressed="${p.status === k}"><i class="qq-dot" data-status="${k}"></i>${l}</button>`).join('')}</div></div>
-        ${field('自定义状态', input('me-statusText', p.statusText, 'text', 'maxlength="20" placeholder="例如：摸鱼中、在听歌"'))}</div>`
+      + `<div class="qq-card me" data-bubble="${esc(p.bubble)}"><span class="qq-card-cover" aria-hidden="true"></span><button type="button" class="me-pic" data-action="avatar-pick" data-key="me" aria-label="换头像（${esc(avatarState('me'))}）">${myAvatar(84)}<span class="me-pic-edit" aria-hidden="true">${icon('image')}</span></button><h2>${esc(myName())}</h2><p>${esc(p.signature || '还没有个性签名')}</p><div class="qq-card-tags"><span class="chip">${statusLine()}</span></div></div>`
+      + `<div class="group pad">${field('名字', input('me-name', p.name, 'text', `maxlength="40" placeholder="${esc(api.userName?.() || '我')}（跟随酒馆里的用户名）"`))}${field('个性签名', input('me-signature', p.signature, 'text', 'maxlength="80" placeholder="写一句话"'))}</div>
+        <div class="group"><button class="list-row" data-action="me-status"><span><strong>状态</strong><small>${statusLine()}</small></span>${icon('next')}</button></div>`
       + groupTitle('钱包与商城')
       + `<div class="group"><button class="list-row" data-action="me-wallet">${icon('wallet')}<span><strong>钱包</strong><small>零钱 ¥${esc(yuan(w.balance))} · 明细和收到的礼物</small></span>${icon('next')}</button><button class="list-row" data-action="me-shop">${icon('shop')}<span><strong>商城</strong><small>更好看的气泡、挂件、背景，送给角色的礼物</small></span>${icon('next')}</button></div>`
       + groupTitle('个性装扮')
-      + `<div class="group pad"><div class="field"><span>聊天气泡</span>${chips('bubble', BUBBLES, p.bubble)}</div><div class="field"><span>头像挂件</span>${chips('frame', FRAMES, p.frame)}</div><div class="field"><span>聊天背景</span>${chips('background', BACKGROUNDS, p.background)}</div>
-        <div class="actions" style="margin-top:0">${btn('me-bg-photo', icon('image') + (p.backgroundPhoto ? '换一张照片当背景' : '用相册里的照片当背景'), 'secondary')}${p.backgroundPhoto ? btn('me-bg-clear', '不用照片', 'text-button') : ''}</div></div>`
+      + `<div class="group">${Object.entries(DECOS).map(([key, [label]]) => `<button class="list-row" data-action="me-deco" data-key="${key}"><span><strong>${label}</strong><small>${esc(decoName(key))}</small></span>${icon('next')}</button>`).join('')}</div>`
       + groupTitle('聊天设置')
       + `<div class="group"><button class="list-row" data-action="me-voice">${icon('book')}<span><strong>语音消息</strong><small>转文字显示什么、要不要自动转</small></span>${icon('next')}</button><button class="list-row" data-action="me-calls">${icon('phone')}<span><strong>来电</strong><small>角色会不会自己打来、响铃多久</small></span>${icon('next')}</button><button class="list-row" data-action="me-proactive">${icon('bubble')}<span><strong>主动发消息</strong><small>${api.getState().chat.proactive?.on ? '开着' : '关着'}：角色会不会自己给你发消息</small></span>${icon('next')}</button><button class="list-row" data-action="me-presets">${icon('edit')}<span><strong>聊天预设</strong><small>怎么回消息、朋友圈怎么发、电话里怎么说</small></span>${icon('next')}</button></div>`);
+  }
+  /** 状态: the five, and a few words of one's own. */
+  function statusSheet() {
+    const draw = () => { const p = profile(); return `<div class="deco-row">${Object.entries(PROFILE_STATUS).map(([k, l]) => `<button type="button" class="status-chip" data-action="me-set" data-key="status" data-value="${k}" aria-pressed="${p.status === k}"><i class="qq-dot" data-status="${k}"></i>${l}</button>`).join('')}</div>
+      ${field('自定义状态', input('me-statusText', p.statusText, 'text', 'maxlength="20" placeholder="例如：摸鱼中、在听歌"'))}`; };
+    const d = ctx.dialog('状态', draw());
+    d.body.addEventListener('click', e => { const b = e.target.closest('[data-action=me-set]'); if (!b) return; api.saveChatOptions({profile: {status: b.dataset.value}}); d.body.innerHTML = draw(); render(); });
+    d.body.addEventListener('change', e => { if (e.target.dataset.field !== 'me-statusText') return; try { api.saveChatOptions({profile: {statusText: e.target.value}}); render(); } catch (error) { ctx.notify(error.message, {error: true}); } });
+  }
+  /** 个性装扮 of one kind in a sheet: tap to put one on, buy one from the shop; the background can be a photo. */
+  function decoSheet(key) {
+    const [label, list] = DECOS[key];
+    const draw = () => { const p = profile(); return decoChips(key, list, p[key]) + (key === 'background' ? `<div class="actions">${btn('me-bg-photo', icon('image') + (p.backgroundPhoto ? '换一张照片当背景' : '用相册里的照片当背景'), 'secondary')}${p.backgroundPhoto ? btn('me-bg-clear', '不用照片', 'text-button') : ''}</div>` : ''); };
+    const d = ctx.dialog(label, draw());
+    d.body.addEventListener('click', async e => {
+      const b = e.target.closest('[data-action]');
+      if (!b) return;
+      const action = b.dataset.action;
+      try {
+        if (action === 'me-set') { api.saveChatOptions({profile: {[key]: b.dataset.value}}); d.body.innerHTML = draw(); render(); }
+        if (action === 'me-buy') {
+          const left = api.wallet().balance, price = Number(b.dataset.price);
+          if (!await ctx.confirm(`买下「${b.dataset.name}」？`, `¥${price}，零钱还有 ¥${yuan(left)}。买下以后一直能用。`)) return;
+          api.buyDecoration(key, b.dataset.value); api.saveChatOptions({profile: {[key]: b.dataset.value}});
+          render(); ctx.notify('买下并换上了');
+        }
+        if (action === 'me-bg-photo') { d.close(); await pickBackground(); }
+        if (action === 'me-bg-clear') { api.saveChatOptions({profile: {backgroundPhoto: ''}}); d.body.innerHTML = draw(); render(); }
+      } catch (error) { ctx.notify(error.message, {error: true}); }
+    });
   }
 
   // ---------- Thread ----------
@@ -899,14 +931,15 @@ export function chatApp(ctx) {
     if (drop.length) await api.deleteChatMessages(threadId, drop);
     requestReply();
   }
-  function newChat() {
+  /** 发起私聊: one row per contact; 发起群聊 (group): tick who comes in, a name if wanted. */
+  function newChat(group = false) {
     const contacts = api.chatContacts();
-    const d = ctx.dialog('新建聊天', contacts.length
-      ? `${groupTitle('私聊')}<div class="pick-list">${contacts.map(c => `<button class="list-row" data-new-dm="${esc(c.name)}">${avatar(c.name, c.engine, 36)}<span><strong>${esc(shown(c.name))}</strong><small>${c.source === 'role' ? (c.voice ? '角色 · 能发语音' : '角色 · 只发文字') : '手动联系人'}</small></span>${icon('next')}</button>`).join('')}</div>
-        ${contacts.length > 1 ? `${groupTitle('群聊')}<div class="pick-list">${contacts.map(c => `<label class="setting-row"><span>${avatar(c.name, c.engine, 28)}${esc(shown(c.name))}</span><input class="switch" type="checkbox" data-member="${esc(c.name)}" aria-label="拉 ${esc(c.name)} 进群"></label>`).join('')}</div>
-          ${field('群名', input('group-name', '', 'text', 'maxlength="40" placeholder="可以不填"'))}<div class="actions">${btn('create-group', icon('group') + '建群', 'primary')}</div>` : ''}
-        <div class="actions">${btn('manage-contacts', icon('person') + '管理联系人', 'text-button')}</div>`
-      : `<p class="help-copy">还没有联系人。在角色 App 里新增角色，或者手动添加一个联系人。</p><div class="actions">${btn('manage-contacts', icon('add') + '添加联系人', 'primary')}</div>`);
+    const d = ctx.dialog(group ? '发起群聊' : '发起私聊', !contacts.length
+      ? `<p class="help-copy">还没有联系人。在角色 App 里新增角色，或者手动添加一个联系人。</p><div class="actions">${btn('manage-contacts', icon('add') + '添加联系人', 'primary')}</div>`
+      : group
+      ? `<div class="pick-list">${contacts.map(c => `<label class="setting-row"><span>${avatar(c.name, c.engine, 28)}${esc(shown(c.name))}</span><input class="switch" type="checkbox" data-member="${esc(c.name)}" aria-label="拉 ${esc(c.name)} 进群"></label>`).join('')}</div>
+        ${field('群名', input('group-name', '', 'text', 'maxlength="40" placeholder="可以不填"'))}<div class="actions">${btn('create-group', icon('group') + '建群', 'primary')}</div>`
+      : `<div class="pick-list">${contacts.map(c => `<button class="list-row" data-new-dm="${esc(c.name)}">${avatar(c.name, c.engine, 36)}<span><strong>${esc(shown(c.name))}</strong><small>${c.source === 'role' ? (c.voice ? '角色 · 能发语音' : '角色 · 只发文字') : '手动联系人'}</small></span>${icon('next')}</button>`).join('')}</div>`);
     d.body.addEventListener('click', e => {
       const b = e.target.closest('button');
       if (!b) return;
@@ -1033,16 +1066,15 @@ export function chatApp(ctx) {
   }
   function plusMenu() {
     const d = ctx.dialog('发起', `<div class="pick-list">
-      <button class="list-row" data-menu="chat">${icon('chat')}<span><strong>发起聊天</strong><small>私聊，或者拉几个人建群</small></span></button>
-      <button class="list-row" data-menu="contact">${icon('person')}<span><strong>添加联系人</strong><small>剧情之外的人，写上人设就能聊</small></span></button>
-      <button class="list-row" data-menu="me">${icon('smile')}<span><strong>个性装扮</strong><small>气泡、头像挂件、聊天背景、状态</small></span></button></div>`);
+      <button class="list-row" data-menu="chat">${icon('chat')}<span><strong>发起私聊</strong></span></button>
+      ${api.chatContacts().length > 1 ? `<button class="list-row" data-menu="group">${icon('group')}<span><strong>发起群聊</strong></span></button>` : ''}
+      <button class="list-row" data-menu="contact">${icon('person')}<span><strong>添加联系人</strong><small>剧情之外的人，写上人设就能聊</small></span></button></div>`);
     d.body.addEventListener('click', e => {
       const action = e.target.closest('[data-menu]')?.dataset.menu;
       if (!action) return;
       d.close();
-      if (action === 'chat') newChat();
+      if (action === 'chat' || action === 'group') newChat(action === 'group');
       if (action === 'contact') { contactDraft = {name: '', persona: ''}; mode = 'contact-edit'; render(); }
-      if (action === 'me') { mode = 'me'; render(); }
     });
   }
   async function pickBackground() {
@@ -1234,6 +1266,8 @@ export function chatApp(ctx) {
         render(); ctx.notify('买下并换上了');
         break;
       }
+      case 'me-status': statusSheet(); break;
+      case 'me-deco': decoSheet(el.dataset.key); break;
       case 'me-wallet': openWallet(); break;
       case 'me-shop': openShop(); break;
       case 'me-bg-photo': await pickBackground(); break;

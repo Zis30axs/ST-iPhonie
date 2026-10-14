@@ -71,16 +71,16 @@ export function rolesApp(ctx) {
           ${mimo === 'design'
             ? field('音色描述', textArea('voice', r.voice, 'rows="3" placeholder="例如：二十岁出头的女生，声音清亮，带点慵懒，说话慢悠悠的"'), '用一到四句话描述：性别年龄、音色质感、情绪语气、语速节奏。不要写混响、回声这类后期效果，也不要写“普通”“正常”这种模糊的词。')
             : field(mimo === 'clone' ? '克隆样本' : r.engine === 'custom' ? '音色' : '音色 ID', input('voice', r.voice, 'text', `placeholder="${mimo === 'clone' ? '填克隆样本的名字，或从列表选择' : r.engine === 'custom' ? '「自己的接口」里音色的名字，或从列表选择' : '粘贴音色 ID 或从列表选择'}" autocomplete="off"`))}
+        </div>
+        <details data-group="role-model"><summary>模型和台词语言<small class="fold-note">${esc((r.model || '跟随引擎') + ' · ' + (r.language ? languageName(r.language) : '跟随默认'))}</small></summary><div class="fold-body">
           ${field('模型', select('model', r.model || '', [['', '跟随引擎 · ' + c.model], ...schema.models.map(m => [m.id, m.id, !m.supported])]))}
           ${languageField('language', r.language || '', true, typedLanguages(api.getState()))}
-        </div>
-        ${groupTitle('资料')}
-        <div class="group pad">${field('角色资料', textArea('persona', r.persona || '', 'rows="4" maxlength="4000" placeholder="例如：Hina，17 岁，学生会会长，嘴硬心软，和小春是青梅竹马"'), '聊天、论坛、朋友圈、查手机和电话写这个人时用的资料：身份、性格、说话方式、和谁是什么关系。\n\n酒馆里有这个人的角色卡时，不写也会读角色卡；写了就用这里的。没出场过、也没有角色卡的人（比如只在别的卡里出现的），在这里写几句，模型就不用凭空猜了。世界书照常按名字去找，最近的剧情也一直会带上。')}</div>
-        ${groupTitle('绘图')}
-        <div class="group pad">${field('外貌 tag', textArea('appearance', r.appearance || '', 'class="code" rows="3" placeholder="例如 1girl, long silver hair, blue eyes, slender"'), '这个角色入画时会自动补上这些 tag，让长相保持一致。写英文 danbooru tag，逗号分隔，只写不会变的特征：1girl 或 1boy、发型发色、瞳色、体型、显眼的特征；衣服、表情、动作让模型按剧情写。已有作品里的角色，把识别 tag 放最前，比如 hatsune miku (vocaloid)。\n\n新角色第一次入画时，模型写的外貌会自动填到这里，可以随时改。')}</div>
+        </div></details>
+        <details data-group="role-persona"><summary>角色资料<small class="fold-note">${r.persona?.trim() ? r.persona.trim().length + ' 字' : '没写（读角色卡）'}</small></summary><div class="fold-body">${field('角色资料', textArea('persona', r.persona || '', 'rows="4" maxlength="4000" placeholder="例如：Hina，17 岁，学生会会长，嘴硬心软，和小春是青梅竹马"'), '聊天、论坛、朋友圈、查手机和电话写这个人时用的资料：身份、性格、说话方式、和谁是什么关系。\n\n酒馆里有这个人的角色卡时，不写也会读角色卡；写了就用这里的。没出场过、也没有角色卡的人（比如只在别的卡里出现的），在这里写几句，模型就不用凭空猜了。世界书照常按名字去找，最近的剧情也一直会带上。')}</div></details>
+        <details data-group="role-look"><summary>外貌 tag<small class="fold-note">${esc(r.appearance?.trim() ? r.appearance.trim().slice(0, 24) : '没写')}</small></summary><div class="fold-body">${field('外貌 tag', textArea('appearance', r.appearance || '', 'class="code" rows="3" placeholder="例如 1girl, long silver hair, blue eyes, slender"'), '这个角色入画时会自动补上这些 tag，让长相保持一致。写英文 danbooru tag，逗号分隔，只写不会变的特征：1girl 或 1boy、发型发色、瞳色、体型、显眼的特征；衣服、表情、动作让模型按剧情写。已有作品里的角色，把识别 tag 放最前，比如 hatsune miku (vocaloid)。\n\n新角色第一次入画时，模型写的外貌会自动填到这里，可以随时改。')}</div></details>
         <div class="savebar" data-engine="${r.engine}"><span class="save-state" data-save-state>草稿</span>${btn('audition', icon('play', true) + '试听', 'secondary')}${btn('save-role', '保存', 'primary')}</div>
         ${pending ? `<div class="actions" data-engine="${r.engine}">${btn('continue-role', '保存并继续朗读', 'primary')}</div>` : ''}
-        ${r.id ? `<div class="actions">${btn('delete-role', '删除角色配音', 'danger')}</div>` : ''}`);
+        ${r.id ? `<div class="actions">${btn('delete-role', icon('trash') + '删除角色配音', 'text-button danger-text')}</div>` : ''}`);
   }
 
   const render = () => current ? renderEditor() : renderList();

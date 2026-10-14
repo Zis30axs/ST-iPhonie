@@ -1,4 +1,4 @@
-import {createView, esc, btn, heading, field, select, toggle, copyText} from './common.js';
+import {createView, esc, btn, heading, field, select, toggle, copyText, menu} from './common.js';
 import {openImageViewer} from '../image-viewer.js';
 import {downloadAction, shareAction} from '../download.js';
 import {ASSISTANT_FILE_ACCEPT} from '../assistant-files.js';
@@ -533,7 +533,7 @@ export function assistantApp(ctx) {
     const s = settings || state(), built = s.presets?.find(p => p.id === s.activePreset), external = tavern.find(p => p.id === s.tavernPreset);
     const entries = s.source === 'tavern' ? external?.entries || [] : built?.entries || [];
     v.root.classList.remove('assistant-chat-mode');
-    v.draw(heading('助手设置', btn('save-settings', settingsSaving ? '保存中' : '完成', 'primary small', settingsSaving ? 'disabled' : ''), 'Assistant') + `<p class="hint">这里的选择只用于助手。</p><div class="group">${field('预设来源', select('source', s.source, [['builtin', '助手预设'], ['tavern', '酒馆预设']]))}${s.source === 'tavern' ? field('酒馆预设', select('tavernPreset', s.tavernPreset, [['', '选择一个预设'], ...tavern.map(p => [p.id, p.name])])) : field('助手预设', select('activePreset', s.activePreset, s.presets.map(p => [p.id, p.name]))) + `<div class="assistant-preset-tools">${btn('new-preset', '新建', 'text-button')}${btn('copy-preset', '另存为新预设', 'text-button')}${built?.id !== 'companion' ? btn('delete-preset', '删除预设', 'text-button') : ''}</div>${field('预设名称', `<input data-preset-name value="${esc(built?.name || '')}" maxlength="80" aria-label="预设名称">`)}`}${toggle('stream', '流式显示', s.stream !== false, '开启后边生成边显示；关闭后等待完整回复。思考状态仍实时更新。')}${toggle('visuals', '智能界面', s.visuals !== false, '用文字说不清、或者做成界面更好玩的时候，助手会在回答里现做一个能用的小界面：小游戏、计算器、能拖动的图表、资料面板……平时还是用文字回答。关掉后只用文字。')}${toggle('readContext', '读取正文上下文', s.readContext)}${s.readContext ? `<p class="hint">${esc(contextCopy(s))}</p><p class="hint">使用最近一次正文请求的完整快照，保留当次正则、预设与注入；不含随后生成的回复。刷新或切换正文后，请先发送一次正文。</p>` : '<p class="hint">只带助手提示词和这个会话，不读取正文。</p>'}</div>${memorySettings(s)}${s.source === 'tavern' && tavernLoading ? '<p class="hint" role="status">正在读取酒馆预设……</p>' : ''}${s.source === 'tavern' && tavernError ? `<p class="assistant-error" role="alert">${esc(tavernError)}</p>${btn('reload-presets', '重新读取', 'secondary small')}` : ''}<div class="group-title"><span>${s.source === 'tavern' ? '预设条目' : '助手提示词'}</span><small>${entries.length} 条</small>${s.source === 'builtin' ? btn('add-entry', icon('add'), 'text-button', 'aria-label="添加条目"') : ''}</div><div class="assistant-entries">${entries.map(entry => {
+    v.draw(heading('助手设置', btn('save-settings', settingsSaving ? '保存中' : '完成', 'primary small', settingsSaving ? 'disabled' : ''), 'Assistant') + `<div class="group">${field('预设来源', select('source', s.source, [['builtin', '助手预设'], ['tavern', '酒馆预设']]))}${s.source === 'tavern' ? field('酒馆预设', select('tavernPreset', s.tavernPreset, [['', '选择一个预设'], ...tavern.map(p => [p.id, p.name])])) : field('助手预设', `<div class="music-selfhost">${select('activePreset', s.activePreset, s.presets.map(p => [p.id, p.name]))}${btn('preset-tools', icon('more'), 'round-button', 'aria-label="新建、另存为、删除助手预设"')}</div>`) + `${field('预设名称', `<input data-preset-name value="${esc(built?.name || '')}" maxlength="80" aria-label="预设名称">`)}`}${toggle('stream', '流式显示', s.stream !== false, '开启后边生成边显示；关闭后等待完整回复。思考状态仍实时更新。')}${toggle('visuals', '智能界面', s.visuals !== false, '用文字说不清、或者做成界面更好玩的时候，助手会在回答里现做一个能用的小界面：小游戏、计算器、能拖动的图表、资料面板……平时还是用文字回答。关掉后只用文字。')}${toggle('readContext', '读取正文上下文', s.readContext, '打开后，助手会读最近一次正文请求的完整快照，保留当次正则、预设与注入；不含随后生成的回复。刷新或切换正文后，请先发送一次正文。关掉时只带助手提示词和这个会话。')}${s.readContext ? `<p class="hint">${esc(contextCopy(s))}</p>` : ''}</div>${memorySettings(s)}${s.source === 'tavern' && tavernLoading ? '<p class="hint" role="status">正在读取酒馆预设……</p>' : ''}${s.source === 'tavern' && tavernError ? `<p class="assistant-error" role="alert">${esc(tavernError)}</p>${btn('reload-presets', '重新读取', 'secondary small')}` : ''}<div class="group-title"><span>${s.source === 'tavern' ? '预设条目' : '助手提示词'}</span><small>${entries.length} 条</small>${s.source === 'builtin' ? btn('add-entry', icon('add'), 'text-button', 'aria-label="添加条目"') : ''}</div><div class="assistant-entries">${entries.map(entry => {
       const enabled = s.source === 'tavern' ? s.tavernEntries?.[s.tavernPreset]?.[entry.id] ?? entry.enabled !== false : entry.enabled !== false;
       return `<details class="group assistant-entry" data-group="entry-${esc(entry.id)}"><summary><span>${esc(entry.title || entry.id)}${entry.marker ? '<small> · 上下文位置</small>' : ''}</span><input class="switch" type="checkbox" data-entry="${esc(entry.id)}" aria-label="启用 ${esc(entry.title || entry.id)}" ${enabled ? 'checked' : ''}></summary>${s.source === 'builtin' ? `<div class="assistant-entry-edit"><input data-entry-title="${esc(entry.id)}" value="${esc(entry.title)}" maxlength="100" aria-label="条目名称">${btn('delete-entry', icon('trash'), 'text-button', `data-entry-id="${esc(entry.id)}" aria-label="删除条目"`)}</div><textarea data-entry-text="${esc(entry.id)}" aria-label="${esc(entry.title || entry.id)}的内容" rows="6">${esc(entry.text)}</textarea>` : `<pre class="assistant-code">${esc(entry.text || (entry.marker ? '正文快照完整保留当次发送内容，不由此处的条目开关裁剪。' : '这个条目没有文字内容。'))}</pre>`}</details>`;
     }).join('')}</div>`);
@@ -671,9 +671,17 @@ export function assistantApp(ctx) {
     drawSettings();
     if (el.dataset.field === 'source' && settings.source === 'tavern') return loadPresets();
   });
-  v.on('click', '[data-action]', async el => {
-    const action = el.dataset.action, message = thread?.messages.find(m => m.id === el.dataset.mid);
+  v.on('click', '[data-action]', el => act(el.dataset.action, el));
+  async function act(action, el) {
+    const message = thread?.messages.find(m => m.id === el.dataset.mid);
     switch (action) {
+      // 新建 / 另存为 / 删除 the assistant preset: the 「⋯」 next to it.
+      case 'preset-tools': {
+        const current = settings?.presets.find(p => p.id === settings.activePreset);
+        const picked = await menu(ctx, '助手预设', [{key: 'new-preset', icon: 'add', label: '新建预设'}, {key: 'copy-preset', icon: 'copy', label: '另存为新预设', note: `把「${current?.name || ''}」复制一份`}, current && current.id !== 'companion' && {key: 'delete-preset', icon: 'trash', label: '删除这套预设', danger: true}]);
+        if (picked) return act(picked, el);
+        return;
+      }
       case 'attach': v.root.querySelector('.assistant-add-menu').open = false; v.root.querySelector('[data-assistant-files]').click(); return;
       case 'draw-image':
         v.root.querySelector('.assistant-add-menu').open = false;
@@ -802,7 +810,7 @@ export function assistantApp(ctx) {
         const line = voiceFor(message)[Number(el.dataset.line)]; if (line) return api.speak(line); return;
       }
     }
-  });
+  }
   v.back = () => {
     if (mode === 'settings') { settings = null; mode = 'chat'; render().catch(e => ctx.notify(e.message, {error: true})); return true; }
     if (mode === 'threads') { mode = 'chat'; render().catch(e => ctx.notify(e.message, {error: true})); return true; }

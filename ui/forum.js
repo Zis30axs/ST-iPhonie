@@ -1,6 +1,6 @@
 // 论坛: a public board next to 朋友圈. The feed (热搜 on top, then posts), a post with its replies as floors, and the
 // user's own posts and replies. New posts, replies and the 热搜 are generated in the tavern page (host-apps.js).
-import {createView, esc, btn, field, input, textArea, heading, avatar, empty} from './common.js';
+import {createView, esc, btn, field, input, textArea, heading, avatar, empty, menu} from './common.js';
 import {icon} from './icons.js';
 
 function ago(at) {
@@ -112,18 +112,14 @@ export function forumApp(ctx) {
       if (api.forumReply) background(api.forumReply(open, reply.id)); else render();
     });
   }
-  function options() {
-    const d = ctx.dialog('论坛设置', `<div class="actions">${btn('net-names', icon('edit') + '网名', 'secondary')}</div><p class="help-copy">帖子和热搜怎么写，在预设 App 的聊天预设里：勾了「论坛」的规则就用在这里（默认是「论坛口吻」）。</p>
-      <div class="actions">${btn('edit-prompt', icon('edit') + '编辑聊天预设', 'secondary')}</div><div class="actions">${btn('clear-forum', icon('trash') + '清空论坛', 'danger')}</div>`);
-    d.body.addEventListener('click', async e => {
-      const b = e.target.closest('[data-action]');
-      if (b?.dataset.action === 'edit-prompt') { d.close(); ctx.open('presets'); ctx.showPresetKind?.('chat'); }
-      if (b?.dataset.action === 'net-names') { d.close(); netNames(); }
-      if (b?.dataset.action === 'clear-forum') {
-        if (!await ctx.confirm('清空论坛？', '所有帖子、回复和热搜都会删除。')) return;
-        d.close(); await api.clearForum(); open = ''; await render(); ctx.notify('论坛已清空');
-      }
-    });
+  async function options() {
+    const picked = await menu(ctx, '论坛', [
+      {key: 'net-names', icon: 'edit', label: '网名', note: '你和角色在论坛上用的名字'},
+      {key: 'edit-prompt', icon: 'edit', label: '帖子怎么写', note: '聊天预设里勾了「论坛」的规则（默认是「论坛口吻」）'},
+      {key: 'clear-forum', icon: 'trash', label: '清空论坛', note: '所有帖子、回复和热搜', danger: true}]);
+    if (picked === 'edit-prompt') { ctx.open('presets'); ctx.showPresetKind?.('chat'); }
+    if (picked === 'net-names') netNames();
+    if (picked === 'clear-forum' && await ctx.confirm('清空论坛？', '所有帖子、回复和热搜都会删除。')) { await api.clearForum(); open = ''; await render(); ctx.notify('论坛已清空'); }
   }
 
   v.back = () => { if (!open) return false; open = ''; render(); return true; };
