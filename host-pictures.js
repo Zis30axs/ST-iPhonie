@@ -138,7 +138,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const reply = await backend.generateText(ctx, {prompt: planRequest(s, {message: source, before: before(id)}), trimNames: false, responseLength: Math.min(4000, 500 + preset.count * 400)});
       if (context().chat[id] !== message) return false;
       const {text, count} = insertPlanned(source, reply);
-      if (!count) throw Error('这次没有挑出画面，可以在绘图 App 里点“给最新回复配图”再试一次');
+      if (!count) throw Error('这次没有挑出画面，可以在小手机的「设置 → 正文」里点「给最新回复配图」再试一次');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
       await ctx.saveChat();
@@ -168,14 +168,14 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       let text = source, pictured = 0, voiced = 0;
       if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply));
       if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, format));
-      if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文」里点「给最新回复配音」再试一次' : '这次没有挑出画面，可以在绘图 App 里点“给最新回复配图”再试一次');
+      if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文」里点「给最新回复配音」再试一次' : '这次没有挑出画面，可以在小手机的「设置 → 正文」里点「给最新回复配图」再试一次');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
       await ctx.saveChat();
       redrawMessage(id, message);
       scheduleRender();
       if (wantVoice && !voiced) notice('画面挑好了，台词这次没配上，可以在「设置 → 正文」里点「给最新回复配音」');
-      if (wantPictures && !pictured) notice('台词配好了，画面这次没挑出来，可以在绘图 App 里点“给最新回复配图”');
+      if (wantPictures && !pictured) notice('台词配好了，画面这次没挑出来，可以在「设置 → 正文」里点「给最新回复配图」');
       return {voiced, pictured};
     } finally { planning.delete(id); }
   }

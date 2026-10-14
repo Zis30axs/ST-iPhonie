@@ -1907,8 +1907,8 @@ export class TTSBackend {
     /** Contacts of the card open now (all of them when 分区 is off). */
     contacts() { return chatContacts(this.settings, this.here()); }
     /** Who 论坛 and 朋友圈 write about. With 分区 on: the open card's own people (its characters, roles met in its
-     *  story or added to it, contacts added under it), not the roles no story has met yet, which only stay in every
-     *  card's contacts so they can be found. All contacts when that leaves no one. */
+     *  story or added to it, contacts added under it), not the roles no story has met yet, which can be added from
+     *  联系人 →「＋」. All contacts when that leaves no one. */
     crowd() {
         const here = this.here(), all = this.contacts();
         if (!here) return all;

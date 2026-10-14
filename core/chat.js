@@ -266,9 +266,11 @@ export const inSpace = (item, space) => !space?.key || !item?.space || item.spac
 /** The space to filter by: the open card's, when partition is on and a card is open; else null (everything). */
 export const activeSpace = (settings, space) => settings.chat?.partition === 'card' && space?.key ? space : null;
 export function chatContacts(settings, space = null) {
-  // A card's contacts: its own character(s), the roles that have spoken in its story, and contacts added under it.
-  // A role no story has met yet (just made in the 角色 App) belongs to every card until one does.
-  const here = r => !space?.key || (space.members || []).includes(r.name) || !(Array.isArray(r.cards) && r.cards.length) || r.cards.includes(space.key);
+  // A card's contacts: its own character(s), the roles that have spoken (or been named) in its story, roles added to
+  // it, and contacts added under it. A role no story has met yet is in none until one does: it used to be in every
+  // card, so that roles made before cards were kept (most of them) made every card's phone look the same. A role
+  // made while a card is open belongs to that card; any role can be added from 联系人 →「＋」.
+  const here = r => !space?.key || (space.members || []).includes(r.name) || (Array.isArray(r.cards) && r.cards.includes(space.key));
   const roles = settings.routes.filter(r => !isPlaceholderRole(r.name) && here(r)).map(r => ({name: r.name, source: 'role', voice: !!r.voice, engine: r.voice ? r.engine : 'none', language: r.language || settings.general.defaultLanguage,
     // 角色资料: written in the 角色 App, else a contact of the same name's (a contact given a voice keeps who they are).
     persona: String(r.persona || settings.chat.contacts.find(c => c.name === r.name)?.persona || '').slice(0, CHAT_LIMITS.persona)}));
