@@ -83,7 +83,8 @@ export function chatApp(ctx) {
   const voiceText = () => api.getState().chat.voiceText || {mode: 'translation', auto: false};
   /** 转文字 for a voice message: the translation, the original line, or both (original first). */
   function transcriptHTML(m) {
-    const mode = voiceText().mode, original = m.text || '', translation = m.translation || '';
+    // The engine's own marks ([sigh], <whisper>…</whisper>, (laughing), <#0.5#>) are for the voice, not for reading.
+    const mode = voiceText().mode, original = String(m.text || '').replace(/\[[^\]]*\]|<[^>]*>|\((?:[a-z][a-z\s'-]*)\)/gi, '').replace(/\s{2,}/g, ' ').trim(), translation = m.translation || '';
     if (mode === 'original' || !translation) return `<span class="v-text">${esc(original)}</span>`;
     if (mode === 'both' && original && original !== translation) return `<span class="v-text both"><span class="v-orig">${esc(original)}</span><span>${esc(translation)}</span></span>`;
     return `<span class="v-text">${esc(translation)}</span>`;

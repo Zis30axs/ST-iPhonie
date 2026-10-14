@@ -27,7 +27,7 @@ const ENGINE_NAMES={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'�
 // only: the speakers of the current story (null: every role, for previews). Roles not in the story are never named in
 // a story request, or the model takes them as the cast (a new chat of a world card kept bringing back saved roles).
 export function speakingRoutes(s,only=null){const configured=s.routes.filter(r=>!isPlaceholderRole(r.name));if(!Array.isArray(only))return configured;const wanted=new Set(only.map(n=>String(n).trim()));return configured.filter(r=>wanted.has(r.name));}
-export function modelRules(s,only=null){const {FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS}=TTSParameters.vocab;const output=[];const configured=speakingRoutes(s,only);const registered=s.routes.filter(r=>!isPlaceholderRole(r.name));
+export function modelRules(s,only=null){const {FISH_DRAMA_PAIRS,FISH_DRAMA_SOUNDS,FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS}=TTSParameters.vocab;const output=[];const configured=speakingRoutes(s,only);const registered=s.routes.filter(r=>!isPlaceholderRole(r.name));
  // Nobody registered in the story yet: the rules of the engines in use, without names.
  const nameless=!configured.length&&registered.length,routes=configured.length?configured:nameless?[...new Map(registered.map(r=>[r.engine+'|'+(r.model||''),{...r,name:'说话者'}])).values()]:[{name:'未配置角色',engine:'fish',model:s.connections.fish.model}];
  for(const r of routes){const model=r.model||s.connections[r.engine]?.model||TTSParameters.catalogs[r.engine]?.model||'';let rule;
@@ -41,6 +41,10 @@ export function modelRules(s,only=null){const {FISH_S1_EMOTIONS,FISH_S1_TONES,FI
    rule=/^eleven_v[34]/.test(model)
     ?'情绪字段写一个描述声音的英文词或短语（如 excited、sarcastic、quietly curious），插件会把它放在原文开头当语气标签。原文里还可以在语气变化的那句话前加方括号英文标签，只描述声音、不描述动作：'+ELEVEN_TAGS.map(x=>'['+x+']').join('、')+'；一句最多一两个，不写 [standing]、[smiling] 这类动作。省略号表示停顿，全大写的词会被加重，少用；不要写 SSML 的 <break>。'
     :'这个模型不读语气标签：情绪字段照常填写，原文不要加方括号或圆括号标签，用措辞和标点表达情绪。';
+  }else if(model==='drama-3'){
+   rule='情绪字段像给配音演员说戏那样写这一句怎么演：情绪、意图、节奏、对谁说，可以写一整句，中文英文都行（如「强忍着眼泪，却努力笑着」「defensive, slightly uneasy tone」「对着老朋友，放松又温暖」）；插件会把它放在原文开头的方括号里。'
+    +'原文里：语气中途变了，就在变的地方再插一个方括号说明；叹气、笑、吸气、停顿这些声音用方括号放在发生的位置，如 '+FISH_DRAMA_SOUNDS.map(x=>'['+x+']').join('、')+'；'
+    +'只想改几个词的读法，就用成对标签把那几个词包住，只用这些：'+FISH_DRAMA_PAIRS.map(x=>'<'+x+'>…</'+x+'>').join('、')+'，要闭合、不要嵌套。方括号里只写怎么说，不写动作和场景。';
   }else if(model==='s1'){
    rule='情绪字段从这些英文词里选一个：'+FISH_S1_EMOTIONS.join('、')+'；插件会把它写成句首的圆括号标签。原文里还可以用圆括号加语气和声音，只用这些：'+[...FISH_S1_TONES,...FISH_S1_SOUNDS].map(x=>'('+x+')').join('、')+'；情绪标签放句首，语气和声音可以放在句中。';
   }else{
