@@ -17,7 +17,8 @@ export const APPS = {
   sounds: {name: '音效', eyebrow: 'Ambience', colors: ['#a8e6e0', '#2f9e95', '#ffe08a']},
   assistant: {name: '助手', eyebrow: 'Assistant', colors: ['#c1b9ff', '#7869d7', '#ffe7a4']},
   music: {name: '音乐', eyebrow: 'Music', colors: ['#ffb3c7', '#e8507a', '#ffe08a']},
-  games: {name: '游戏', eyebrow: 'Arcade', colors: ['#b9f3c9', '#33b36b', '#ffd36a']}
+  games: {name: '游戏', eyebrow: 'Arcade', colors: ['#b9f3c9', '#33b36b', '#ffd36a']},
+  paint: {name: '画画', eyebrow: 'Paint', colors: ['#ffd1e6', '#e85d9b', '#7fd0ff']}
 };
 
 export const SLOT = null;
@@ -27,7 +28,7 @@ export const SLOT = null;
 export const HOME = {
   pages: [
     ['roles', 'engines', 'presets', 'library', 'gallery', 'notes', 'forum', 'peek'],
-    ['sounds', 'assistant', 'music', 'games', SLOT, SLOT, SLOT, SLOT]
+    ['sounds', 'assistant', 'music', 'games', 'paint', SLOT, SLOT, SLOT]
   ],
   dock: ['chat', 'draw', 'listen', 'settings']
 };
