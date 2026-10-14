@@ -28,7 +28,7 @@ export function clearRows(board) {
 export default {
   id: 'tetris', name: '俄罗斯方块', icon: '🧱', colors: ['#a9c8ff', '#5b6ef0'], note: '消掉整行', live: true,
   how: '左右滑或 ←→ 移动，点一下或 ↑ 转，↓ 加速，往下一划（或空格）直接落下。',
-  make({doc, win, host, api}) {
+  make({doc, win, host, api, saved}) {
     // The board, the pad under it and nothing to scroll: the cells as big as the room left on the screen allows.
     const view = host.closest('.view'), room = view ? view.clientHeight - (host.getBoundingClientRect().top - view.getBoundingClientRect().top) - 110 : 420;
     const width = Math.min(340, Math.max(220, host.clientWidth || 300)), cell = Math.max(13, Math.floor(Math.min((width - 70) / W, (room > 200 ? room : 420) / H))), bw = cell * W, bh = cell * H;
@@ -106,9 +106,10 @@ export default {
       tick.start();
     }
     swipes(c, d => act(d === 'up' ? 'turn' : d === 'down' ? 'drop' : d), {tap: () => act('turn')});
-    restart();
+    if (saved?.board?.length === H && saved.piece) { ({board, piece, bag, next, score, lines, level} = saved); wait = speed(); over = false; draw(); api.score(score); } else restart();
     return {
       restart,
+      state: () => over ? null : {board, piece, bag, next, score, lines, level},
       key(e) {
         const what = {ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down', ArrowUp: 'turn', ' ': 'drop', a: 'left', d: 'right', s: 'down', w: 'turn', x: 'turn'}[e.key];
         if (!what) return false;

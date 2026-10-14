@@ -17,7 +17,7 @@ export function stepSnake(snake, dir, food, n = N) {
 export default {
   id: 'snake', name: '贪吃蛇', icon: '🐍', colors: ['#9be7a6', '#2f9e5b'], note: '越吃越长', live: true,
   how: '滑动、方向键或下面的按钮转向；撞墙或咬到自己就结束。',
-  make({doc, win, host, api}) {
+  make({doc, win, host, api, saved}) {
     const view = host.closest('.view'), room = view ? view.clientHeight - (host.getBoundingClientRect().top - view.getBoundingClientRect().top) - 190 : 340;
     const size = Math.min(340, Math.max(200, host.clientWidth || 300), room > 200 ? room : 340), cell = size / N;
     const {canvas: c, g} = canvas(doc, size, size);
@@ -71,9 +71,11 @@ export default {
       tick.start();
     }
     swipes(c, turn);
-    restart();
+    // The game left off: as it was, still, until 继续.
+    if (saved?.snake?.length) { ({snake, dir, food, score, speed} = saved); queue = []; wait = 400; over = false; draw(); api.score(score); } else restart();
     return {
       restart,
+      state: () => over ? null : {snake, dir, food, score, speed},
       key(e) { const d = ARROWS[e.key]; if (!d) return false; turn(d); return true; },
       pause() { if (over || !tick.running) return false; tick.stop(); },
       resume() { if (!over) { wait = 300; tick.start(); } },

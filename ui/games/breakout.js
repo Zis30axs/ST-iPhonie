@@ -12,7 +12,7 @@ export function bounce(hit, speed) {
 export default {
   id: 'breakout', name: '打砖块', icon: '🏓', colors: ['#ffd0a8', '#f0703c'], note: '三个球', live: true,
   how: '按住屏幕左右拖（或 ←→）移动挡板，点一下发球；接住球，把砖块全打掉。',
-  make({doc, win, host, api}) {
+  make({doc, win, host, api, saved}) {
     const w = Math.min(340, Math.max(240, host.clientWidth || 300)), h = Math.round(w * 1.25);
     const {canvas: c, g} = canvas(doc, w, h);
     c.className = 'game-canvas';
@@ -72,9 +72,10 @@ export default {
       wall(); paddle = w / 2; ball = [w / 2, py - r - 1]; speed = 4.2; lives = 3; score = 0; level = 1; held = true; over = false;
       api.score(0); draw(); tick.start();
     }
-    restart();
+    if (saved?.bricks?.length === ROWS) { ({bricks, lives, score, level, speed} = saved); paddle = w / 2; ball = [w / 2, py - r - 1]; held = true; over = false; api.score(score); draw(); } else restart();
     return {
       restart,
+      state: () => over ? null : {bricks, lives, score, level, speed},
       key(e) {
         if (e.key === 'ArrowLeft' || e.key === 'a') { keys.left = e.type !== 'keyup'; return true; }
         if (e.key === 'ArrowRight' || e.key === 'd') { keys.right = e.type !== 'keyup'; return true; }

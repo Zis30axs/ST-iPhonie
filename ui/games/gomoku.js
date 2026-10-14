@@ -49,7 +49,7 @@ export function bestMove(b, who) {
 export default {
   id: 'gomoku', name: '五子棋', icon: '⚫', colors: ['#f3d9a4', '#b9844a'], note: '和手机下一盘', unit: '步', lower: true,
   how: '你执黑先下，点交叉点落子；先连成五个的赢。最好成绩是用最少的步数赢。',
-  make({doc, win, host, api}) {
+  make({doc, win, host, api, saved}) {
     const size = Math.min(340, Math.max(240, host.clientWidth || 300)), gap = size / N;
     const {canvas: c, g} = canvas(doc, size, size);
     c.className = 'game-canvas gomoku-board';
@@ -108,7 +108,12 @@ export default {
     }
     c.addEventListener('click', tap);
     host.addEventListener('click', e => { if (e.target.closest('[data-gomoku=undo]')) undo(); });
-    restart();
-    return {restart, dispose() { win.clearTimeout(timer); host.innerHTML = ''; }};
+    if (saved?.b?.length === N && saved.moves?.length) {
+      b = saved.b; moves = saved.moves; last = moves.at(-1); over = false; thinking = false;
+      draw(); api.score(Math.ceil(moves.length / 2));
+      // Left while the phone was thinking: it moves now.
+      if (moves.length % 2) phone(); else say('轮到你（黑）');
+    } else restart();
+    return {restart, state: () => over || !moves.length ? null : {b, moves}, dispose() { win.clearTimeout(timer); host.innerHTML = ''; }};
   },
 };

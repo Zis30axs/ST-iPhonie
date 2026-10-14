@@ -15,6 +15,9 @@ export function store(win) {
       all[id] = {...all[id], best: score}; write(all); return true;
     },
     played(id) { const all = read(); all[id] = {...all[id], plays: (Number(all[id]?.plays) || 0) + 1}; write(all); },
+    /** The game left off (its state), to go on with next time; null when there is none. */
+    saved: id => read()[id]?.saved || null,
+    keep(id, state) { const all = read(); if (state) all[id] = {...all[id], saved: state}; else if (all[id]) delete all[id].saved; write(all); },
   };
 }
 

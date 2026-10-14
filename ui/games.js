@@ -32,15 +32,18 @@ export function gamesApp(ctx) {
     const b = best.best(game.id);
     return `<div class="game-bar"><div class="game-score"><small>${game.unit === '秒' ? '用时' : game.unit === '步' ? '步数' : '分数'}</small><b data-game-score>0</b></div><div class="game-score"><small>${game.lower ? '最好' : '最高'}</small><b data-game-best>${b ? esc(scoreText(game, b)) : '—'}</b></div><button type="button" class="chip-button" data-action="game-restart">重新开始</button></div>`;
   }
+  /** The game as it is now is kept (or forgotten when it is over), to go on with next time. */
+  function persist() { if (game && play?.state) best.keep(game.id, play.state()); }
   function open(id) {
     close();
     game = GAMES.find(g => g.id === id);
     if (!game) return renderList();
+    const saved = best.saved(game.id);
     v.draw(`<div class="game-page" data-playing="${game.id}"><h2 class="game-title">${esc(game.name)}</h2>${bar()}<div class="game-host" data-game-host></div><p class="hint game-how">${esc(game.how)}</p><div class="game-over" data-game-over hidden></div></div>`);
     const host = v.root.querySelector('[data-game-host]');
     paused = false;
-    best.played(game.id);
-    play = game.make({doc: ctx.doc, win: ctx.win, host, api: {
+    if (!saved) best.played(game.id);
+    play = game.make({doc: ctx.doc, win: ctx.win, host, saved, api: {
       score: n => { const el = v.root.querySelector('[data-game-score]'); if (el) el.textContent = scoreText(game, n); },
       /** The game ended: the score is offered as a best; the card says so. win: it was won (not lost). */
       over: ({score = 0, win = false, text = '', goOn = false} = {}) => {
@@ -50,21 +53,25 @@ export function gamesApp(ctx) {
         el.innerHTML = `<div class="game-over-card"><strong>${record ? '新纪录！' : win ? '赢啦！' : '游戏结束'}</strong>${text ? `<p>${esc(text)}</p>` : ''}${score ? `<p class="game-over-score">${esc(scoreText(game, score))}</p>` : ''}<div class="actions">${goOn ? '<button type="button" class="secondary" data-action="game-go-on">接着玩</button>' : ''}<button type="button" class="primary" data-action="game-restart">再来一局</button></div></div>`;
         el.hidden = false;
         if (record) { const b = v.root.querySelector('[data-game-best]'); if (b) b.textContent = scoreText(game, score); }
+        best.keep(game.id, null);
       },
     }});
+    // A game that runs by itself waits for 继续 when it was left off.
+    if (saved && game.live) { paused = true; showPause('上一局还没玩完'); }
   }
-  function close() { play?.dispose?.(); play = null; game = null; paused = false; }
+  function close() { persist(); play?.dispose?.(); play = null; game = null; paused = false; }
   function restart() {
     if (!game) return;
     v.root.querySelector('[data-game-over]').hidden = true;
     paused = false;
     best.played(game.id);
     play?.restart();
+    persist();
   }
-  function showPause() {
+  function showPause(title = '已暂停') {
     const el = v.root.querySelector('[data-game-over]');
     if (!el || !el.hidden) return;
-    el.innerHTML = '<div class="game-over-card"><strong>已暂停</strong><button type="button" class="primary" data-action="game-go-on">继续</button></div>';
+    el.innerHTML = `<div class="game-over-card"><strong>${esc(title)}</strong><div class="actions">${title === '已暂停' ? '' : '<button type="button" class="secondary" data-action="game-restart">重新开始</button>'}<button type="button" class="primary" data-action="game-go-on">继续</button></div></div>`;
     el.hidden = false;
   }
 
@@ -80,7 +87,11 @@ export function gamesApp(ctx) {
   ctx.doc.addEventListener('keyup', e => { if (play && !paused) play.keyup?.(e); }, {signal: keys.signal});
 
   v.back = () => { if (!game) return false; close(); renderList(); return true; };
-  v.leave = () => { if (play?.pause && play.pause() !== false && game?.live) { paused = true; showPause(); } };
+  v.leave = () => { if (play?.pause && play.pause() !== false && game?.live) { paused = true; showPause(); } persist(); };
+  // After each move (a tap, a key) the game is kept, so a reload or another device-day goes on from here.
+  const later = () => ctx.win.setTimeout(persist, 0);
+  v.root.addEventListener('pointerup', later);
+  ctx.doc.addEventListener('keyup', e => { if (play && !paused && !e.target.closest?.('input, textarea')) later(); }, {signal: keys.signal});
   v.refresh = () => { if (!game) renderList(); };
   const dispose = v.dispose;
   v.dispose = () => { close(); keys.abort(); dispose(); };

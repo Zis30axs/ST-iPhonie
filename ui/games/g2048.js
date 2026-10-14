@@ -46,7 +46,7 @@ function addTile(board) {
 export default {
   id: '2048', name: '2048', icon: '2048', colors: ['#ffd27a', '#f08a3c'], note: '合出 2048',
   how: '滑动（或方向键）让方块一起移动，相同的数字撞在一起合成一个。',
-  make({doc, host, api}) {
+  make({doc, host, api, saved}) {
     let board, score, won, fresh = null;
     const el = doc.createElement('div');
     el.className = 'g2048';
@@ -71,9 +71,10 @@ export default {
       else if (!canMove(board)) api.over({score, text: '没地方走了'});
     }
     swipes(el, go);
-    restart();
+    if (saved?.board?.length === N) { board = saved.board; score = Number(saved.score) || 0; won = !!saved.won; draw(); } else restart();
     return {
       restart,
+      state: () => canMove(board) ? {board, score, won} : null,
       key(e) { const d = ARROWS[e.key]; if (!d) return false; go(d); return true; },
       dispose() { el.remove(); },
     };

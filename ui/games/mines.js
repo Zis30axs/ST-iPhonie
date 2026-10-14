@@ -34,7 +34,7 @@ export function openAt(grid, x, y) {
 export default {
   id: 'mines', name: '扫雷', icon: '💣', colors: ['#c9d3e3', '#6a7b99'], note: `${N}×${N}，${MINES} 个雷`, unit: '秒', lower: true,
   how: '点开格子；长按（电脑上右键）或打开「插旗」再点是插旗。数字旁的旗插够了，点数字能一次翻开周围。',
-  make({doc, win, host, api}) {
+  make({doc, win, host, api, saved}) {
     const el = doc.createElement('div');
     el.className = 'mines';
     el.style.setProperty('--n', N);
@@ -77,7 +77,8 @@ export default {
     el.addEventListener('contextmenu', e => { const at = cellOf(e); if (!at) return; e.preventDefault(); flag(...at); });
     host.addEventListener('click', e => { const b = e.target.closest('[data-mines=flag]'); if (!b) return; flagging = !flagging; b.setAttribute('aria-pressed', String(flagging)); });
     function restart() { win.clearInterval(clock); grid = null; started = 0; over = false; api.score(0); draw(); }
-    restart();
-    return {restart, dispose() { win.clearInterval(clock); host.innerHTML = ''; }};
+    // The game left off: its time goes on from where it was.
+    if (saved?.grid?.length === N) { grid = saved.grid; started = Date.now() - (Number(saved.elapsed) || 0); over = false; clock = win.setInterval(() => api.score(seconds()), 1000); api.score(seconds()); draw(); } else restart();
+    return {restart, state: () => over || !grid ? null : {grid, elapsed: Date.now() - started}, dispose() { win.clearInterval(clock); host.innerHTML = ''; }};
   },
 };

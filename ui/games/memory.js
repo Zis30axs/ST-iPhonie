@@ -7,7 +7,7 @@ const PAIRS = 8;
 export default {
   id: 'memory', name: '记忆翻牌', icon: '🃏', colors: ['#ffc4dc', '#e8679a'], note: '找出一对对', unit: '步', lower: true,
   how: '每次翻两张，一样的就留着；用最少的步数把牌全翻开。',
-  make({doc, win, host, api}) {
+  make({doc, win, host, api, saved}) {
     const el = doc.createElement('div');
     el.className = 'memory';
     host.append(el);
@@ -36,7 +36,8 @@ export default {
       cards = shuffle([...faces, ...faces]).map(face => ({face, up: false, done: false})); open = []; turns = 0;
       api.score(0); draw();
     }
-    restart();
-    return {restart, dispose() { win.clearTimeout(wait); el.remove(); }};
+    // The game left off: the pairs found stay open, the rest face down.
+    if (saved?.cards?.length === PAIRS * 2) { cards = saved.cards.map(c => ({face: c.face, done: !!c.done, up: false})); open = []; turns = Number(saved.turns) || 0; api.score(turns); draw(); } else restart();
+    return {restart, state: () => cards.every(c => c.done) ? null : {cards: cards.map(c => ({face: c.face, done: c.done})), turns}, dispose() { win.clearTimeout(wait); el.remove(); }};
   },
 };

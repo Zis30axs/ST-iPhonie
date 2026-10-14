@@ -25,7 +25,7 @@ export function shuffled(count = 200, random = rand) {
 export default {
   id: 'slide', name: '数字华容道', icon: '🧩', colors: ['#b8ecff', '#3aa6d6'], note: '1 到 15 排好', unit: '步', lower: true,
   how: '点空格旁边的数字（或滑动、方向键）把它推进空格，排成 1 到 15。',
-  make({doc, host, api}) {
+  make({doc, host, api, saved}) {
     const el = doc.createElement('div');
     el.className = 'slide';
     host.append(el);
@@ -47,7 +47,7 @@ export default {
     el.addEventListener('click', e => { const b = e.target.closest('[data-tile]'); if (b) push(Number(b.dataset.tile)); });
     swipes(el, go, {min: 30});
     function restart() { tiles = shuffled(); moves = 0; done = false; api.score(0); draw(); }
-    restart();
-    return {restart, key(e) { const d = ARROWS[e.key]; if (!d) return false; go(d); return true; }, dispose() { el.remove(); }};
+    if (saved?.tiles?.length === N * N) { tiles = saved.tiles; moves = Number(saved.moves) || 0; done = false; api.score(moves); draw(); } else restart();
+    return {restart, state: () => done ? null : {tiles, moves}, key(e) { const d = ARROWS[e.key]; if (!d) return false; go(d); return true; }, dispose() { el.remove(); }};
   },
 };
