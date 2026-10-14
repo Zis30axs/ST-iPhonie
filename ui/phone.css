@@ -1080,6 +1080,8 @@ button.moment-note{color:var(--accent-ink);text-decoration:underline;text-underl
 
 /* A group title keeps its words on one line; the buttons beside it sit together. */
 .group-title>span:first-child{white-space:nowrap}
+/* The ⓘ stays beside the title; what else the title row has goes to the right. */
+.group-title>span:first-child+.info{margin-right:auto}
 .group-title .title-tools{display:flex;gap:6px;flex-shrink:0}
 
 /* ---------- Chat app, QQ style ---------- */

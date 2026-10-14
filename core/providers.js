@@ -40,7 +40,6 @@ export function buildRequest(engine,connection,route,line,references=new Map()){
  // any other name is explained here instead of MiMo's English "Unknown voice".
  if(engine==='mimo'&&P.mimoMode(c.model)==='preset'&&route.voice?.trim()){const v=route.voice.trim();if(!P.vocab.MIMO_VOICES.some(([id])=>id===v)){if((c.params.samples||[]).some(x=>String(x.name).trim()===v))c.model=P.catalogs.mimo.models.find(m=>P.mimoMode(m)==='clone');else throw Error('小米 MiMo：「'+v+'」不是预置音色（预置音色有：'+P.vocab.MIMO_VOICES.map(([id])=>id).join('、')+'）。想用自己的声音，就在 MiMo 引擎的「克隆样本」里上传一段，名字填「'+v+'」；想用文字描述声音，就把这个角色的模型换成 voicedesign，音色里写描述。');}}
  P.normalize(engine,c);const error=P.validate(engine,c);if(error)throw Error(error);
- if(engine==='fish'&&c.model==='drama-3-preview')throw Error('这个模型尚未列入 Fish 兼容通道，请选择 S2 或 S1');
  if(engine==='mimo'&&!route.voice?.trim()){const mode=P.mimoMode(c.model);throw Error(mode==='design'?'请先在角色里填写音色描述':mode==='clone'?'请先在角色里填写克隆样本的名字':'请先选择角色音色');}
  if(!route.voice?.trim()&&!(engine==='fish'&&c.params.references.length)&&!(engine==='mini'&&c.params.timbre_weights.length))throw Error('请先选择角色音色');
  // The 情绪 field becomes the model's own opening tag (Fish, Eleven v3/v4) unless the text already starts with one.
