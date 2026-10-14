@@ -4,7 +4,8 @@
 // Works are kept as they change (ui/paint/store.js); 存到相册 puts a flat copy in the album.
 import {createView, esc, btn, help, menu, empty} from './common.js';
 import {saveFile} from '../download.js';
-import {allBrushes, userBrushes, saveUserBrushes, cleanBrush, BRUSHES, FIELDS, tipMask, coloredTip, maskFromImage} from './paint/brushes.js';
+import {allBrushes, userBrushes, saveUserBrushes, cleanBrush, BRUSHES, FIELDS, tipMask, coloredTip} from './paint/brushes.js';
+import {importBrushFile} from './paint/brush-import.js';
 import {createPicture, undo, redo, flatten, stampOf, layerInfo, floodFill, setSelection, invertSelection, clearSelected, copySelected, startTransform, commitTransform, cancelTransform} from './paint/engine.js';
 import {layersPanel} from './paint/layers-panel.js';
 import {createStage} from './paint/stage.js';
@@ -274,8 +275,9 @@ export function paintApp(ctx) {
     const d = ctx.dialog(kind === 'eraser' ? '橡皮用的笔刷' : kind === 'smudge' ? '涂抹用的笔刷' : '笔刷库', '');
     const paint = () => {
       const list = allBrushes(ctx.win), mine = tools[kindOf(kind)].id, groups = [...new Set(list.map(b => b.group))];
-      d.body.innerHTML = `<div class="actions paint-brush-tools"><label class="chip-button file-button">导入笔刷图片<input type="file" accept="image/png,image/jpeg,image/webp" data-brush-file></label>${help('用一张图片做笔尖：透明的 PNG 用它自己的形状，没有透明的图片里越黑的地方颜料越多（和 Photoshop、Procreate 的笔尖一样）。导入后可以在「调整」里改间距、硬度、压力这些。\n\nPhotoshop（.abr）和 Procreate（.brushset）笔刷文件的导入正在做。')}</div>`
-        + groups.map(gname => `<p class="group-title"><span>${esc(gname)}</span></p><div class="pick-list">${list.filter(b => b.group === gname).map(b => `<div class="list-row paint-brush-row${b.id === mine ? ' on' : ''}"><button type="button" class="paint-brush-pick" data-brush="${esc(b.id)}"><strong>${esc(b.name)}</strong><canvas width="220" height="44" data-brush-preview="${esc(b.id)}"></canvas></button>${btn('brush-edit', '调整', 'chip-button', `data-id="${esc(b.id)}"`)}</div>`).join('')}</div>`).join('');
+      const builtGroups = new Set(BRUSHES.map(b => b.group));
+      d.body.innerHTML = `<div class="actions paint-brush-tools"><label class="chip-button file-button">导入笔刷<input type="file" accept=".brushset,.brush,.abr,.sut,image/png,image/jpeg,image/webp" data-brush-file></label>${help('能导入：\n· Procreate 的笔刷（.brushset 一整套，或 .brush 一支）：笔尖形状、名字，还有间距、散布、压力、防抖这些对得上的设置；\n· Photoshop 的笔刷（.abr）：里面的取样笔尖（只有参数、没有图片的笔刷读不出来）；\n· 一张图片：透明 PNG 用它的形状，没有透明的图越黑颜料越多。\n\n纹理（颗粒）、双重笔刷这些还没有，导进来的是笔尖形状。CSP 的 .sut 还读不了。导入后可以在「调整」里改。一组最多 80 支，存在这个浏览器里。')}</div>`
+        + groups.map(gname => `<p class="group-title"><span>${esc(gname)}</span>${builtGroups.has(gname) ? '' : btn('brush-group-delete', '删除这组', 'chip-button', `data-group="${esc(gname)}"`)}</p><div class="pick-list">${list.filter(b => b.group === gname).map(b => `<div class="list-row paint-brush-row${b.id === mine ? ' on' : ''}"><button type="button" class="paint-brush-pick" data-brush="${esc(b.id)}"><strong>${esc(b.name)}</strong><canvas width="220" height="44" data-brush-preview="${esc(b.id)}"></canvas></button>${btn('brush-edit', '调整', 'chip-button', `data-id="${esc(b.id)}"`)}</div>`).join('')}</div>`).join('');
       for (const c of d.body.querySelectorAll('[data-brush-preview]')) preview(c, list.find(b => b.id === c.dataset.brushPreview));
     };
     paint();
@@ -284,17 +286,26 @@ export function paintApp(ctx) {
       if (b) { const brush = brushOf(b.dataset.brush), t = tools[kindOf(kind)]; t.id = brush.id; t.size = Math.round(brush.size); t.opacity = kind === 'smudge' ? .6 : 1; tools.kind = kind; keepTools(); tipMask(ctx.doc, brush).onready = () => stage?.render(); d.close(); syncTools(); return; }
       const edit = e.target.closest('[data-action=brush-edit]');
       if (edit) { d.close(); studio(edit.dataset.id, kind); }
+      const group = e.target.closest('[data-action=brush-group-delete]')?.dataset.group;
+      if (group) ctx.win.Promise.resolve(ctx.confirm(`删除「${group}」这组笔刷？`, '画好的画不受影响。')).then(ok => {
+        if (!ok) return brushSheet(kind);
+        const gone = new Set(userBrushes(ctx.win).filter(b => b.group === group).map(b => b.id));
+        saveUserBrushes(ctx.win, userBrushes(ctx.win).filter(b => !gone.has(b.id)));
+        for (const t of [tools.brush, tools.eraser, tools.smudge]) if (gone.has(t.id)) t.id = 'round';
+        keepTools(); brushSheet(kind);
+      });
     });
     d.body.addEventListener('change', async e => {
       const file = e.target.closest('[data-brush-file]')?.files?.[0];
       if (!file) return;
+      e.target.value = '';
       try {
-        const img = await ctx.win.createImageBitmap(file), tip = maskFromImage(ctx.doc, img);
-        const brush = cleanBrush({id: 'u' + Date.now().toString(36), name: file.name.replace(/\.[^.]+$/, '').slice(0, 20) || '导入的笔刷', group: '导入', size: 60, opacity: 1, flow: .8, spacing: .15, hardness: 1, pressureSize: .5, pressureOpacity: .3, streamline: .2, jitter: 0, tip, source: file.name});
-        if (!saveUserBrushes(ctx.win, [...userBrushes(ctx.win), brush])) throw Error('这个浏览器存不下更多笔刷了');
-        ctx.notify(`导入了笔刷「${brush.name}」`);
+        ctx.notify('正在读笔刷……');
+        const brushes = await importBrushFile(ctx.doc, ctx.win, file);
+        if (!saveUserBrushes(ctx.win, [...userBrushes(ctx.win), ...brushes])) throw Error('这个浏览器存不下这么多笔刷了，先删掉一些导入的');
+        ctx.notify(brushes.length > 1 ? `导入了 ${brushes.length} 支笔刷（「${brushes[0].group}」）` : `导入了笔刷「${brushes[0].name}」`);
         paint();
-      } catch (error) { ctx.notify('这张图片做不了笔刷：' + error.message, {error: true}); }
+      } catch (error) { ctx.notify('没导入：' + error.message, {error: true}); }
     });
   }
   /** 笔刷工作室: every setting of a brush, with a stroke to try it on; built-in ones can go back to how they were. */
