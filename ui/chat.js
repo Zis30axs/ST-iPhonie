@@ -1146,8 +1146,8 @@ export function chatApp(ctx) {
       <button class="list-row" data-menu="memory">${icon('book')}<span><strong>记忆</strong><small>更早的聊天整理成的摘要和总结，可以改</small></span></button>
       <button class="list-row" data-menu="voice-text">${icon('book')}<span><strong>语音消息</strong><small>转文字显示什么、要不要自动转</small></span></button>
       <button class="list-row" data-menu="pace">${icon('chat')}<span><strong>逐条显示回复：${api.getState().chat.pace !== false ? '开' : '关'}</strong><small>对方的消息像真人打字一样一条条出来；关掉就一次全显示</small></span></button>
-      <button class="list-row" data-menu="clear">${icon('trash')}<span><strong>清空聊天记录</strong></span></button>
-      <button class="list-row" data-menu="delete">${icon('close')}<span><strong>删除这段聊天</strong></span></button></div>`);
+      ${group ? `<button class="list-row" data-menu="clear">${icon('trash')}<span><strong>清空聊天记录</strong></span></button>
+      <button class="list-row danger-row" data-menu="delete">${icon('close')}<span><strong>删除这个群聊</strong></span></button>` : ''}</div>`);
     d.body.addEventListener('click', e => {
       const action = e.target.closest('[data-menu]')?.dataset.menu;
       if (!action) return;
