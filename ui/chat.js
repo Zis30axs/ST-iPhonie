@@ -1490,6 +1490,8 @@ export function chatApp(ctx) {
   };
   v.onPlayback = () => { if (mode === 'thread') paintVoices(); };
   v.onMoments = () => { if (mode === 'list') render(); };
+  /** 动态, from the tavern page's 动态小窗. */
+  v.showMoments = () => { mode = 'list'; tab = 'moments'; threadId = null; search = ''; moments.only(''); v.root.scrollTop = 0; render(); };
   const dispose = v.dispose;
   v.dispose = () => { ctx.win.clearTimeout(pace.timer); moments.dispose(); for (const url of photoURLs.values()) if (url) ctx.win.URL.revokeObjectURL(url); photoURLs.clear(); dispose(); };
   render();

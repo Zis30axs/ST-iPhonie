@@ -162,6 +162,12 @@
 @media (prefers-reduced-motion:reduce){.sttts-call-island,.sttts-call-island .ci-wave.on i,.sttts-call-island .ci-dot{animation:none!important}}
 /* 消息小窗 (msg-island.js): the call island's look, for a message that came while the phone was away. */
 .sttts-call-island .ci-close{background:rgba(255,255,255,.16)}
+/* 动态小窗 (note-island.js): one line of 朋友圈 news; the whole head is a button that opens 动态. */
+.sttts-note-island{flex-direction:row;align-items:center;border-radius:30px;animation:sttts-ci-in .32s cubic-bezier(.2,1.2,.4,1)}
+.sttts-note-island .ni-open{flex:1;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.sttts-note-island .ci-text b em{font-style:normal;font-weight:500;color:rgba(255,255,255,.55)}
+.sttts-note-island .ci-text small{color:rgba(255,255,255,.8)}
+.sttts-note-island .ni-more{flex-shrink:0;padding:2px 7px;border-radius:10px;background:rgba(255,255,255,.16);font-size:11px;font-weight:700}
 .sttts-call-island .ci-close svg{width:16px;height:16px}
 .sttts-msg-island .ci-text small{color:rgba(255,255,255,.6)}
 .sttts-msg-island .mi-from{font-weight:800;color:#64d2ff}

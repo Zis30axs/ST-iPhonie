@@ -902,13 +902,16 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   win.stTtsOpenRole = id => open('roles', id);
   const previousOpenApp = win.stTtsOpenApp;
   /** An App the tavern page asked for (the music island's double tap): taken when the phone shows, or right away. */
-  function takeApp() {
-    const name = api.takeApp?.();
-    if (!name || !FACTORIES[name]) return false;
+  // 'chat:moments': the chat app on 动态 (the 动态小窗's tap).
+  function openPart(value) {
+    const [name, part] = String(value || '').split(':');
+    if (!FACTORIES[name]) return false;
     open(name);
+    if (part === 'moments') views.get('chat')?.showMoments?.();
     return true;
   }
-  win.stTtsOpenApp = name => run(() => name && FACTORIES[name] ? open(name) : takeApp());
+  function takeApp() { return openPart(api.takeApp?.()); }
+  win.stTtsOpenApp = name => run(() => name && openPart(name) || takeApp());
   function takeDraw() {
     const request = api.takeDraw?.();
     if (!request) return false;
