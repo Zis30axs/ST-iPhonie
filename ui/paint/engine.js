@@ -4,7 +4,9 @@
 // opacity however often it crosses itself, as on Procreate. Undo keeps the pixels a change touched, before and after.
 // Layers, as on Procreate: a blend mode (正片叠底…), 剪辑蒙版 (shown only where the layer below it has paint),
 // 阿尔法锁定 (paint only where there is paint already), 锁定 (no changes), 参考 (what 油漆桶 looks at).
-import {coloredTip} from './brushes.js';
+// 涂抹 pushes the paint of the layer along the stroke. A 选区 keeps strokes, fills and smudges inside it; 变形 lifts
+// what is selected (or the whole layer) off it, to move, turn, scale and flip, and puts it back.
+import {coloredTip, tipMask} from './brushes.js';
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 let ids = 0;
@@ -72,17 +74,47 @@ const pixelsOf = (pic, layer, box = [0, 0, pic.width, pic.height]) => layer.g.ge
 function pixelStep(pic, layer, box, before) { return {kind: 'pixels', layer: layer.id, x: box[0], y: box[1], before, after: layer.g.getImageData(...box), pixels: box[2] * box[3] * 2}; }
 
 // ---------- strokes ----------
-/** Starts a stroke: brush, size (px), color ('#rrggbb'), erase. The first point stamps at once. False on a locked layer. */
-export function beginStroke(pic, {brush, size, color, erase = false}, point) {
+/**
+ * Starts a stroke: brush, size (px), color ('#rrggbb'), erase, or smudge (the brush's tip pushes the layer's paint;
+ * its opacity is how hard). The first point stamps at once. False on a locked layer or while something is lifted.
+ */
+export function beginStroke(pic, {brush, size, color, erase = false, smudge = false}, point) {
   const layer = activeLayer(pic);
-  if (layer.locked) return false;
-  pic.buffer.g?.clearRect(0, 0, pic.width, pic.height);
-  pic.stroke = {brush, size, erase, layer, tip: coloredTip(pic.doc, brush, erase ? '#000000' : color), last: point, carry: 0, box: null};
+  if (layer.locked || pic.float || !layer.g) return false;
+  if (smudge) {
+    const C = Math.max(2, Math.ceil(size));
+    pic.stroke = {smudge: true, brush, size, layer, mask: tipMask(pic.doc, brush).canvas, held: canvasOf(pic.doc, C, C), piece: canvasOf(pic.doc, C, C), C, before: pixelsOf(pic, layer), last: point, carry: 0, box: null, started: false};
+    layer.g.save(); clipSelection(layer.g, pic);
+  } else {
+    pic.buffer.g?.clearRect(0, 0, pic.width, pic.height);
+    pic.stroke = {brush, size, erase, layer, tip: coloredTip(pic.doc, brush, erase ? '#000000' : color), last: point, carry: 0, box: null};
+    pic.buffer.g?.save(); if (pic.buffer.g) clipSelection(pic.buffer.g, pic);
+  }
   stamp(pic, point);
   return true;
 }
+/** 涂抹: what the tip holds goes down here, and it takes up some of what is here. */
+function smudgeStamp(pic, x, y, size, strength) {
+  const s = pic.stroke, C = s.C, L = s.layer.g, held = s.held.g, piece = s.piece.g;
+  if (!held || !piece) return;
+  if (!s.started) { held.globalCompositeOperation = 'copy'; held.drawImage(s.layer.canvas, x - C / 2, y - C / 2, C, C, 0, 0, C, C); s.started = true; return; }
+  piece.globalCompositeOperation = 'copy'; piece.drawImage(s.held.canvas, 0, 0);
+  piece.globalCompositeOperation = 'destination-in'; piece.drawImage(s.mask, 0, 0, C, C);
+  L.globalAlpha = clamp(strength, 0, 1); L.globalCompositeOperation = s.layer.alphaLock ? 'source-atop' : 'source-over';
+  L.drawImage(s.piece.canvas, x - size / 2, y - size / 2, size, size);
+  L.globalAlpha = 1; L.globalCompositeOperation = 'source-over';
+  held.globalCompositeOperation = 'source-over'; held.globalAlpha = .28;
+  held.drawImage(s.layer.canvas, x - C / 2, y - C / 2, C, C, 0, 0, C, C);
+  held.globalAlpha = 1;
+}
 function stamp(pic, {x, y, p}) {
   const s = pic.stroke, {size, alpha} = stampOf(s.brush, s.size, p), g = pic.buffer.g;
+  if (s.smudge) {
+    smudgeStamp(pic, x, y, size, s.brush.opacity * (alpha / Math.max(.01, s.brush.flow)));
+    const r = size / 2 + 2, box = [Math.floor(x - r), Math.floor(y - r), Math.ceil(x + r), Math.ceil(y + r)];
+    s.box = s.box ? [Math.min(s.box[0], box[0]), Math.min(s.box[1], box[1]), Math.max(s.box[2], box[2]), Math.max(s.box[3], box[3])] : box;
+    return;
+  }
   const jitter = s.brush.jitter * size;
   const cx = x + (jitter ? (Math.random() - .5) * 2 * jitter : 0), cy = y + (jitter ? (Math.random() - .5) * 2 * jitter : 0);
   if (g) { g.globalAlpha = clamp(alpha, 0, 1); g.drawImage(s.tip, cx - size / 2, cy - size / 2, size, size); }
@@ -105,6 +137,15 @@ const strokeMode = s => s.erase ? 'destination-out' : s.layer.alphaLock ? 'sourc
 export function endStroke(pic, {cancel = false} = {}) {
   const s = pic.stroke;
   pic.stroke = null;
+  if (s?.smudge) {
+    s.layer.g.restore();
+    if (cancel || !s.box) { s.layer.g.putImageData(s.before, 0, 0); return false; }
+    const box = boxIn(pic, s.box);
+    if (!box[2] || !box[3]) return false;
+    remember(pic, pixelStep(pic, s.layer, box, cropData(pic.doc, s.before, box)));
+    return true;
+  }
+  pic.buffer.g?.restore();
   if (!s || cancel || !s.box) { pic.buffer.g?.clearRect(0, 0, pic.width, pic.height); return false; }
   const box = boxIn(pic, s.box), g = s.layer.g;
   if (!box[2] || !box[3] || !g) return false;
@@ -223,8 +264,15 @@ export function mergeDown(pic, id) {
 // ---------- seeing it ----------
 /** What a layer shows now: itself, or itself with the stroke being drawn on it. */
 function content(pic, l, n) {
-  const s = pic.stroke;
-  if (!s || s.layer !== l) return l.canvas;
+  const s = pic.stroke, f = pic.float;
+  if (f && f.layer === l) {
+    const t = temp(pic, n);
+    if (!t.g) return l.canvas;
+    t.g.globalCompositeOperation = 'copy'; t.g.globalAlpha = 1; t.g.drawImage(l.canvas, 0, 0);
+    t.g.globalCompositeOperation = 'source-over'; drawFloat(t.g, f);
+    return t.canvas;
+  }
+  if (!s || s.layer !== l || s.smudge) return l.canvas;
   const t = temp(pic, n);
   if (!t.g) return l.canvas;
   t.g.globalCompositeOperation = 'copy'; t.g.globalAlpha = 1; t.g.drawImage(l.canvas, 0, 0);
@@ -292,3 +340,169 @@ export function colorAt(pic, x, y) {
   if (!a) return '';
   return '#' + [r, gg, b].map(n => n.toString(16).padStart(2, '0')).join('');
 }
+
+/** A piece of an ImageData. */
+function cropData(doc, data, [x, y, w, h]) {
+  const Data = doc.defaultView?.ImageData || globalThis.ImageData, out = Data ? new Data(w, h) : {data: new Uint8ClampedArray(w * h * 4), width: w, height: h};
+  for (let row = 0; row < h; row++) out.data.set(data.data.subarray(((y + row) * data.width + x) * 4, ((y + row) * data.width + x + w) * 4), row * w * 4);
+  return out;
+}
+
+// ---------- 选区 ----------
+/** Selects inside the outline `points` ([[x, y]…], picture px); null, or too small an outline, selects nothing. */
+export function setSelection(pic, points, {inverted = false} = {}) {
+  const list = (points || []).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  let area = 0;
+  for (let i = 0; i < list.length; i++) { const [a, b] = list[i], [c, d] = list[(i + 1) % list.length]; area += a * d - c * b; }
+  pic.selection = list.length > 2 && Math.abs(area) / 2 > 9 ? {points: list, inverted} : null;
+  return pic.selection;
+}
+export const invertSelection = pic => { if (pic.selection) pic.selection = {...pic.selection, inverted: !pic.selection.inverted}; return pic.selection; };
+export function tracePath(g, points) { g.beginPath(); points.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); }
+/** Keeps what g draws inside the selection (or outside it, inverted). */
+export function clipSelection(g, pic) {
+  const sel = pic.selection;
+  if (!sel) return;
+  tracePath(g, sel.points);
+  if (sel.inverted) { g.rect(0, 0, pic.width, pic.height); g.clip('evenodd'); } else g.clip();
+}
+/** The box [x, y, w, h] around the selection, inside the picture (the whole picture when inverted). */
+export function selectionBox(pic) {
+  const sel = pic.selection;
+  if (!sel || sel.inverted) return [0, 0, pic.width, pic.height];
+  const xs = sel.points.map(p => p[0]), ys = sel.points.map(p => p[1]);
+  return boxIn(pic, [Math.floor(Math.min(...xs)), Math.floor(Math.min(...ys)), Math.ceil(Math.max(...xs)), Math.ceil(Math.max(...ys))]);
+}
+/** Empties what is selected on the layer in use (undoable). */
+export function clearSelected(pic) {
+  const layer = activeLayer(pic);
+  if (!pic.selection || !layer.g || layer.locked) return false;
+  const box = selectionBox(pic), before = pixelsOf(pic, layer, box);
+  layer.g.save(); clipSelection(layer.g, pic); layer.g.clearRect(...box); layer.g.restore();
+  remember(pic, pixelStep(pic, layer, box, before));
+  return true;
+}
+/** What is selected on the layer in use, as a new layer above it (拷贝并粘贴). */
+export function copySelected(pic) {
+  const from = activeLayer(pic);
+  if (!pic.selection || !from.g) return null;
+  const at = pic.layers.indexOf(from) + 1, layer = insertLayer(pic, at, {name: `${from.name} 片段`});
+  if (layer.g) { layer.g.save(); clipSelection(layer.g, pic); layer.g.drawImage(from.canvas, 0, 0); layer.g.restore(); }
+  remember(pic, {kind: 'layer', layer, index: at, added: true, pixels: pic.width * pic.height});
+  return layer;
+}
+
+// ---------- 油漆桶 ----------
+/**
+ * Fills from (x, y) with a colour: the area of about the same colour as there (threshold 0–1), as the 参考 layer
+ * shows it when there is one, else the whole picture (sample 'all') or the layer in use. Inside the selection; with
+ * 阿尔法锁定 only over paint. Undoable; false when nothing was filled.
+ */
+export function floodFill(pic, x, y, color, {threshold = .12, sample = 'layer', opacity = 1} = {}) {
+  const layer = activeLayer(pic), W = pic.width, H = pic.height;
+  x = Math.floor(x); y = Math.floor(y);
+  if (layer.locked || !layer.g || pic.float || x < 0 || y < 0 || x >= W || y >= H) return false;
+  const ref = pic.layers.find(l => l.reference && l.visible);
+  const source = ref ? ref.canvas : sample === 'all' ? flatten(pic) : layer.canvas;
+  const src = source.getContext('2d').getImageData(0, 0, W, H).data, at = (y * W + x) * 4;
+  const seed = [src[at], src[at + 1], src[at + 2], src[at + 3]], limit = Math.round(clamp(threshold, 0, 1) * 255);
+  const same = i => {
+    const a = src[i + 3];
+    // Clear meets clear whatever its colour; otherwise every channel close enough.
+    if (!a && !seed[3]) return true;
+    return Math.abs(a - seed[3]) <= limit && Math.abs(src[i] - seed[0]) <= limit && Math.abs(src[i + 1] - seed[1]) <= limit && Math.abs(src[i + 2] - seed[2]) <= limit;
+  };
+  const mask = new Uint8Array(W * H), stack = [[x, y]];
+  let minX = x, maxX = x, minY = y, maxY = y;
+  while (stack.length) {
+    const [sx, sy] = stack.pop();
+    let lx = sx;
+    while (lx > 0 && !mask[sy * W + lx - 1] && same((sy * W + lx - 1) * 4)) lx--;
+    let rx = sx;
+    while (rx < W - 1 && !mask[sy * W + rx + 1] && same((sy * W + rx + 1) * 4)) rx++;
+    if (mask[sy * W + sx] || !same((sy * W + sx) * 4)) continue;
+    for (let i = lx; i <= rx; i++) mask[sy * W + i] = 1;
+    minX = Math.min(minX, lx); maxX = Math.max(maxX, rx); minY = Math.min(minY, sy); maxY = Math.max(maxY, sy);
+    for (const ny of [sy - 1, sy + 1]) {
+      if (ny < 0 || ny >= H) continue;
+      let inside = false;
+      for (let i = lx; i <= rx; i++) {
+        const ok = !mask[ny * W + i] && same((ny * W + i) * 4);
+        if (ok && !inside) stack.push([i, ny]);
+        inside = ok;
+      }
+    }
+  }
+  // One pixel more all round, so no light seam stays along soft line edges.
+  const x0 = Math.max(0, minX - 1), y0 = Math.max(0, minY - 1), w = Math.min(W, maxX + 2) - x0, h = Math.min(H, maxY + 2) - y0;
+  const [r, gr, b] = [1, 3, 5].map(i => parseInt(color.slice(i, i + 2), 16));
+  const piece = canvasOf(pic.doc, w, h), data = piece.g?.createImageData(w, h);
+  if (!data) return false;
+  for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+    const X = x0 + xx, Y = y0 + yy;
+    let on = mask[Y * W + X];
+    if (!on) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = X + dx, c = Y + dy; if (a >= 0 && c >= 0 && a < W && c < H && mask[c * W + a]) { on = 1; break; } }
+    if (!on) continue;
+    const i = (yy * w + xx) * 4;
+    data.data[i] = r; data.data[i + 1] = gr; data.data[i + 2] = b; data.data[i + 3] = 255;
+  }
+  piece.g.putImageData(data, 0, 0);
+  const box = [x0, y0, w, h], before = pixelsOf(pic, layer, box), g = layer.g;
+  g.save(); clipSelection(g, pic); g.globalAlpha = clamp(opacity, 0, 1); g.globalCompositeOperation = layer.alphaLock ? 'source-atop' : 'source-over';
+  g.drawImage(piece.canvas, x0, y0); g.restore();
+  remember(pic, pixelStep(pic, layer, box, before));
+  return true;
+}
+
+// ---------- 变形 ----------
+/** Draws a lifted piece where it is now: around its middle, turned, scaled and flipped. */
+export function drawFloat(g, f) {
+  const t = f.t;
+  g.save(); g.translate(t.cx, t.cy); g.rotate(t.angle); g.scale(t.sx, t.sy);
+  g.imageSmoothingEnabled = true;
+  g.drawImage(f.canvas, -f.box[2] / 2, -f.box[3] / 2);
+  g.restore();
+}
+/** The corners of a lifted piece where it is now (picture px), clockwise from the top left. */
+export function floatCorners(f) {
+  const t = f.t, cos = Math.cos(t.angle), sin = Math.sin(t.angle), w = f.box[2] / 2, h = f.box[3] / 2;
+  return [[-w, -h], [w, -h], [w, h], [-w, h]].map(([x, y]) => [t.cx + (x * t.sx) * cos - (y * t.sy) * sin, t.cy + (x * t.sx) * sin + (y * t.sy) * cos]);
+}
+/** Where there is paint on a layer: [x, y, w, h], or null when it is empty. */
+function paintBox(pic, layer) {
+  const d = pixelsOf(pic, layer).data, W = pic.width;
+  let x0 = W, y0 = pic.height, x1 = -1, y1 = -1;
+  for (let i = 3, p = 0; i < d.length; i += 4, p++) if (d[i]) { const x = p % W, y = (p - x) / W; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 < 0 ? null : [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
+}
+/** Lifts what is selected (or all that is painted) off the layer in use, to be moved; null when there is nothing. */
+export function startTransform(pic) {
+  const layer = activeLayer(pic);
+  if (pic.float || layer.locked || !layer.g) return null;
+  const box = pic.selection ? selectionBox(pic) : paintBox(pic, layer);
+  if (!box || !box[2] || !box[3]) return null;
+  const before = pixelsOf(pic, layer), piece = canvasOf(pic.doc, box[2], box[3]);
+  if (piece.g) {
+    piece.g.translate(-box[0], -box[1]);
+    if (pic.selection) clipSelection(piece.g, pic);
+    piece.g.drawImage(layer.canvas, 0, 0);
+  }
+  layer.g.save(); clipSelection(layer.g, pic); layer.g.clearRect(...box); layer.g.restore();
+  pic.float = {layer, canvas: piece.canvas, box, before, t: {cx: box[0] + box[2] / 2, cy: box[1] + box[3] / 2, sx: 1, sy: 1, angle: 0}};
+  return pic.float;
+}
+/** Puts the lifted piece down where it is (undoable); the selection goes with it. */
+export function commitTransform(pic) {
+  const f = pic.float;
+  if (!f) return false;
+  pic.float = null;
+  drawFloat(f.layer.g, f);
+  remember(pic, pixelStep(pic, f.layer, [0, 0, pic.width, pic.height], f.before));
+  if (pic.selection && !pic.selection.inverted) {
+    const t = f.t, cos = Math.cos(t.angle), sin = Math.sin(t.angle), mx = f.box[0] + f.box[2] / 2, my = f.box[1] + f.box[3] / 2;
+    pic.selection = {...pic.selection, points: pic.selection.points.map(([x, y]) => { const dx = (x - mx) * t.sx, dy = (y - my) * t.sy; return [t.cx + dx * cos - dy * sin, t.cy + dx * sin + dy * cos]; })};
+  }
+  return true;
+}
+/** Puts the piece back where it was, unchanged. */
+export function cancelTransform(pic) { const f = pic.float; if (!f) return false; pic.float = null; f.layer.g.putImageData(f.before, 0, 0); return true; }

@@ -2459,3 +2459,21 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .pl-options button:disabled{opacity:.4}
 .pl-bg{background:none}
 .pl-bg .pl-main input[type=color]{width:44px;height:44px;padding:0;border:0;border-radius:8px;background:none;flex:none}
+/* 画画: the eyedropper on the side, the bar for 选区 and 变形, the colour dot dragged out as 油漆桶 */
+.paint-top{gap:2px;padding:6px 4px;overflow-x:auto;scrollbar-width:none}
+.paint-top::-webkit-scrollbar{display:none}
+.paint-top .paint-tool{width:34px;height:36px;flex:none}
+.paint-swatch{flex:none;touch-action:none;cursor:grab}
+.paint-pick{width:26px;height:26px;border-radius:7px;box-shadow:0 0 0 2px var(--card),0 0 0 3.5px color-mix(in srgb,var(--ink) 30%,transparent)}
+.paint-pick[aria-pressed=true]{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--accent)}
+.paint-bar{display:flex;align-items:center;gap:6px;padding:8px;overflow-x:auto;scrollbar-width:none;background:color-mix(in srgb,var(--card) 92%,transparent);box-shadow:0 -1px 0 color-mix(in srgb,var(--ink) 10%,transparent);z-index:2}
+.paint-bar[hidden]{display:none}
+.paint-bar::-webkit-scrollbar{display:none}
+.paint-bar>*{flex:none}
+.paint-bar .chip-button{min-height:34px;padding:0 12px;font-size:12.5px}
+.paint-bar .primary{min-height:34px;padding:0 16px;font-size:13px}
+.paint-shape{margin:0}
+.paint-shape button{min-height:30px;padding:0 10px;font-size:12.5px}
+.paint-drop{position:absolute;left:0;top:0;z-index:5;width:32px;height:32px;border-radius:50%;pointer-events:none;box-shadow:0 0 0 3px #fff,0 6px 16px rgba(0,0,0,.35)}
+.paint-fill-set{display:flex;flex-direction:column;gap:8px;width:100%;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--ink) 10%,transparent)}
+.paint-fill-set .segmented button{font-size:12.5px}

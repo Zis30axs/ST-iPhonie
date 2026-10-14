@@ -1,12 +1,14 @@
 // 画画的画面: shows the picture turned, moved and zoomed, and turns pens, fingers and the mouse into strokes and
 // gestures, as on Procreate:
-// - a pen, a finger or the mouse draws; once a pen has been seen, fingers no longer draw (the palm can rest);
+// - a pen, a finger or the mouse draws (画笔, 橡皮, 涂抹); once a pen has been seen, fingers no longer draw;
 // - two fingers pinch, turn and move the picture; a quick two-finger tap undoes, three fingers redo;
 // - holding still for a moment picks the colour under the point;
+// - 选区: drag a box, or draw round what to select; 变形: drag to move, the corners to scale, the dot above to turn,
+//   two fingers to scale and turn;
 // - on a computer: the wheel zooms where the pointer is, space or the middle button drags the picture.
-import {beginStroke, extendStroke, endStroke, compose, colorAt, steady} from './engine.js';
+import {beginStroke, extendStroke, endStroke, compose, colorAt, steady, tracePath, floatCorners} from './engine.js';
 
-const HOLD = 480, TAP = 280;
+const HOLD = 480, TAP = 280, HANDLE = 24;
 /** The view's turn, place and zoom: picture point → screen point, and back. */
 export function viewMath(t) {
   const cos = Math.cos(t.angle), sin = Math.sin(t.angle);
@@ -22,10 +24,12 @@ export function fitView(pic, w, h) {
 }
 
 /**
- * host: the element the canvas fills. tool(): {kind: 'brush'|'eraser'|'pick', brush, size, opacity, color}.
- * picked(color): the eyedropper found a colour. stroked(): a stroke went onto the picture. undo(), redo().
+ * host: the element the canvas fills. tool(): {kind: 'brush'|'eraser'|'smudge'|'pick'|'fill'|'select'|'transform',
+ * brush, size, opacity, color, shape ('rect'|'lasso' for 选区)}. picked(color): the eyedropper found a colour.
+ * stroked(): the picture changed. filled(point): 油漆桶 at a point. selected(points): an outline was drawn.
+ * undo(), redo(), locked(): a stroke on a locked layer.
  */
-export function createStage({doc, win, host, pic, tool, picked, stroked, undo, redo, locked = () => {}}) {
+export function createStage({doc, win, host, pic, tool, picked, stroked, filled = () => {}, selected = () => {}, undo, redo, locked = () => {}}) {
   const canvas = doc.createElement('canvas');
   canvas.className = 'paint-view';
   canvas.style.touchAction = 'none';
@@ -33,7 +37,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
   const g = canvas.getContext('2d');
   let w = 0, h = 0, ratio = 1, view = null, raf = 0, penSeen = false, spaceDown = false, flipped = false;
   const pointers = new Map();
-  let drawing = null, gesture = null, panning = null, taps = null;
+  let drawing = null, gesture = null, panning = null, taps = null, outline = null, moving = null;
 
   function size() {
     const r = host.getBoundingClientRect();
@@ -44,14 +48,17 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
     if (!view) view = fitView(pic, w, h);
     render();
   }
+  // Picture px ⇄ screen px, with 左右翻转画面.
+  const toScreen = (x, y) => viewMath(view).toScreen(flipped ? pic.width - x : x, y);
+  const toPicture = (x, y) => { const p = viewMath(view).toPicture(x, y); return {x: flipped ? pic.width - p.x : p.x, y: p.y}; };
   function render() {
     win.cancelAnimationFrame(raf); raf = 0;
     if (!g) return;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, canvas.width, canvas.height);
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
+    g.save();
     g.translate(view.x, view.y); g.rotate(view.angle); g.scale(view.scale, view.scale);
-    // 左右翻转画面: only how it is seen.
     if (flipped) { g.translate(pic.width, 0); g.scale(-1, 1); }
     g.shadowColor = 'rgba(0,0,0,.25)'; g.shadowBlur = 18 / view.scale;
     g.fillStyle = '#fff'; g.fillRect(0, 0, pic.width, pic.height);
@@ -59,6 +66,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
     if (!pic.showBackground) checker();
     g.imageSmoothingEnabled = view.scale < 2;
     compose(pic, g);
+    g.restore();
+    overlays();
   }
   // Behind a picture without its background: a light chequer, so what is see-through shows.
   function checker() {
@@ -66,24 +75,61 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
     g.fillStyle = '#e6e6ea';
     for (let y = 0; y < pic.height; y += cell) for (let x = (Math.floor(y / cell) % 2) * cell; x < pic.width; x += cell * 2) g.fillRect(x, y, Math.min(cell, pic.width - x), Math.min(cell, pic.height - y));
   }
+  // On top, in screen px: the selection's dashed outline, the one being drawn, and the 变形 box with its handles.
+  function ants(points) {
+    const s = points.map(([x, y]) => toScreen(x, y));
+    g.save(); g.lineWidth = 1.5;
+    for (const [color, offset] of [['#fff', 0], ['#222', 5]]) { g.strokeStyle = color; g.setLineDash([5, 5]); g.lineDashOffset = offset; tracePath(g, s.map(p => [p.x, p.y])); g.stroke(); }
+    g.restore();
+  }
+  function overlays() {
+    if (pic.selection && !pic.float) ants(pic.selection.points);
+    if (outline?.points.length > 1) ants(outline.points);
+    const f = pic.float;
+    if (!f) return;
+    const c = floatCorners(f).map(([x, y]) => toScreen(x, y)), top = rotateHandle();
+    g.save(); g.strokeStyle = '#3a9cf0'; g.lineWidth = 1.5;
+    tracePath(g, c.map(p => [p.x, p.y])); g.stroke();
+    const mid = {x: (c[0].x + c[1].x) / 2, y: (c[0].y + c[1].y) / 2};
+    g.beginPath(); g.moveTo(mid.x, mid.y); g.lineTo(top.x, top.y); g.stroke();
+    for (const p of [...c, top]) { g.beginPath(); g.arc(p.x, p.y, p === top ? 7 : 6, 0, Math.PI * 2); g.fillStyle = p === top ? '#3a9cf0' : '#fff'; g.fill(); g.stroke(); }
+    g.restore();
+  }
+  // The dot that turns a lifted piece: a little above the middle of its top edge.
+  function rotateHandle() {
+    const c = floatCorners(pic.float).map(([x, y]) => toScreen(x, y)), mid = {x: (c[0].x + c[1].x) / 2, y: (c[0].y + c[1].y) / 2}, centre = {x: (c[0].x + c[2].x) / 2, y: (c[0].y + c[2].y) / 2};
+    const dx = mid.x - centre.x, dy = mid.y - centre.y, len = Math.hypot(dx, dy) || 1;
+    return {x: mid.x + dx / len * 30, y: mid.y + dy / len * 30};
+  }
   const later = () => { if (!raf) raf = win.requestAnimationFrame(render); };
   const local = e => { const r = canvas.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
   // Pressure: a pen's own; a mouse or a finger (most report nothing useful) presses fully.
   const pressure = e => e.pointerType === 'pen' ? Math.max(.02, e.pressure || 0) : 1;
-  function point(e) { const s = local(e), p = viewMath(view).toPicture(s.x, s.y); return {x: flipped ? pic.width - p.x : p.x, y: p.y, p: pressure(e), sx: s.x, sy: s.y}; }
+  function point(e) { const s = local(e), p = toPicture(s.x, s.y); return {x: p.x, y: p.y, p: pressure(e), sx: s.x, sy: s.y}; }
 
+  // ---------- drawing ----------
   function startDrawing(e) {
     const t = tool(), at = point(e);
     if (t.kind === 'pick') { drawing = {id: e.pointerId, pick: true}; pick(at); return; }
+    if (t.kind === 'fill') { drawing = {id: e.pointerId, done: true}; filled(at); return; }
+    if (t.kind === 'select') { outline = {id: e.pointerId, shape: t.shape, start: at, points: [[at.x, at.y]]}; drawing = {id: e.pointerId, outline: true}; return; }
+    if (t.kind === 'transform') { startMoving(e, at); return; }
     const brush = {...t.brush, opacity: t.brush.opacity * t.opacity};
     drawing = {id: e.pointerId, start: at, smooth: at, raw: at, moved: 0, at: Date.now(), streamline: brush.streamline};
-    if (!beginStroke(pic, {brush, size: t.size, color: t.color, erase: t.kind === 'eraser'}, at)) { drawing = null; locked(); return; }
+    if (!beginStroke(pic, {brush, size: t.size, color: t.color, erase: t.kind === 'eraser', smudge: t.kind === 'smudge'}, at)) { drawing = null; locked(); return; }
     // Held still: the eyedropper instead.
     drawing.hold = win.setTimeout(() => { if (drawing && !drawing.pick && drawing.moved < 6) { endStroke(pic, {cancel: true}); drawing.pick = true; pick(drawing.raw); later(); } }, HOLD);
     later();
   }
   function moveDrawing(e) {
     if (drawing.pick) { pick(point(e)); return; }
+    if (drawing.done) return;
+    if (drawing.outline) {
+      const at = point(e), s = outline.start;
+      if (outline.shape === 'rect') outline.points = [[s.x, s.y], [at.x, s.y], [at.x, at.y], [s.x, at.y]];
+      else { const last = outline.points.at(-1); if (Math.hypot(at.x - last[0], at.y - last[1]) * view.scale > 2) outline.points.push([at.x, at.y]); }
+      later(); return;
+    }
     const list = e.getCoalescedEvents?.().length ? e.getCoalescedEvents() : [e];
     for (const ev of list) {
       const raw = point(ev);
@@ -99,7 +145,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
     drawing = null;
     if (!d) return;
     win.clearTimeout(d.hold);
-    if (d.pick) return;
+    if (d.pick || d.done) return;
+    if (d.outline) { const o = outline; outline = null; if (!cancel) selected(o.points); later(); return; }
     // The steadied line catches up with where the pen lifted.
     if (!cancel && d.raw && d.raw !== d.smooth) extendStroke(pic, d.raw);
     if (endStroke(pic, {cancel})) stroked();
@@ -107,17 +154,47 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
   }
   function pick(at) { const c = colorAt(pic, at.x, at.y); if (c) picked(c); }
 
-  // ---------- two fingers ----------
+  // ---------- 变形 ----------
+  function startMoving(e, at) {
+    const f = pic.float;
+    if (!f) return;
+    const s = local(e), corners = floatCorners(f).map(([x, y]) => toScreen(x, y)), top = rotateHandle();
+    const t = {...f.t}, centre = {x: t.cx, y: t.cy};
+    let mode = 'move';
+    if (Math.hypot(s.x - top.x, s.y - top.y) < HANDLE) mode = 'turn';
+    else if (corners.some(c => Math.hypot(s.x - c.x, s.y - c.y) < HANDLE)) mode = 'scale';
+    moving = {id: e.pointerId, mode, t, at, dist: Math.hypot(at.x - centre.x, at.y - centre.y) || 1, angle: Math.atan2(at.y - centre.y, at.x - centre.x)};
+  }
+  function moveMoving(e) {
+    const f = pic.float, at = point(e), m = moving, t = m.t;
+    if (!f) return;
+    if (m.mode === 'move') f.t = {...t, cx: t.cx + at.x - m.at.x, cy: t.cy + at.y - m.at.y};
+    if (m.mode === 'scale') { const k = Math.max(.02, Math.hypot(at.x - t.cx, at.y - t.cy) / m.dist); f.t = {...t, sx: t.sx * k, sy: t.sy * k}; }
+    if (m.mode === 'turn') f.t = {...t, angle: t.angle + Math.atan2(at.y - t.cy, at.x - t.cx) - m.angle};
+    later();
+  }
+
+  // ---------- two fingers: the picture, or a lifted piece ----------
   const two = () => [...pointers.values()].filter(p => p.type === 'touch').slice(0, 2);
   function startGesture() {
     const [a, b] = two();
-    gesture = {view: {...view}, mid: {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}, dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, angle: Math.atan2(b.y - a.y, b.x - a.x)};
+    const mid = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+    gesture = {view: {...view}, mid, dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, angle: Math.atan2(b.y - a.y, b.x - a.x), piece: pic.float && tool().kind === 'transform' ? {...pic.float.t, mid: toPicture(mid.x, mid.y)} : null};
   }
   function moveGesture() {
     const [a, b] = two();
     if (!a || !b) return;
-    const mid = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}, scale = Math.min(40, Math.max(.05, gesture.view.scale * Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist));
-    let angle = gesture.view.angle + Math.atan2(b.y - a.y, b.x - a.x) - gesture.angle;
+    const mid = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}, k = Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist, turn = Math.atan2(b.y - a.y, b.x - a.x) - gesture.angle;
+    if (gesture.piece && pic.float) {
+      // The piece follows the fingers: scaled and turned about where they started, moved with them.
+      const p = gesture.piece, now = toPicture(mid.x, mid.y), dir = flipped ? -1 : 1, cos = Math.cos(turn * dir), sin = Math.sin(turn * dir);
+      const ox = p.cx - p.mid.x, oy = p.cy - p.mid.y;
+      pic.float.t = {...p, cx: now.x + (ox * cos - oy * sin) * k, cy: now.y + (ox * sin + oy * cos) * k, sx: p.sx * k, sy: p.sy * k, angle: p.angle + turn * dir};
+      delete pic.float.t.mid;
+      later(); return;
+    }
+    const scale = Math.min(40, Math.max(.05, gesture.view.scale * k));
+    let angle = gesture.view.angle + turn;
     // Close to upright, it snaps upright.
     const turns = angle / (Math.PI / 2), near = Math.round(turns);
     if (Math.abs(turns - near) < .04) angle = near * Math.PI / 2;
@@ -141,14 +218,15 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
       taps = touches === 1 ? {at: Date.now(), most: 1, moved: 0} : taps && {...taps, most: Math.max(taps.most, touches)};
       if (touches >= 2) {
         // A second finger soon after the first: it was a gesture, not a stroke.
-        if (drawing && pointers.get(drawing.id)?.type === 'touch') endDrawing(Date.now() - drawing.at < 260 || drawing.moved < 12);
+        if (drawing && pointers.get(drawing.id)?.type === 'touch') endDrawing(Date.now() - (drawing.at || 0) < 260 || (drawing.moved || 0) < 12 || !!drawing.outline);
+        if (moving && pointers.get(moving.id)?.type === 'touch') moving = null;
         if (touches === 2) startGesture();
         return;
       }
-      if (penSeen) return;
+      if (penSeen && tool().kind !== 'transform') return;
     }
     if (e.button === 1 || (e.button === 0 && spaceDown)) { panning = {x: s.x, y: s.y, view: {...view}}; e.preventDefault(); return; }
-    if (e.button > 0 || drawing) return;
+    if (e.button > 0 || drawing || moving) return;
     startDrawing(e);
   });
   canvas.addEventListener('pointermove', e => {
@@ -159,16 +237,18 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
     p.x = s.x; p.y = s.y;
     if (gesture && p.type === 'touch') { moveGesture(); return; }
     if (panning) { view = {...panning.view, x: panning.view.x + s.x - panning.x, y: panning.view.y + s.y - panning.y}; later(); return; }
+    if (moving?.id === e.pointerId) { moveMoving(e); return; }
     if (drawing?.id === e.pointerId) moveDrawing(e);
   });
   const up = e => {
     const p = pointers.get(e.pointerId);
     pointers.delete(e.pointerId);
     if (drawing?.id === e.pointerId) endDrawing(e.type === 'pointercancel');
+    if (moving?.id === e.pointerId) { moving = null; stroked({quiet: true}); }
     if (panning && !pointers.size) panning = null;
     if (p?.type === 'touch') {
       const left = [...pointers.values()].filter(x => x.type === 'touch').length;
-      if (left < 2) gesture = null;
+      if (left < 2 && gesture) { if (gesture.piece) stroked({quiet: true}); gesture = null; }
       if (!left && taps) {
         // A quick tap with two fingers undoes, with three redoes.
         if (Date.now() - taps.at < TAP + 120 && taps.moved < 14) { if (taps.most === 2) undo(); if (taps.most === 3) redo(); }
@@ -190,10 +270,12 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
     flip() { flipped = !flipped; later(); },
     get flipped() { return flipped; },
     zoomBy(factor) { zoomAt(w / 2, h / 2, factor); },
+    /** The picture point under a point on the page (clientX, clientY), or null off the picture. */
+    pictureAt(clientX, clientY) { const r = canvas.getBoundingClientRect(), p = toPicture(clientX - r.left, clientY - r.top); return p.x >= 0 && p.y >= 0 && p.x < pic.width && p.y < pic.height ? p : null; },
     /** Space held: the picture is dragged instead of drawn on. */
     space(on) { spaceDown = on; canvas.style.cursor = on ? 'grab' : ''; },
     get view() { return {...view}; },
-    get busy() { return !!drawing; },
+    get busy() { return !!drawing || !!moving; },
     dispose() { resize?.disconnect(); win.cancelAnimationFrame(raf); if (drawing) endDrawing(true); canvas.remove(); },
   };
 }
