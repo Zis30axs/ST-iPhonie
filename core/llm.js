@@ -10,7 +10,7 @@
 export const TEXT_LIMITS = Object.freeze({maxTokens: [64, 32000], temperature: [0, 2], idle: 90000, whole: 600000, timeout: 300000});
 
 export function defaultTextPreset(id = 'default', name = '自定义接口') {
-  return {id, name, url: '', model: '', temperature: 0.9, maxTokens: 1200, thinking: 'auto'};
+  return {id, name, url: '', model: '', temperature: 0.9, maxTokens: 1200, thinking: 'auto', stream: true};
 }
 export function defaultText() {
   return {source: 'tavern', active: 'default', presets: [defaultTextPreset()]};
@@ -22,7 +22,9 @@ function normalizePreset(value, index) {
   return {id: TEXT_PRESET_ID.test(String(value?.id || '')) ? String(value.id) : crypto.randomUUID(), name: String(value?.name || '').trim().slice(0, 40) || '接口 ' + (index + 1),
     url: String(value?.url || '').trim().slice(0, 500), model: String(value?.model || '').trim().slice(0, 200),
     temperature: Math.round(count(value?.temperature, TEXT_LIMITS.temperature, base.temperature, false) * 100) / 100, maxTokens: count(value?.maxTokens, TEXT_LIMITS.maxTokens, base.maxTokens),
-    thinking: value?.thinking === 'off' ? 'off' : 'auto'};
+    thinking: value?.thinking === 'off' ? 'off' : 'auto',
+    // 流式: on unless turned off (some providers, Gemini behind some relays, cut a streamed answer short).
+    stream: value?.stream !== false};
 }
 export function normalizeText(value) {
   const base = defaultText();
@@ -192,8 +194,10 @@ export async function customRequest({text, key, prompt, responseLength, fetch: s
     if (choice?.message?.reasoning_content || choice?.message?.reasoning) throw thoughtOnly(choice.finish_reason);
     return '';
   };
-  const first = await post(true);
-  if (!first.response.ok) {
+  // 不用流式: asked the ordinary way at once.
+  const first = text.stream === false ? null : await post(true);
+  if (!first) { /* below */ }
+  else if (!first.response.ok) {
     const raw = await first.read(() => first.response.text());
     // An API that refuses streaming: asked the ordinary way.
     if (!(first.response.status === 400 || first.response.status === 422) || !/stream/i.test(raw)) throw failure(first.response.status, raw, key);

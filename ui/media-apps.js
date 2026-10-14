@@ -1,7 +1,7 @@
 import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help} from './common.js';
 import {icon, wave, halo} from './icons.js';
 import {openAlbum} from './album-viewer.js';
-import {saveFile, shareFile, canShareFiles} from '../download.js';
+import {saveFile, shareFile, canShareFiles, zipFiles} from '../download.js';
 import {decodeMono, joinClips, encodeWav, JOIN_RATE} from '../core/audio-join.js';
 
 const NOTE_COLORS = ['#fff4b0', '#ffd9e6', '#d9ecff', '#e3f5d9', '#efe0ff', '#ffe6cc'];
@@ -79,7 +79,7 @@ export function galleryApp(ctx) {
     const tools = selecting ? btn('select-cancel', '取消', 'chip-button') : (rows.length ? btn('select', icon('check') + '选择', 'chip-button') : '') + importButton;
     v.draw(heading('相册', `<span class="gallery-tools">${tools}</span>`, `Album · ${rows.length}`) + (rows.length
       ? `<div class="photo-grid${selecting ? ' selecting' : ''}">${rows.map(r => `<button data-action="photo" data-id="${esc(r.id)}" aria-label="${selecting ? '选择' : '查看'} ${esc(r.name)}"${selecting ? ` aria-pressed="${selecting.has(r.id)}"` : ''}><img loading="lazy" data-photo="${esc(r.id)}" alt="${esc(r.name)}"></button>`).join('')}</div>`
-        + (selecting ? `<div class="select-bar"><span data-select-count>${countText()}</span>${btn('select-all', allText(), 'text-button')}${btn('select-delete', icon('trash') + '删除', 'danger', selecting.size ? '' : 'disabled')}</div>` : '')
+        + (selecting ? `<div class="select-bar"><span data-select-count>${countText()}</span>${btn('select-all', allText(), 'text-button')}${btn('select-download', icon('download') + '下载', 'secondary', selecting.size ? '' : 'disabled')}${btn('select-delete', icon('trash') + '删除', 'danger', selecting.size ? '' : 'disabled')}</div>` : '')
       : empty('留住喜欢的画面', '从本地导入照片，也可以设为手机壁纸。', 'image')));
     for (const row of rows) {
       const photo = await api.getPhoto(row.id);
@@ -96,6 +96,8 @@ export function galleryApp(ctx) {
     if (count) count.textContent = countText();
     if (all) all.textContent = allText();
     if (del) del.disabled = !selecting.size;
+    const down = v.root.querySelector('[data-action=select-download]');
+    if (down) down.disabled = !selecting.size;
   }
   /** Opens a photo full screen; the others of the grid are a swipe away. */
   function openPhoto(id, from = null) {
@@ -139,6 +141,22 @@ export function galleryApp(ctx) {
         openPhoto(el.dataset.id, (el.querySelector('img') || el).getBoundingClientRect()); break;
       case 'select': selecting = new Set(); await render(); break;
       case 'select-cancel': selecting = null; await render(); break;
+      // 下载 the ticked photos: one is saved as it is, several go in one .zip (a phone keeps only the first of many
+      // downloads started at once), so the album can be emptied after.
+      case 'select-download': {
+        const ids = shown.filter(id => selecting.has(id));
+        if (!ids.length) break;
+        await v.busy(el, async () => {
+          const files = [];
+          for (const id of ids) { const photo = await api.getPhoto(id); if (photo?.blob) files.push({name: photo.name, blob: photo.blob}); }
+          if (!files.length) throw Error('选中的照片已经不在了');
+          if (files.length === 1) { ctx.notify('已下载 ' + await saveFile(ctx.doc, files[0].blob, files[0].name)); return; }
+          const d = new Date(), stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+          const name = await saveFile(ctx.doc, await zipFiles(files), `ST-iPhonie 相册 ${stamp} ${files.length} 张`);
+          ctx.notify(`已打包下载 ${files.length} 张：${name}`);
+        });
+        break;
+      }
       case 'select-all': selecting = selecting.size === shown.length ? new Set() : new Set(shown); syncSelection(); break;
       case 'select-delete': {
         const ids = [...selecting];

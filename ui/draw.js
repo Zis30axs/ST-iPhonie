@@ -1,7 +1,7 @@
 import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, avatar, empty} from './common.js';
 import {icon} from './icons.js';
-import {openImageViewer} from '../image-viewer.js';
-import {downloadAction, shareAction} from '../download.js';
+import {saveFile, shareFile, canShareFiles} from '../download.js';
+import {openAlbum} from './album-viewer.js';
 import {vibePanel} from './vibes.js';
 import {comfyPlans} from './comfy-plans.js';
 import {comfyLoraPanel} from './comfy-lora-panel.js';
@@ -235,7 +235,9 @@ export function drawApp(ctx) {
     if (event.subscription || event.queue || event.vibes && tab === 'vibe') render();
   };
   const dispose = v.dispose;
-  v.dispose = () => { epoch++; comfyRequest++; plans.dispose(); loras.dispose(); for (const url of urls.values()) ctx.win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
+  let viewer = null;
+  v.back = () => { if (viewer?.open) { viewer.close(); return true; } return false; };
+  v.dispose = () => { epoch++; viewer?.close(); comfyRequest++; plans.dispose(); loras.dispose(); for (const url of urls.values()) ctx.win.URL.revokeObjectURL(url); urls.clear(); dispose(); };
 
   v.on('input', '[data-field]', el => {
     const key = el.dataset.field;
@@ -304,16 +306,26 @@ export function drawApp(ctx) {
       case 'remove-char': characters.splice(index, 1); render(); break;
       case 'add-custom': characters.push({name: '角色', prompt: '', position: -1}); render(); break;
       case 'add-char': pickCharacter(); break;
-      case 'zoom': { const img = el.querySelector('img'), shown = results[current]; if (img) openImageViewer({doc: ctx.doc, src: img.src, alt: '生成的图片', from: img, info: shown?.info || null, actions: shown ? [downloadAction(ctx.doc, () => resultFile(shown), ctx.notify), shareAction(ctx.doc, () => resultFile(shown), ctx.notify), {label: '删除', danger: true, run: () => {
-          // The viewer closes first, so the question is not under it.
-          ctx.win.setTimeout(async () => {
-            if (!await ctx.confirm('删除这张图？', '相册里的这张也会一起删掉。')) return;
-            await api.deletePhoto(shown.photoId);
-            results = results.filter(r => r !== shown);
-            current = results.length ? Math.min(current, results.length - 1) : -1;
-            render(); ctx.notify('已删除');
-          }, 0);
-        }}] : []}); break; }
+      // The big picture opens like the album: swipe to the ones drawn before and after (this visit's column), swipe up
+      // for the prompt and parameters of each, to compare them.
+      case 'zoom': {
+        if (!results.length) break;
+        const img = el.querySelector('img'), file = id => resultFile(results.find(r => r.photoId === id) || {photoId: id});
+        viewer = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: results.map(r => r.photoId), index: Math.max(0, current), from: img?.getBoundingClientRect() || null,
+          load: id => api.getPhoto(id),
+          actions: [
+            {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await file(id); ctx.notify('已下载 ' + await saveFile(ctx.doc, source, name)); }},
+            ...(canShareFiles(ctx.win) ? [{key: 'share', icon: 'share', label: '分享', run: async id => { const {source, name} = await file(id); try { await shareFile(ctx.doc, source, name); } catch (error) { ctx.notify(error.message, {error: !/已取消/.test(error.message)}); } }}] : []),
+            {key: 'delete', icon: 'trash', label: '删除', danger: true, run: async id => {
+              if (!await ctx.confirm('删除这张图？', '相册里的这张也会一起删掉。')) return;
+              await api.deletePhoto(id);
+              results = results.filter(r => r.photoId !== id);
+              ctx.notify('已删除');
+              return 'removed';
+            }}],
+          onClose: () => { const at = results.findIndex(r => r.photoId === viewer?.id); current = at >= 0 ? at : results.length ? Math.min(Math.max(current, 0), results.length - 1) : -1; viewer = null; render(); }});
+        break;
+      }
       case 'write-prompt':
         if (!idea.trim()) { ctx.notify('先在「想画什么」里说一句'); v.root.querySelector('[data-field=idea]')?.focus(); break; }
         await v.busy(el, async () => {
