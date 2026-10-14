@@ -10,6 +10,16 @@ export type InjectionPosition = 'in_chat' | 'in_prompt' | 'before_prompt';
 export type MessageRole = 'system' | 'user' | 'assistant';
 
 export interface VoiceBinding { voice: string; model: string; }
+/** 整篇朗读 (core/narration.js). voice: 'system' = the browser's speech; 'role' = the 旁白 role in the 角色 App. */
+export interface NarrationSettings {
+    enabled: boolean;
+    voice: 'system' | 'role';
+    /** A system voice's id (voiceURI); empty: the first Chinese one. */
+    systemVoice: string;
+    rate: number;
+    /** Tag names whose contents are not read. */
+    skip: string[];
+}
 export interface Route {
     id?: string;
     name: string;
@@ -103,6 +113,7 @@ export interface Settings {
     assistant: AssistantSettings;
     sounds: SoundSettings;
     music: MusicSettings;
+    narration: NarrationSettings;
     text: TextSettings;
     /** 向量模型 for 记忆 (key kept as KeyEngine 'embed'). */
     embed: EmbedSettings;
@@ -501,6 +512,8 @@ export interface BackendFacade {
     getSnapshot(): SettingsSnapshot;
     save(next: Settings, expectedRevision?: number): Settings;
     updateGeneral(patch: Partial<GeneralSettings>): Settings;
+    /** 整篇朗读: on/off, the 旁白's voice, the system voice and speed, the tags read past. */
+    saveNarration(patch: Partial<NarrationSettings> & {skip?: string[] | string}): NarrationSettings;
     saveRoute(route: RouteInput): Route;
     /** 候选音色池: the voices 自动挑音色 picks from first. */
     saveVoicePool(list: VoicePoolEntry[]): VoicePoolEntry[];

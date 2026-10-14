@@ -1,6 +1,7 @@
-import {createView, esc, btn, field, input, select, toggle, heading, size, languageField, typedLanguages, groupTitle, help, copyText} from './common.js';
+import {createView, esc, btn, field, input, select, textArea, toggle, heading, size, languageField, typedLanguages, groupTitle, help, copyText} from './common.js';
 import {buildReport} from '../core/diagnostics.js';
 import {saveFile} from '../download.js';
+import {browserSpeech, cleanSkip, NARRATION_RATES, NARRATOR} from '../core/narration.js';
 import {icon, GLYPH_NAMES} from './icons.js';
 import {APPS} from './apps.js';
 import {wallpapers, skins} from './wallpapers.js';
@@ -10,6 +11,48 @@ const IMAGE_TYPES = 'image/png,image/jpeg,image/webp,image/avif,image/gif';
 
 export function settingsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'settings');
+  const narrationNote = s => !s.narration.enabled ? '关 · 只读台词' : s.narration.voice === 'role' ? '开 · 旁白用「旁白」角色的配音' : '开 · 旁白用系统朗读';
+  /**
+   * 整篇朗读: 播放全部 reads the story between the lines too, in the 旁白's voice — the system's (free, not kept) or the
+   * 旁白 role's in the 角色 App (an engine's: costs its characters, kept). Tags listed are read past, lines in them too.
+   */
+  function narrationSheet() {
+    const speech = browserSpeech(ctx.win);
+    const d = ctx.dialog('整篇朗读', '');
+    const paint = () => {
+      if (!d.live) return;
+      const n = api.getState().narration, role = api.getState().routes.find(r => r.name === NARRATOR), voices = speech?.voices() || [];
+      const chinese = voices.filter(x => /^(zh|cmn)/i.test(x.lang)), others = voices.filter(x => !/^(zh|cmn)/i.test(x.lang));
+      d.body.innerHTML = `<div class="group pad">${toggle('nar-enabled', '整篇朗读', n.enabled, '点「整条」或「播放全部」时，台词之间的叙述也读出来：叙述用旁白的声音，台词还是各个角色的声音。单独点一句台词时只读那一句。\n\n叙述就是回复里台词以外的文字，不用再请求模型，不花模型的 token。')}
+        <div class="field"><span>旁白的声音${help('系统朗读：用手机或电脑自带的声音，免费，不花配音额度；声音好不好听看设备（Edge、苹果设备上比较自然）。直接读出来，不能缓存，也不能下载。\n\n配音引擎：在角色 App 里给一个叫「旁白」的角色选音色，和别的角色一样用 Fish 等引擎生成，按字数花配音额度（叙述往往比台词长好几倍）；生成过的会缓存，可以下载。')}</span>
+          <div class="segmented" style="margin:0">${[['system', '系统朗读'], ['role', '配音引擎']].map(([k, l]) => `<button type="button" data-nar-voice="${k}" aria-pressed="${n.voice === k}">${l}</button>`).join('')}</div></div>
+        ${n.voice === 'system' ? (speech ? `${field('声音', select('nar-system', n.systemVoice, [['', '自动（中文的第一个）'], ...chinese.map(x => [x.id, x.name]), ...others.map(x => [x.id, `${x.name}（${x.lang}）`])]))}
+          ${field('语速', select('nar-rate', n.rate, NARRATION_RATES.map(r => [r, r === 1 ? '正常' : r + ' 倍'])))}
+          <div class="actions">${btn('nar-try', icon('play', true) + '试听', 'secondary')}</div>` : '<p class="hint">这个浏览器不能系统朗读，换成「配音引擎」，或者换个浏览器。</p>')
+        : `<p class="hint">${role?.voice ? `用角色 App 里「旁白」的音色。` : '还没有「旁白」这个角色的音色：选好之前，叙述会跳过，只读台词。'}</p><div class="actions">${btn('nar-role', icon('wave') + (role ? '设置旁白的音色' : '新建「旁白」角色'), 'secondary')}</div>`}
+        ${field('不读的内容', textArea('nar-skip', n.skip.join('、'), 'rows="3" placeholder="小剧场、状态栏"'), '写标签名，用顿号或逗号隔开：写「小剧场」，就会跳过 <小剧场>…</小剧场> 里的全部内容（里面的台词也不读）。代码块、注释、思考，以及小手机自己的出图、音效、音乐、手机消息标签，总是跳过。')}</div>`;
+    };
+    paint();
+    // System voices can arrive a moment later.
+    const later = () => paint();
+    ctx.win.speechSynthesis?.addEventListener?.('voiceschanged', later);
+    d.onClose(() => { ctx.win.speechSynthesis?.removeEventListener?.('voiceschanged', later); render(); });
+    const save = patch => { try { api.saveNarration(patch); } catch (error) { ctx.notify(error.message, {error: true}); } paint(); };
+    d.body.addEventListener('change', e => {
+      const el = e.target;
+      if (el.dataset.field === 'nar-enabled') { save({enabled: el.checked}); ctx.notify(el.checked ? '播放全部时会连叙述一起读' : '播放全部时只读台词'); }
+      if (el.dataset.field === 'nar-system') save({systemVoice: el.value});
+      if (el.dataset.field === 'nar-rate') save({rate: Number(el.value)});
+      if (el.dataset.field === 'nar-skip') save({skip: cleanSkip(el.value)});
+    });
+    d.body.addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.narVoice) save({voice: b.dataset.narVoice});
+      if (b.dataset.action === 'nar-try') { const n = api.getState().narration; speech?.speak('夜色渐深，街灯一盏一盏亮了起来。', {voice: n.systemVoice, rate: n.rate}).catch(error => { if (error.name !== 'AbortError') ctx.notify(error.message, {error: true}); }); }
+      if (b.dataset.action === 'nar-role') { d.close(); ctx.openPendingRole(NARRATOR); }
+    });
+  }
   let appearance = null, check = null, backup = null, restore = null, storage = false, epoch = 0;
   const glyphName = key => APPS[key]?.name || GLYPH_NAMES[key] || key;
 
@@ -181,6 +224,7 @@ export function settingsApp(ctx) {
           ${s.general.voiceEnabled !== false ? `<div class="field"><span>配音方式${help('正文里顺手写：把配音规则加进正文请求，模型写故事时顺手把台词写成配音格式。只要一次请求，但规则较长，有时会影响正文，或者和破限、文风预设打架、漏写格式。\n\n回复后单独配音：正文模型只管写故事，不带任何配音规则；回复写完后，插件用同一个模型再单独请求一次，把正文里的台词配上音（声波稍等一会儿才出来）。格式更稳，不挤占正文，每条回复多一次请求。\n\n绘图里也选了「回复后单独配图」的话，配音和配图合成一次请求，不会多发两次。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配音']].map(([k, l]) => `<button data-action="voice-mode" data-value="${k}" aria-pressed="${(s.general.voiceMode || 'inline') === k}">${l}</button>`).join('')}</div>${s.general.voiceMode === 'separate' && api.planLatestVoice ? `<div class="actions" style="margin:6px 0 0">${btn('voice-latest', icon('wave') + '给最新回复配音', 'text-button')}</div>` : ''}</div>` : ''}
           ${toggle('drawEnabled', '正文出图', s.draw.enabled, '开启后，绘图预设会加进聊天请求，让模型在正文里写出图标签。新回复要不要自动画、图片要不要收起，在绘图 App 的「正文出图」里改；免费档守卫在绘图 App 的「参数」里。')}
           ${s.draw.enabled ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。上面配音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图']].map(([k, l]) => `<button data-action="draw-mode" data-value="${k}" aria-pressed="${s.draw.mode === k}">${l}</button>`).join('')}</div>${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>` : ''}
+          ${s.general.voiceEnabled !== false ? `<button class="list-row" data-action="narration"><span><strong>整篇朗读</strong><small>${narrationNote(s)}</small></span>${icon('next')}</button>` : ''}
           ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上开了视觉小说模式，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
         </div>
         <details data-group="voice-more"><summary>更多<small class="fold-note">声波、旧配音标签、音量</small></summary><div class="fold-body">
@@ -274,6 +318,7 @@ export function settingsApp(ctx) {
       case 'theme': await api.savePhone({theme: el.dataset.value}); await render(); break;
       case 'draw-mode': api.saveDraw({mode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配图' : '以后模型写正文时顺手写出图块'); break;
       case 'draw-latest': await v.busy(el, () => api.planLatestPictures()); break;
+      case 'narration': narrationSheet(); break;
       case 'voice-mode': api.updateGeneral({voiceMode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); break;
       case 'voice-latest': await v.busy(el, async () => { const n = await api.planLatestVoice(); ctx.notify(n ? `配好了 ${n} 句台词` : '这条回复里没有找到台词'); }); break;
       // A skin brings its own wallpaper, unless a personal photo is the wallpaper.

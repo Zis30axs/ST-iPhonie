@@ -19,7 +19,7 @@ const BUSY = ['playing', 'generating'];
  * or null. now(): {id, index, phase} of what is being said. play(id, index): that line (again: pause/resume).
  * playAll(id): every line. phoneOpen(), callShown(): whether to step aside.
  */
-export function createVoiceIsland({doc = document, enabled, latest, now, play, playAll, phoneOpen, callShown = () => false}) {
+export function createVoiceIsland({doc = document, enabled, latest, now, play, playAll, toggle = null, phoneOpen, callShown = () => false}) {
   const win = doc.defaultView;
   const el = doc.createElement('div');
   el.className = 'sttts-voice-island';
@@ -56,9 +56,11 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
       const i = Number(row.dataset.viI), state = i === mine ? 'playing' : i === paused ? 'paused' : '';
       if ((row.dataset.state || '') !== state) { if (state) row.dataset.state = state; else delete row.dataset.state; }
     }
+    // 整篇朗读: while the 旁白 reads, no line is the one playing, but the reply is.
+    const mineAll = s && s.id === r.id && BUSY.includes(s.phase), pausedAll = s && s.id === r.id && s.phase === 'paused';
     const said = mine >= 0 ? r.lines[mine] : null;
-    text('[data-vi-line]', said ? `${said.role ? said.role + '：' : ''}${said.translation || said.text}` : `${r.lines.length} 句台词 · 点开挑一句听`);
-    const all = el.querySelector('[data-vi=all]'), on = mine >= 0 ? 'pause' : paused >= 0 ? 'resume' : 'all';
+    text('[data-vi-line]', said ? `${said.role ? said.role + '：' : ''}${said.translation || said.text}` : mineAll && s.narration ? `旁白：${s.narration}` : `${r.lines.length} 句台词 · 点开挑一句听`);
+    const all = el.querySelector('[data-vi=all]'), on = mine >= 0 || mineAll ? 'pause' : paused >= 0 || pausedAll ? 'resume' : 'all';
     if (all.dataset.on !== on) { all.dataset.on = on; all.innerHTML = on === 'pause' ? `${PAUSE}<span>暂停</span>` : on === 'resume' ? `${PLAY}<span>继续</span>` : `${PLAY}<span>整条</span>`; }
     el.setAttribute('aria-label', `台词小窗：${r.name || ''} ${r.lines.length} 句。点一下展开`);
   }
@@ -111,7 +113,7 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
     if (!reply || Date.now() - openedAt < 350) return;
     const id = reply.id;
     if (b.dataset.viI !== undefined) Promise.resolve().then(() => play(id, Number(b.dataset.viI))).catch(() => {});
-    else if (b.dataset.vi === 'all') { const s = now(); Promise.resolve().then(() => s && s.id === id && [...BUSY, 'paused'].includes(s.phase) ? play(id, s.index) : playAll(id)).catch(() => {}); }
+    else if (b.dataset.vi === 'all') { const s = now(); Promise.resolve().then(() => s && s.id === id && [...BUSY, 'paused'].includes(s.phase) ? (toggle && !(s.index >= 0) ? toggle() : play(id, s.index)) : playAll(id)).catch(() => {}); }
     else if (b.dataset.vi === 'close') { dismissed = key(reply); el.hidden = true; setExpanded(false); }
   });
   // A tap anywhere else takes the list back in.

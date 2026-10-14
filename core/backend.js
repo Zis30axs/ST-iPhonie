@@ -1,3 +1,4 @@
+import { normalizeNarration } from './narration.js';
 import { MomentStore } from './moments-store.js';
 import { MUSIC_LIMITS, normalizeMusic, normalizeSource, validateSource, readSearch, readLink, playable, onTavern, isAudio, fill as fillSource, songRow, bestMatch, matchScore, pick as pickPath } from './music.js';
 import { AppStore } from './app-store.js';
@@ -97,7 +98,7 @@ const DRAWN_SOURCES = [
 export class TTSBackend {
     constructor({ settings, persist = () => {}, notify = () => {}, change = () => {}, unknown = () => {},
         providers = new Providers(), cache, library, keyStore, sink, novelai, chats, indexedDB = globalThis.indexedDB, syncStorage = () => globalThis.localStorage,
-        imageFetch = (...args) => globalThis.fetch(...args), soundPack = '', tavernHeaders = () => globalThis.SillyTavern?.getContext?.()?.getRequestHeaders?.() || {} } = {}) {
+        imageFetch = (...args) => globalThis.fetch(...args), soundPack = '', speech = null, tavernHeaders = () => globalThis.SillyTavern?.getContext?.()?.getRequestHeaders?.() || {} } = {}) {
         this.settings = normalizeSettings(settings);
         validateSettings(this.settings);
         this.persist = persist;
@@ -153,7 +154,7 @@ export class TTSBackend {
         this.closed = false;
         this.prepared = null;
         this.player = new DialoguePlayer({
-            settings: () => this.settings, providers, cache: this.cache, ...(sink ? { sink } : {}), unknown,
+            settings: () => this.settings, providers, cache: this.cache, ...(sink ? { sink } : {}), unknown, speech,
             change: state => { change(state); this.emit('playback', state); },
             prepared: audio => { this.prepared = audio; this.emit('audio-ready', this.audioInfo(audio)); },
         });
@@ -290,6 +291,13 @@ export class TTSBackend {
         this.revision++;
         this.emit('settings', { state: this.getState() });
         return this.getState();
+    }
+    /** 整篇朗读: on or off, the 旁白's voice (系统朗读 or the 旁白 role), the system voice and speed, the tags not read. */
+    saveNarration(patch) {
+        if (!patch || typeof patch !== 'object') throw Error('设置格式无效');
+        const next = this.getState();
+        next.narration = normalizeNarration({ ...next.narration, ...clone(patch) });
+        return clone(this.save(next).narration);
     }
     updateGeneral(patch) {
         if (!patch || typeof patch !== 'object') throw Error('设置格式无效');
@@ -2259,7 +2267,7 @@ export class TTSBackend {
     api() {
         const methods = {
             getState: () => this.getState(), getSnapshot: () => this.getSnapshot(), save: (next, revision) => this.save(next, revision),
-            updateGeneral: patch => this.updateGeneral(patch), saveRoute: route => this.saveRoute(route), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
+            updateGeneral: patch => this.updateGeneral(patch), saveNarration: patch => this.saveNarration(patch), saveRoute: route => this.saveRoute(route), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
             switchRouteEngine, cleanAliases, validRoleName: name => typeof name === 'string' && !!name.trim() && !isPlaceholderRole(name),
             saveConnection: (engine, patch) => this.saveConnection(engine, patch),
             savePreset: preset => this.savePreset(preset), deletePreset: id => this.deletePreset(id), selectPreset: id => this.selectPreset(id),

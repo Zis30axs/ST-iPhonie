@@ -127,8 +127,9 @@ export class BrowserAudio {
 }
 
 export class DialoguePlayer {
- constructor({ settings, providers, cache, sink = new BrowserAudio(), change = () => {}, unknown = () => {}, prepared = () => {} }) {
-  Object.assign(this, { settings, providers, cache, sink, change, unknown, prepared });
+ /** speech: the browser's voice for a 旁白 read with 系统朗读 (core/narration.js browserSpeech), or null. */
+ constructor({ settings, providers, cache, sink = new BrowserAudio(), change = () => {}, unknown = () => {}, prepared = () => {}, speech = null }) {
+  Object.assign(this, { settings, providers, cache, sink, change, unknown, prepared, speech });
   this.epoch = 0;
   this.phase = 'idle';
   this.message = '';
@@ -186,6 +187,7 @@ export class DialoguePlayer {
   this.controller?.abort();
   this.controller = null;
   this.sink.stop();
+  this.speech?.stop();
   this.queue = [];
   this.index = 0;
   this.pending = null;
@@ -245,7 +247,9 @@ export class DialoguePlayer {
  }
  /** Starts making the line at `index` now (one ahead of the one about to play); null when there is nothing to make. */
  makeAhead(index, signal) {
-  const line = this.queue[index], s = this.settingsOverride || this.settings(), route = line && findRoute(s.routes, line.role);
+  const line = this.queue[index], s = this.settingsOverride || this.settings();
+  if (line?.narration && s.narration?.voice !== 'role') return null;
+  const route = line && findRoute(s.routes, line.role);
   if (!route?.voice?.trim() && !(route?.engine === 'fish' && s.connections.fish.params.references.length) && !(route?.engine === 'mini' && s.connections.mini.params.timbre_weights.length)) return null;
   const made = this.make(line, route, s, signal, () => {}, () => !signal.aborted && this.valid());
   made.catch(() => {});
@@ -257,6 +261,17 @@ export class DialoguePlayer {
    while (this.index < this.queue.length) {
     if (!this.canContinue(epoch)) return;
     const s = this.settingsOverride || this.settings(), line = this.queue[this.index];
+    // 旁白 with 系统朗读: the browser says it, nothing is made or kept. Without one, the story goes on to the next line.
+    if (line.narration && s.narration?.voice !== 'role') {
+     this.line = line; this.speaker = line.role; this.engine = 'system'; this.requestKey = null; this.pending = null;
+     if (!this.speech) { if (!this.skipped.includes('旁白（这个浏览器不能系统朗读）')) this.skipped.push('旁白（这个浏览器不能系统朗读）'); this.index++; continue; }
+     if (!await this.waitForResume(epoch)) return;
+     this.emit('playing', '正在朗读 · ' + line.role);
+     await this.speech.speak(line.text, { voice: s.narration.systemVoice, rate: s.narration.rate, volume: this.volume }, signal);
+     if (!this.canContinue(epoch)) return;
+     this.index++;
+     continue;
+    }
     const route = findRoute(s.routes, line.role);
     this.line = line;
     this.speaker = line.role;
@@ -343,12 +358,14 @@ export class DialoguePlayer {
   if (['playing', 'generating'].includes(this.phase)) {
    this.resumePhase = this.phase;
    const epoch = this.epoch;
+   this.speech?.pause();
    Promise.resolve(this.sink.pause()).catch(error => { if (this.current(epoch)) this.emit('error', error.message || '暂停失败'); });
    this.emit('paused', '已暂停');
   } else if (this.phase === 'paused') {
    const epoch = this.epoch;
    return Promise.resolve(this.sink.resume()).then(() => {
     if (!this.current(epoch) || this.phase !== 'paused') return;
+    this.speech?.resume();
     this.emit(this.resumePhase === 'generating' ? 'generating' : 'playing', this.resumePhase === 'generating' ? '继续生成' : '继续播放');
     this.wake?.();
     this.wake = null;
