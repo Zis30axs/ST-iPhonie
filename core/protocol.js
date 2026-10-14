@@ -70,8 +70,13 @@ export const CONTRACT_PROMPT=['【对白输出硬性规则】',
 '中文台词（最容易出错，务必遵守）：原语言就是中文时，译文和朗读文本写的是同一整句话，把整句完整写两遍（去掉引擎声音标签和停顿标记后，两边一字不差）。绝不能把一句话拆成两半——前半句放译文里、后半句只放朗读文本里——那样读者只看得到前半句。错误：{{错误示例}}；正确：{{正确示例}}。句子太长就拆成几组，每组译文和朗读文本各自完整。其他语言使用忠实、完整的自然中文翻译，不按字数比例机械删减。',
 '发声范围：语气词和停顿仅使用该角色引擎/模型支持的写法，不把动作或心理描写夹进朗读文本。角色字段填写实际姓名，不能照抄 {角色} 或 {{角色}} 等占位符。',
 '格式完整：每一组都填写译文、角色、情绪、文本，格式写完整（有成对的标签就要闭合）；字段内的特殊分隔符用 HTML 实体转义（例如 &quot;、&lt;、&gt;、&amp;），完整的一组不要写进代码块。',
-'输出前自行核对：每段发声是否都有完整格式；每组译文与朗读内容是否逐句对应且无漏译、无增写；所有标签是否闭合。直接输出检查后的正文，不输出核对过程。'
+'输出前自行核对：每段发声是否都有完整格式；每组译文与朗读内容是否逐句对应且无漏译、无增写；所有标签是否闭合。在心里核对就好，不写出核对过程。'
 ].join('\n');
+/** The sentence the rules ended with before 0.7.78, and what replaces it in saved presets. Read as "output only the body",
+ *  it made models leave out what the card or preset asks for after it (thinking, MVU 状态栏, 选项). */
+export const CONTRACT_OLD_END='直接输出检查后的正文，不输出核对过程。',CONTRACT_NEW_END='在心里核对就好，不写出核对过程。';
+/** Said after everything the plugin adds to a story request: the rules only add to the reply, never cut it down. */
+export const KEEP_REPLY='【以上是插件补充的写法】这些规则只管台词、插图、手机这些内容怎么写，不改变回复的其他部分：预设和角色卡要求的思考过程、状态栏、选项、变量更新等内容，照常按它们原来的要求完整输出，不要省略。';
 /** 朗读规则: the voice preset's entry (id 'reading') where each speaker's engine rules go ({{朗读规则}}). */
 export const READING_PROMPT='{{朗读规则}}';
 /** One line in the preset's format, for the examples of the rules. */

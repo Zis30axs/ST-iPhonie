@@ -4,7 +4,7 @@ import {readingPlan,browserSpeech,NARRATOR} from './core/narration.js';
 import {createNoteIsland,watchMoments} from './note-island.js';
 import { TTSBackend } from './core/backend.js';
 import { normalizeSettings,validateSettings,modelRules,NAMESPACE } from './core/state.js';
-import { DEFAULT_FORMAT,parseDialogue,renderDialogue,plainDialogue,promptPlan,validatePreset,isPlaceholderRole,DEFAULT_PROMPT,knownFormats,dialogueProblems,escapeHTML,unwaveFramed,markDialogue,waveMarks,unmark } from './core/protocol.js';
+import { DEFAULT_FORMAT,parseDialogue,renderDialogue,plainDialogue,promptPlan,validatePreset,isPlaceholderRole,DEFAULT_PROMPT,knownFormats,dialogueProblems,escapeHTML,unwaveFramed,markDialogue,waveMarks,unmark,KEEP_REPLY } from './core/protocol.js';
 import { FloatingPlayer } from './core/floating.js';
 import { renderPictures, drawPromptPlan } from './core/draw.js';
 import { outgoingChat } from './core/outgoing.js';
@@ -127,7 +127,10 @@ function speakers(){const ctx=context(),names=new Set(),add=n=>{if(n&&String(n).
  if(ctx.groupId){const group=ctx.groups?.find(g=>g.id===ctx.groupId);for(const member of group?.members||[])add(ctx.characters?.find(c=>c.avatar===member)?.name);}
  const recent=(ctx.chat||[]).filter(m=>m&&!m.is_system).slice(-8);for(const m of recent){if(!m.is_user)add(m.name);for(const line of parsed(m.mes||'').lines)add(line.role);}
  const text=recent.slice(-3).map(m=>m.mes||'').join('\n');for(const r of settings.routes)if(r.name&&text.includes(r.name))add(r.name);return [...names];}
-function inject(type,options,dryRun){clearPrompts();if(!active)return;const only=speakers();for(const p of [...(voiceOn()&&settings.general.voiceMode!=='separate'?promptPlan(settings,modelRules(settings,only),only):[]),...drawPromptPlan(settings,undefined,only),...(chats?.bringPlan(typeof type==='string'?type:'',dryRun===true)||[]),...(chats?.storyPlan()||[]),...(memoryHost?.storyPlan()||[]),...(soundHost?.promptPlan()||[]),...(musicHost?.promptPlan()||[])]){context().setExtensionPrompt(p.key,p.text,p.position,p.depth,false,p.role);prompts.add(p.key);}}
+function inject(type,options,dryRun){clearPrompts();if(!active)return;const only=speakers();for(const p of [...(voiceOn()&&settings.general.voiceMode!=='separate'?promptPlan(settings,modelRules(settings,only),only):[]),...drawPromptPlan(settings,undefined,only),...(chats?.bringPlan(typeof type==='string'?type:'',dryRun===true)||[]),...(chats?.storyPlan()||[]),...(memoryHost?.storyPlan()||[]),...(soundHost?.promptPlan()||[]),...(musicHost?.promptPlan()||[])]){context().setExtensionPrompt(p.key,p.text,p.position,p.depth,false,p.role);prompts.add(p.key);}
+ // Last of all: the rules add to the reply and never cut it down (a card's thinking, 状态栏 and 选项 stay).
+ if(prompts.size){context().setExtensionPrompt(KEEP_KEY,KEEP_REPLY,1,0,false,0);prompts.add(KEEP_KEY);}}
+const KEEP_KEY='sttts.entry.zz-keep';
 function persist(next){return backend.save(next);}
 const voiceOn=()=>settings?.general?.voiceEnabled!==false;
 const storyWavesOn=()=>voiceOn()&&settings?.general?.hideStoryWaves!==true;

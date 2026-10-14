@@ -24,7 +24,7 @@ import { normalizeSettings, validateSettings, modelRules, freshState } from './s
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
-import { TTSParameters } from './parameters.js';
+import { TTSParameters, FISH_DRAMA_NOTE } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
 import { Providers, buildRequest } from './providers.js';
 import { AudioCache } from './cache.js';
@@ -2148,7 +2148,7 @@ export class TTSBackend {
         engineCheck(engine); modelCheck(engine, connection.model);
         const current = clone(connection); TTSParameters.normalize(engine, current);
         const catalog = clone(TTSParameters.catalogs[engine]);
-        catalog.models = catalog.models.map(id => ({ id, supported: true, reason: '' }));
+        catalog.models = catalog.models.map(id => engine === 'fish' && TTSParameters.fishDramaBlocked({ ...current, model: id }) ? { id, supported: false, reason: FISH_DRAMA_NOTE } : { id, supported: true, reason: '' });
         catalog.groups = catalog.groups.map(group => ({ ...group, fields: group.fields.map(field => ({
             ...field, ...(field.type === 'select' ? { options: TTSParameters.allowed(engine, field, current) } : {}),
             unavailable: TTSParameters.unavailable(engine, field, current),

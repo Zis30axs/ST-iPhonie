@@ -87,6 +87,10 @@ function unavailable(key,f,c){const p=c.params,k=f.key;
 }
 /** Fish Audio's address, or the relay (中转) the user set: every Fish request (speech, voices, balance) goes there. */
 export const FISH_API='https://api.fish.audio';
+// Drama 3 is served only on Fish's own /v1/tts, which answers no CORS preflight, so a browser cannot call it; the
+// compat endpoint we use lists s2.1-pro, s2.1-pro-free, s2-pro and s1 (GET /compat/v1/models, checked 2026-10-14).
+export const FISH_DRAMA_NOTE='Fish 还没把 drama-3 放进网页能用的接口：它现在只在 Fish 自己的 /v1/tts 上，那个接口不让浏览器直接调用。等 Fish 放开就能选；用 OpenAI 格式的中转时看中转支不支持。';
+const fishDramaBlocked=c=>c.model==='drama-3'&&!fishOpenAI(c);
 export const fishBase=c=>typeof c?.relay==='string'&&/^https?:\/\/[^\s]+$/.test(c.relay)?c.relay:FISH_API;
 /** A relay speaks Fish's own paths ('fish': /compat/v1/audio/speech, /model, /wallet) or OpenAI's ('openai': /v1/audio/speech only). */
 export const fishOpenAI=c=>!!(c?.relay&&c.relayApi==='openai');
@@ -142,4 +146,4 @@ function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();
  if(key==='fish'&&fishS1(model)){const w=word.toLowerCase();return FISH_S1_EMOTIONS.includes(w)||FISH_S1_TONES.includes(w)?`(${w}) ${text}`:text;}
  if(key==='fish'||key==='eleven'&&elevenTagged(model))return /^[a-z][a-z ,'-]{1,40}$/i.test(word)?`[${word.toLowerCase()}] ${text}`:text;
  return text;}
-export const TTSParameters={fishBase,fishOpenAI,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};
+export const TTSParameters={fishBase,fishOpenAI,fishDramaBlocked,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};

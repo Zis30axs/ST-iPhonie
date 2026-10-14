@@ -2463,6 +2463,15 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .paint-top{gap:2px;padding:6px 4px;overflow-x:auto;scrollbar-width:none}
 .paint-top::-webkit-scrollbar{display:none}
 .paint-top .paint-tool{width:34px;height:36px;flex:none}
+/* Narrow phones: every tool shrinks a little so 图层 and the colour dot stay on screen instead of scrolling off. */
+.paint-edit{container-type:inline-size}
+@container (max-width:400px){
+.paint-top{padding:6px 2px}
+.paint-top .paint-text{min-height:34px;padding:0 5px;font-size:13px}
+.paint-top .paint-tool{width:clamp(24px,calc((100cqw - 76px) / 8),34px);border-radius:10px}
+.paint-top .paint-tool svg{width:min(22px,calc(100% - 4px));height:auto}
+.paint-top .paint-swatch{width:26px;height:26px;margin:0 3px}
+}
 .paint-swatch{flex:none;touch-action:none;cursor:grab}
 .paint-pick{width:26px;height:26px;border-radius:7px;box-shadow:0 0 0 2px var(--card),0 0 0 3.5px color-mix(in srgb,var(--ink) 30%,transparent)}
 .paint-pick[aria-pressed=true]{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--accent)}
