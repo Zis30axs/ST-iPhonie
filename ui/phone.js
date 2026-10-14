@@ -17,6 +17,7 @@ import {chatApp} from './chat.js';
 import {soundsApp} from './sounds.js';
 import {assistantApp} from './assistant.js';
 import {musicApp} from './music.js';
+import {gamesApp} from './games.js';
 import {momentsNew, momentsSeen} from './moments.js';
 import {callScreen} from './call.js';
 import {installMotion} from './motion.js';
@@ -24,7 +25,7 @@ import {grow, launch, nudge, within, visible, islandIn, moving} from './carry.js
 import {todayPage} from './today.js';
 
 // App factories, keyed by the ids in apps.js.
-const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp, music: musicApp};
+const FACTORIES = {roles: rolesApp, engines: enginesApp, presets: presetsApp, library: libraryApp, gallery: galleryApp, notes: notesApp, listen: listenApp, settings: settingsApp, draw: drawApp, chat: chatApp, forum: forumApp, peek: peekApp, sounds: soundsApp, assistant: assistantApp, music: musicApp, games: gamesApp};
 const ACTIVE_PHASES = ['playing', 'paused', 'generating', 'waiting'];
 
 // Network and battery in the status bar come from the user's own device (where the browser tells them).
