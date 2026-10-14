@@ -10,7 +10,7 @@ const IMAGE_TYPES = 'image/png,image/jpeg,image/webp,image/avif,image/gif';
 
 export function settingsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'settings');
-  let appearance = null, check = null, backup = null, restore = null, epoch = 0;
+  let appearance = null, check = null, backup = null, restore = null, storage = false, epoch = 0;
   const glyphName = key => APPS[key]?.name || GLYPH_NAMES[key] || key;
 
   // The self-check page: what core/diagnostics.js found, grouped, with the plain report to copy, save or send.
@@ -63,7 +63,7 @@ export function settingsApp(ctx) {
   const restored = done => [done.keys && `${done.keys} 个密钥`, done.settings && '设置和预设', done.chats && `${done.chats} 段聊天`, done.memories && `${done.memories} 份聊天记忆`, done.assistant && `${done.assistant} 段助手会话`, done.moments && `${done.moments} 条朋友圈`, done.notes && `${done.notes} 条备忘录`, done.photos && `${done.photos} 张照片`, done.favorites && `${done.favorites} 段收藏`, done.vibes && `${done.vibes} 个 Vibe`].filter(Boolean).join('、');
 
   /** 保存到酒馆: the switch, and when it is on, when it last synced and what the tavern holds. */
-  function syncGroup() {
+  function syncRows() {
     const st = api.syncStatus?.();
     if (!st) return '';
     const time = at => new Date(at).toLocaleString('zh-CN', {hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
@@ -72,11 +72,8 @@ export function settingsApp(ctx) {
       : st.error ? '同步失败：' + st.error
       : st.lastAt ? '上次同步 ' + time(st.lastAt) : st.pending ? '有改动，马上同步' : '还没同步过';
     const remote = st.remote?.savedAt ? `酒馆里的是${st.remote.deviceName ? ' ' + st.remote.deviceName + ' ' : ''}在 ${time(st.remote.savedAt)} 存的` : '';
-    return groupTitle('保存到酒馆')
-      + `<div class="group">${toggle('syncEnabled', '保存到酒馆', st.enabled, '聊天记录、聊天记忆、助手会话与记忆、朋友圈、备忘录和相册存进酒馆里你账号的文件夹（data/你的用户名/user/files）。换一台设备、换个浏览器打开酒馆，小手机里的东西都还在；清了浏览器数据也不会丢。有改动几秒后自动保存，打开小手机时自动读取别的设备的新内容。两台设备都改了同一段聊天或同一条朋友圈时，会合并成一份（消息和评论都保留）；只有一边改过就直接用那一边的。助手已发送的附件随会话保存，生成的图片保存在相册。密钥不会存进去；语音缓存、收藏的语音和向量检索缓存也不存，需要时重新生成。')}
-        ${st.enabled ? `<div class="setting-row"><span class="row-text"><strong data-sync-state>${esc(state)}</strong>${remote ? `<small>${esc(remote)}</small>` : ''}</span>${btn('sync-now', icon('refresh') + '立即同步', 'chip-button', st.busy || !st.available ? 'disabled' : '')}</div>` : ''}
-        ${st.available ? `<div class="setting-row"><span class="row-text"><strong>删除酒馆里的那份</strong><small>只删酒馆里存的，这台设备上的不动</small></span>${btn('sync-clear', icon('trash') + '删除', 'chip-button', st.busy ? 'disabled' : '')}</div>` : ''}</div>`
-      ;
+    return toggle('syncEnabled', '保存到酒馆', st.enabled, '聊天记录、聊天记忆、助手会话与记忆、朋友圈、备忘录和相册存进酒馆里你账号的文件夹（data/你的用户名/user/files）。换一台设备、换个浏览器打开酒馆，小手机里的东西都还在；清了浏览器数据也不会丢。有改动几秒后自动保存，打开小手机时自动读取别的设备的新内容。两台设备都改了同一段聊天或同一条朋友圈时，会合并成一份（消息和评论都保留）；只有一边改过就直接用那一边的。助手已发送的附件随会话保存，生成的图片保存在相册。密钥不会存进去；语音缓存、收藏的语音和向量检索缓存也不存，需要时重新生成。\n\n想删掉酒馆里存的那份：存储空间 → 酒馆里存的那份。')
+      + (st.enabled ? `<div class="setting-row"><span class="row-text"><strong data-sync-state>${esc(state)}</strong>${remote ? `<small>${esc(remote)}</small>` : ''}</span>${btn('sync-now', icon('refresh') + '立即同步', 'chip-button', st.busy || !st.available ? 'disabled' : '')}</div>` : '');
   }
   async function clearTavernCopy() {
     try { const n = await api.clearSyncFiles(); ctx.notify(n ? '酒馆里的那份已删除' : '酒馆里没有存过'); } catch (error) { ctx.notify(error.message, {error: true}); }
@@ -139,56 +136,72 @@ export function settingsApp(ctx) {
       + `<div class="savebar">${btn('cancel-appearance', '取消', 'secondary')}${btn('save-appearance', '应用', 'primary')}</div>`);
   }
 
+  /** 存储空间: the voice cache switch, what this device holds, the clearing, and the copy in the tavern. */
+  async function renderStorage(ticket) {
+    const [cache, library, drawn] = await Promise.all([api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null)]);
+    const chatPictures = api.chatPictureStats?.() || null, st = api.syncStatus?.();
+    if (v.disposed || ticket !== epoch) return;
+    const s = api.getState();
+    v.draw(heading('存储空间', '', 'Storage')
+      + `<div class="group">${toggle('cacheEnabled', '保存语音缓存', s.general.cacheEnabled, '已生成的音频用于重播。清缓存不会删除收藏、相册、备忘录或参考音频。')}
+          ${storageFold(cache, library, drawn, chatPictures)}</div>`
+      + groupTitle('清理')
+      + `<div class="group">
+          <div class="setting-row"><span class="row-text"><strong>语音缓存</strong><small>收藏和其他资料会保留</small></span>${btn('clear-cache', icon('trash') + '清理', 'chip-button')}</div>
+          <div class="setting-row"><span class="row-text"><strong>相册里的绘图</strong><small>绘图 App、正文、查手机、朋友圈画出来的图</small></span>${btn('clear-drawn', icon('trash') + '清除', 'chip-button', drawn?.count ? '' : 'disabled')}</div>
+          ${chatPictures ? `<div class="setting-row"><span class="row-text"><strong>当前聊天的正文图片</strong><small>存在酒馆里，出图标签还在，可以再画</small></span>${btn('clear-chat-pictures', icon('trash') + '清除', 'chip-button', chatPictures.count ? '' : 'disabled')}</div>` : ''}
+          ${st?.available ? `<div class="setting-row"><span class="row-text"><strong>酒馆里存的那份</strong><small>只删酒馆里存的，这台设备上的不动</small></span>${btn('sync-clear', icon('trash') + '删除', 'chip-button', st.busy ? 'disabled' : '')}</div>` : ''}
+        </div>`);
+  }
+
   async function render() {
     const ticket = ++epoch;
     if (appearance) { renderAppearance(); return; }
     if (check) { renderCheck(); return; }
     if (backup) { await renderBackup(ticket); return; }
     if (restore) { renderRestore(); return; }
-    const [phone, cache, library, drawn] = await Promise.all([api.getPhone(), api.cacheStats(), api.libraryStats().catch(() => null), api.generatedPhotos().catch(() => null)]);
-    const chatPictures = api.chatPictureStats?.() || null;
+    if (storage) { await renderStorage(ticket); return; }
+    const [phone, cache, library] = await Promise.all([api.getPhone(), api.cacheStats(), api.libraryStats().catch(() => null)]);
     if (v.disposed || ticket !== epoch) return;
-    const s = api.getState();
-    const wallName = phone.wallpaper.kind === 'builtin' ? wallpapers[phone.wallpaper.key]?.name : '自定义照片';
+    const s = api.getState(), space = api.phoneSpace?.() || {};
+    const wallName = phone.wallpaper.kind === 'builtin' ? wallpapers[phone.wallpaper.key]?.name : '自己的照片';
+    const used = library ? size(library.bytes + (cache.available ? cache.bytes : 0)) : '';
     v.draw(heading('设置', '', 'Settings')
       + groupTitle('外观')
       + `<div class="group pad">
           <div class="field"><span>主题风格</span><div class="skin-options">${Object.entries(skins).map(([key, s]) => `<button class="skin-choice" data-action="skin" data-value="${key}" aria-pressed="${(phone.skin || 'sky') === key}"><span style="background:${s.preview[0]}"><b style="background:${s.preview[3]}"></b><i style="background:${s.preview[1]}"></i><i style="background:${s.preview[2]}"></i></span>${s.name}</button>`).join('')}</div></div>
           <div class="field"><span>日夜</span><div class="segmented" style="margin:0">${[['system', '跟随系统'], ['light', '日间'], ['dark', '夜间']].map(([key, label]) => `<button data-action="theme" data-value="${key}" aria-pressed="${phone.theme === key}">${label}</button>`).join('')}</div></div>
-          ${toggle('wallpaperMotion', '动态壁纸', s.general.wallpaperMotion !== false, '内置壁纸会慢慢动起来：晴空飘云、夜里星星闪烁和流星、水感晴空的泡泡和夜里的极光、青草信笺的落叶和夜里的萤火虫、樱色的花瓣。用自己的照片当壁纸时不动；系统开启「减少动态效果」时也保持静止。')}
           <button class="list-row" data-action="appearance"><span><strong>壁纸与图标</strong><small>${wallName} · ${({color: '彩色', glass: '玻璃', mono: '单色'})[phone.iconStyle]}图标</small></span>${icon('next')}</button>
-          ${phone.wallpaper.kind === 'photo' ? `<div class="setting-row"><span>现在用的是自己的照片当壁纸</span>${btn('builtin-wallpaper', '换回主题壁纸', 'chip-button')}</div>` : ''}
+          ${toggle('wallpaperMotion', '动态壁纸', s.general.wallpaperMotion !== false, '内置壁纸会慢慢动起来：晴空飘云、夜里星星闪烁和流星、水感晴空的泡泡和夜里的极光、青草信笺的落叶和夜里的萤火虫、樱色的花瓣。用自己的照片当壁纸时不动；系统开启「减少动态效果」时也保持静止。控制中心里也能开关。')}
+          ${toggle('lockOnOpen', '打开时显示锁屏', phone.lockOnOpen, '锁屏可随时跳过，是插件内的外观，不是手机安全锁。想看一眼锁屏，点控制中心里的「锁屏」。')}
         </div>`
-      + groupTitle('配音')
+      + groupTitle('正文')
       + `<div class="group pad">${languageField('defaultLanguage', s.general.defaultLanguage, false, typedLanguages(api.getState()))}
           ${toggle('voiceEnabled', '正文语音', s.general.voiceEnabled !== false, '关掉后，聊天请求里不再加入语音规则，模型只写普通对白；正文里已有的语音标签只显示中文译文，不显示声波；手机聊天里的联系人也只发文字。打开后恢复。')}
+          ${toggle('drawEnabled', '正文出图', s.draw.enabled, '开启后，绘图预设会加进聊天请求，让模型在正文里写出图标签。新回复要不要自动画、图片要不要收起，在绘图 App 的「正文出图」里改；免费档守卫在绘图 App 的「参数」里。')}
+          ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上开了视觉小说模式，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
+        </div>
+        <details data-group="voice-more"><summary>更多<small class="fold-note">声波、旧配音标签、音量</small></summary><div class="fold-body">
           ${toggle('hideStoryWaves', '隐藏正文声波', s.general.hideStoryWaves === true, '正文只显示台词文字，不插入声波按钮，适合与部分美化卡一起使用。语音规则和音频仍然保留，可以在「听取」里生成、播放和导出。')}
           ${toggle('stripVoice', '发给模型时去掉旧配音标签', s.general.stripVoice !== false, '不改变酒馆里的正文显示；只是之后每次请求模型时，旧回复里的每句台词只留中文译文，标签和原文不发，省上下文，也不用自己写正则。旧回复全部去掉：留着的那条会被模型当成模板照着学，情绪和句式越写越固定；格式靠每次注入的语音规则就够了。出图块在「绘图」里另有同样的开关。')}
           ${s.general.stripVoice !== false ? toggle('voiceExample', '保留最近一条做示范', s.general.voiceExample === true, '最新一条带台词的回复不去掉，原样发给模型当格式示范。模型老是忘了写配音标签时再打开；打开后它容易照着这条学，越写越像。') : ''}
-          ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上开了视觉小说模式，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
-          ${toggle('floatingEnabled', '悬浮入口', s.general.floatingEnabled, '在酒馆里显示可以拖动的小球，点开再点一次进入手机。')}
           ${toggle('waveformEnabled', '声波动效', s.general.waveformEnabled, '台词旁和手机里的声波随真实音频跳动。系统开启减少动态效果时保持静止。\n\n正文声波的颜色跟随酒馆主题：\n· 虚线小点：这个角色还没配音（斜体色）\n· 淡色：还没生成（正文色）\n· 引号色：已生成，可以播放\n· 引号色加底色：正在播放\n· 下划线色：已经播放过')}
           <div class="field"><div class="meter-label"><span>播放音量</span><output>${Math.round(phone.volume * 100)}%</output></div><input class="slider" type="range" data-field="volume" min="0" max="100" value="${Math.round(phone.volume * 100)}" aria-label="播放音量"></div>
-        </div>`
-      + groupTitle('绘图')
-      + `<div class="group">${toggle('drawEnabled', '正文出图', s.draw.enabled, '开启后，绘图预设会加进聊天请求，让模型在正文里写出图标签。')}${toggle('drawAuto', '新回复自动出图', s.draw.auto, '只自动画不花钱的：NovelAI 免费档内的图、ComfyUI 的图；GPT 生图在「每张先问」关掉后也会自动画。其余的正文里显示“点击生成”。用哪个引擎画在绘图 App 顶上选。')}${toggle('drawFold', '正文图片默认收起', s.draw.fold, '正文里只留一个小缩略图，点开再看。每张图也能单独收起或展开。')}${toggle('drawGuard', '免费档守卫', s.draw.guard, '步数不超过 28、尺寸不超过 1024×1024，不会发出扣 Anlas 的请求。')}</div>`
-      + groupTitle('分区')
-      + (() => { const space = api.phoneSpace?.() || {}; return `<div class="group">${toggle('partition', '按角色卡分开', s.chat.partition === 'card', '打开后，每张角色卡（群聊是每个群）一部手机：聊天记录、朋友圈、论坛、查手机各管各的，换卡就换手机；联系人只有这张卡的角色、在这张卡剧情里说过话的角色，和在这张卡里手动加的联系人。「我」跟着酒馆给这张卡锁定的人设走。\n\n打开之前就有的聊天和动态没有归属，每张卡都看得到；不想要的可以删掉。关掉分区后，所有东西又会一起显示。')}
-          <div class="setting-row"><span>现在是</span><small>${space.key ? esc(space.name || '这张角色卡') + (s.chat.partition === 'card' ? ' 的手机' : '') : '没有打开角色卡'}</small></div></div>`; })()
+        </div></details>`
       + groupTitle('手机')
-      + `<div class="group">${toggle('lockOnOpen', '打开时显示锁屏', phone.lockOnOpen, '锁屏可随时跳过，是插件内的外观，不是手机安全锁。')}<button class="list-row" data-action="lock"><span><strong>看一眼锁屏</strong></span>${icon('lock')}</button></div>`
-      + groupTitle('存储')
-      + `<div class="group">${toggle('cacheEnabled', '保存语音缓存', s.general.cacheEnabled, '已生成的音频用于重播。清缓存不会删除收藏、相册、备忘录或参考音频。')}
-          ${storageFold(cache, library, drawn, chatPictures)}</div>
-        <details class="tool-fold" data-group="storage-clear"><summary>${icon('trash')}清理<small>语音缓存 · 相册里的绘图（绘图 App、正文、查手机、朋友圈）· 正文图片</small></summary><div>
-          <div class="actions" style="margin-top:0">${btn('clear-cache', icon('trash') + '清理语音缓存', 'danger')}${btn('clear-drawn', icon('trash') + '清除相册里的绘图', 'danger', drawn?.count ? '' : 'disabled')}${chatPictures ? btn('clear-chat-pictures', icon('trash') + '清除正文图片', 'danger', chatPictures.count ? '' : 'disabled') : ''}</div></div></details>
-        ${syncGroup()}
-        ${groupTitle('备份与恢复')}<div class="group"><button class="list-row" data-action="backup"><span><strong>备份到文件</strong><small>设置、聊天记录与记忆、助手会话与记忆、相册和收藏存成一个文件，换设备或误删时能找回</small></span>${icon('next')}</button><label class="list-row file-button"><span><strong>从文件恢复</strong><small>选一个 ST-iPhonie 备份文件</small></span>${icon('next')}<input type="file" data-backup-file accept=".json,application/json" aria-label="选择备份文件"></label></div>
-        ${groupTitle('帮助')}<div class="group"><button class="list-row" data-action="self-check"><span><strong>自检</strong><small>出问题时看看是哪里不对，可以把报告发给帮你的人</small></span>${icon('next')}</button></div>
-        <div class="actions">${btn('about', '关于 ST-iPhonie', 'text-button')}</div>`);
+      + `<div class="group">${toggle('floatingEnabled', '悬浮入口', s.general.floatingEnabled, '在酒馆里显示可以拖动的小球，点开再点一次进入手机。')}
+          <div class="setting-row"><span class="row-text"><strong>按角色卡分开${help('打开后，每张角色卡（群聊是每个群）一部手机：聊天记录、朋友圈、论坛、查手机各管各的，换卡就换手机；联系人只有这张卡的角色、在这张卡剧情里说过话的角色，和在这张卡里手动加的联系人。「我」跟着酒馆给这张卡锁定的人设走。\n\n打开之前就有的聊天和动态没有归属，每张卡都看得到；不想要的可以删掉。关掉分区后，所有东西又会一起显示。')}</strong><small>${space.key ? '现在是' + esc(space.name || '这张角色卡') + (s.chat.partition === 'card' ? ' 的手机' : '') : '没有打开角色卡'}</small></span><input class="switch" type="checkbox" data-field="partition" aria-label="按角色卡分开" ${s.chat.partition === 'card' ? 'checked' : ''}></div></div>`
+      + groupTitle('资料')
+      + `<div class="group">${syncRows()}
+          <button class="list-row" data-action="backup"><span><strong>备份到文件</strong><small>换设备或误删时能找回</small></span>${icon('next')}</button>
+          <label class="list-row file-button"><span><strong>从文件恢复</strong><small>选一个 ST-iPhonie 备份文件</small></span>${icon('next')}<input type="file" data-backup-file accept=".json,application/json" aria-label="选择备份文件"></label>
+          <button class="list-row" data-action="storage"><span><strong>存储空间</strong><small>${used ? '用了 ' + used + ' · ' : ''}语音缓存、清理</small></span>${icon('next')}</button></div>`
+      + groupTitle('帮助')
+      + `<div class="group"><button class="list-row" data-action="self-check"><span><strong>自检</strong><small>出问题时看看是哪里不对，可以把报告发给帮你的人</small></span>${icon('next')}</button>
+          <button class="list-row" data-action="about"><span><strong>关于 ST-iPhonie</strong></span>${icon('next')}</button></div>`);
   }
 
-  v.back = () => { if (!appearance && !check && !backup && !restore) return false; appearance = check = backup = restore = null; render().catch(e => ctx.notify(e.message)); return true; };
+  v.back = () => { if (!appearance && !check && !backup && !restore && !storage) return false; appearance = check = backup = restore = null; storage = false; render().catch(e => ctx.notify(e.message)); return true; };
   v.refresh = () => { if (!appearance) return render(); };
   v.on('input', '[data-field=volume]', el => { el.previousElementSibling.querySelector('output').textContent = el.value + '%'; });
   v.on('change', '[data-field]', async el => {
@@ -207,9 +220,6 @@ export function settingsApp(ctx) {
     }
     if (['voiceEnabled', 'hideStoryWaves', 'voiceIsland', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion', 'stripVoice', 'voiceExample'].includes(key)) { api.updateGeneral({[key]: el.checked}); if (key === 'stripVoice') await render(); }
     else if (key === 'drawEnabled') api.saveDraw({enabled: el.checked});
-    else if (key === 'drawAuto') api.saveDraw({auto: el.checked});
-    else if (key === 'drawGuard') api.saveDraw({guard: el.checked});
-    else if (key === 'drawFold') api.saveDraw({fold: el.checked});
     else if (key === 'defaultLanguage') api.updateGeneral({defaultLanguage: el.value});
     else if (key === 'volume') await api.setVolume(Number(el.value) / 100);
     else if (key === 'lockOnOpen') await api.savePhone({lockOnOpen: el.checked});
@@ -279,7 +289,7 @@ export function settingsApp(ctx) {
       }
       case 'cancel-appearance': appearance = null; await render(); break;
       case 'save-appearance': await v.busy(el, async () => { await api.savePhone(appearance); appearance = null; await render(); ctx.notify('外观已应用'); }); break;
-      case 'lock': ctx.lock(); break;
+      case 'storage': storage = true; await render(); v.root.scrollTop = 0; break;
       case 'self-check': case 'run-check': await runCheck(); break;
       case 'backup': backup = {parts: new Set(Object.keys(api.backupParts()).filter(part => part !== 'keys')), password: '', again: ''}; await render(); break;
       case 'sync-clear': if (await ctx.confirm('删除酒馆里的那份？', '酒馆里存的聊天记录与记忆、助手会话与记忆、朋友圈、备忘录和相册会删掉，别的设备再同步时就读不到了。这台设备上的内容不受影响；同步开着的话，之后会重新存一份。')) await clearTavernCopy(); break;

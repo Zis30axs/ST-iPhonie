@@ -15,7 +15,7 @@ const POSITION = i => i < 0 ? '自动' : 'ABCDE'[i % 5] + (Math.floor(i / 5) + 1
 
 export function drawApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'draw'), urls = new Map();
-  let tab = 'prompt', idea = '', prompt = '', negative = '', characters = [], seed = -1, results = [], current = -1, newest = false, busy = false, subscription = null, styleDraft = null, epoch = 0;
+  let tab = 'prompt', idea = '', prompt = '', negative = '', characters = [], seed = -1, results = [], current = -1, newest = false, busy = false, subscription = null, epoch = 0;
   // ComfyUI: models, samplers and schedulers read from it (null until 读取 is pressed).
   let comfyInfo = null, comfyRequest = 0, comfyAddress = '';
   const plans = comfyPlans(ctx, () => render());
@@ -61,7 +61,7 @@ export function drawApp(ctx) {
   }
 
   async function render() {
-    const ticket = ++epoch, d = state(), e = d.engine, s = styleDraft || style(), q = quote(), p = q.params, keyed = api.drawReady();
+    const ticket = ++epoch, d = state(), e = d.engine, q = quote(), p = q.params, keyed = api.drawReady();
     // ComfyUI: the scheme in use, which parameters its workflow takes, and its LoRAs.
     let comfy = null;
     if (e === 'comfy') { try { comfy = api.comfyLoraInfo(); } catch (error) { comfy = {nodes: [], sources: [], disabled: [], controls: [], error: error.message, missing: ''}; } }
@@ -72,15 +72,14 @@ export function drawApp(ctx) {
     const thumbs = await Promise.all(results.map(r => urlFor(r.photoId)));
     if (v.disposed || ticket !== epoch) return;
     const size = SIZES.find(([, , w, h]) => w === d.params.width && h === d.params.height)?.[0] || 'custom';
-    const tabs = [['prompt', '提示词'], ['chars', '角色'], ['params', '参数'], ...(e === 'nai' ? [['vibe', 'Vibe']] : e === 'comfy' ? [['lora', 'LoRA']] : []), ['chat', '正文出图']];
+    const tabs = [['prompt', '提示词'], ['chars', '角色'], ['params', '参数'], ...(e === 'nai' ? [['vibe', 'Vibe']] : e === 'comfy' ? [['lora', 'LoRA']] : [])];
     v.root.dataset.engine = e;
     let body = '';
     if (tab === 'prompt') body = `
       <div class="group pad">${field('这张图的提示词', textArea('prompt', prompt, 'rows="4" placeholder="英文 tag，逗号分隔，例如 2girls, rainy day, cafe window, sharing an umbrella"'), e === 'gpt' ? '会和画风的固定正面、每个角色的外貌一起整理成一段英文描述发给 GPT。画师串、权重括号和负面不会发给 GPT。' : e === 'comfy' ? '实际发送：画师串 + 固定正面 + 这里的提示词，后面接上每个角色的外貌；NovelAI 的权重写法会自动换成 ComfyUI 的。' : '实际发送：画师串 + 固定正面 + 这里的提示词。')}
         <div class="token-meter" data-token-meter="positive" hidden></div>
-        <div class="field idea-field"><span>想画什么${help('用中文说一句就行，比如「下雨天两个人在便利店门口共撑一把伞」，也可以写很多要求（框会跟着变高），点「帮我写」，模型会补成完整的英文提示词填到上面（会换掉上面原来的）。可以直接写人名：作品里的角色模型会写成它认得的 tag；角色 App 里登记了外貌的人，模型只写名字，插件会把他们加进「角色」并带上外貌。用 NovelAI 时会按 token 上限尽量写满。')}</span>${textArea('idea', idea, 'class="idea-box" rows="2" maxlength="1000" placeholder="例如：下雨天两个人共撑一把伞。可以写很多要求：动作、表情、衣服、天气、镜头……"')}<div class="actions" style="margin:6px 0 0">${btn('write-prompt', icon('wand') + '帮我写', 'secondary')}</div></div>
-        <div class="actions" style="margin-top:0">${btn('suggest', icon('book') + '从剧情生成', 'secondary')}</div>
-        ${e === 'gpt' ? '' : field('这张图额外的负面', textArea('negative', negative, 'rows="2" placeholder="可以留空，会和固定负面合在一起"')) + '<div class="token-meter" data-token-meter="negative" hidden></div>'}</div>`;
+        <div class="field idea-field"><span>想画什么${help('用中文说一句就行，比如「下雨天两个人在便利店门口共撑一把伞」，也可以写很多要求（框会跟着变高），点「帮我写」，模型会补成完整的英文提示词填到上面（会换掉上面原来的）。可以直接写人名：作品里的角色模型会写成它认得的 tag；角色 App 里登记了外貌的人，模型只写名字，插件会把他们加进「角色」并带上外貌。用 NovelAI 时会按 token 上限尽量写满。')}</span>${textArea('idea', idea, 'class="idea-box" rows="2" maxlength="1000" placeholder="例如：下雨天两个人共撑一把伞。可以写很多要求：动作、表情、衣服、天气、镜头……"')}<div class="actions" style="margin:6px 0 0">${btn('write-prompt', icon('wand') + '帮我写', 'secondary')}${btn('suggest', icon('book') + '从剧情生成', 'secondary')}</div></div></div>
+        ${e === 'gpt' ? '' : `<details data-group="draw-negative" ${negative.trim() ? 'open' : ''}><summary>这张图额外的负面<small class="fold-note">${negative.trim() ? '' : '没有'}</small></summary><div class="fold-body">${textArea('negative', negative, 'rows="2" aria-label="这张图额外的负面" placeholder="可以留空，会和固定负面合在一起"')}<div class="token-meter" data-token-meter="negative" hidden></div></div></details>`}`;
     if (tab === 'chars') body = (characters.length ? characters.map((c, i) => `
       <div class="group pad draw-char" data-engine="${ctx.engineOf(c.name)}"><div class="row-heading">${avatar(c.name, ctx.engineOf(c.name), 30)}<strong style="flex:1">${esc(c.name)}</strong><span class="chip">位置 ${POSITION(c.position)}</span>${btn('remove-char', icon('trash'), 'text-button', `data-index="${i}" aria-label="移除 ${esc(c.name)}"`)}</div>
         <div class="char-body">${textArea('char', c.prompt, `data-index="${i}" rows="3" aria-label="${esc(c.name)} 的提示词"`)}
@@ -101,6 +100,7 @@ export function drawApp(ctx) {
         ${/^nai-diffusion-5/.test(d.params.model) ? '' : toggle('variety', 'Variety+', d.params.variety, '让构图更多变，适合 V4 / 4.5。')}
       </div>
       <div class="group">${toggle('guard', '免费档守卫', d.guard, '开启时步数不超过 28、尺寸不超过 1024×1024，不会发出扣 Anlas 的请求。关闭后，会扣点的生成每次都先问你。')}</div>
+      <details data-group="draw-queue"><summary>排队<small class="fold-note">间隔 ${d.queue.gap} 秒 · ${d.queue.cloud.enabled ? '云端队列开着' : '本机排队'}</small></summary><div class="fold-body">
       ${groupTitle('排队', help('一个 NovelAI 账号同一时间只能画一张。几个人共用账号时，同时请求会得到 429，太频繁还可能被风控。\n\n插件里所有出图都排成一队，一张画完再发下一张（同一个浏览器里开的几个酒馆页面也会互相等）；两张之间留出间隔；遇到 429 就等一会儿再试，等待时间一次比一次长。'))}
       <div class="group pad">
         <div class="field"><div class="meter-label"><span>两张图之间至少间隔</span><output>${d.queue.gap} 秒</output></div><input class="slider" type="range" data-queue="gap" min="0" max="60" value="${d.queue.gap}" aria-label="两张图之间的间隔秒数"></div>
@@ -114,7 +114,7 @@ export function drawApp(ctx) {
         ${d.queue.cloud.kind === 'keyhash' ? '<p class="hint" style="padding:0">不用房间码：用同一个 NovelAI 密钥的人会自动排进同一条队。</p>' : `<div class="field"><span>房间码</span><div class="inline-row"><input data-cloud="room" value="${esc(d.queue.cloud.room)}" placeholder="16–64 位字母或数字" autocomplete="off" aria-label="房间码">${btn('new-room', '生成', 'chip-button')}</div></div>`}
         <div class="actions" style="margin-top:0">${btn('test-cloud', icon('refresh') + '测试连接', 'secondary')}</div>
         ${cloudNote ? `<p class="hint${cloudNote.ok ? '' : ' error-copy'}" style="padding:0">${esc(cloudNote.text)}</p>` : ''}
-      </div>`;
+      </div></div></details>`;
     if (tab === 'vibe') body = vibes.html();
     if (tab === 'lora') body = plans.summary(comfy) + loras.html(comfy);
     if (tab === 'chat') body = `
@@ -125,7 +125,8 @@ export function drawApp(ctx) {
       <div class="group pad"><p class="hint" style="padding:6px 0">出图块长这样（一张图一块）：${help('场景和每个人分开写：人数、镜头、光线放场景；表情、视线、动作放各自的角色行。插件把画风固定串接在场景前面，把角色 App 里的固定外貌补进对应的角色行，再交给选中的绘图引擎（GPT 会整理成英文描述，ComfyUI 会合成一条提示词）。新角色第一次出现时，模型写的「新外貌」会自动存进角色 App。图片会上传到酒馆，并存进相册。')}</p><pre class="code-preview">${esc(api.picTagFormat)}</pre></div>
       <p class="hint">每条回复固定出 ${(d.presets.find(p => p.id === d.activePreset) || d.presets[0]).count} 张图，在出图规则里改张数。</p><div class="actions">${btn('open-presets', icon('edit') + '编辑出图规则', 'secondary')}</div>`;
     const sub = e === 'gpt' ? d.gpt.model : e === 'comfy' ? '' : subscription ? `${TIERS[subscription.tier] || '订阅'} · ${subscription.anlas} Anlas` : keyed ? '读取中' : '';
-    v.draw(heading('绘图', keyed && sub ? `<span class="chip">${esc(sub)}</span>` : '', engineName(e))
+    // 正文出图 (how story replies get pictures) is set now and then: a chip by the title, not one more tab.
+    v.draw(heading('绘图', (keyed && sub ? `<span class="chip">${esc(sub)}</span>` : '') + btn('tab', icon('image') + '正文出图', 'chip-button', `data-tab="chat" aria-pressed="${tab === 'chat'}"`), engineName(e))
       + `<div class="segmented draw-engines" role="group" aria-label="用哪个画">${api.drawCatalog.engines.map(k => `<button data-action="draw-engine" data-pick="${k}" aria-pressed="${k === e}">${esc(engineName(k))}</button>`).join('')}</div>`
       + (keyed ? '' : `<div class="banner">${icon('key')}<span>${esc(api.drawMissing())}。</span>${btn('go-key', '去填写', 'chip-button')}</div>`)
       + queueCard()
@@ -133,13 +134,6 @@ export function drawApp(ctx) {
         <div class="canvas-card"><div class="canvas-main${main ? '' : ' empty'}" style="aspect-ratio:${p.width}/${p.height}">${main ? `<button type="button" class="canvas-zoom" data-action="zoom" aria-label="放大查看"><img src="${esc(main)}" alt="生成的图片"></button>` : `<span>${comfy && !(comfy.controls.includes('width') && comfy.controls.includes('height')) ? '尺寸由工作流决定' : `${p.width} × ${p.height}`}<br>还没有图</span>`}${busy ? `<span class="canvas-busy">${esc(engineName(e))} 正在画……</span>` : ''}</div>
           ${results.length ? `<div class="canvas-side" data-keep-scroll="results">${thumbs.map((url, i) => `<button class="thumb" data-action="thumb" data-index="${i}" aria-pressed="${i === current}" aria-label="第 ${i + 1} 张">${url ? `<img src="${esc(url)}" alt="">` : ''}</button>`).join('')}</div>` : ''}</div>
         ${shown ? `<p class="hint canvas-meta">${[shown.params.model, `${shown.params.width}×${shown.params.height}`, shown.params.steps ? shown.params.steps + ' 步' : '', shown.seed >= 0 ? '种子 ' + shown.seed : ''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
-        <details data-group="style" class="style-card"><summary>${icon('paint')}画风 · ${esc(s.name)}<span class="save-state" data-style-state>${styleDraft ? '未保存' : ''}</span></summary><div>
-          ${field('名字', input('name', s.name, 'text', 'data-style-field maxlength="40"'))}
-          ${field('画师串', textArea('artist', s.artist, 'class="code" rows="2" data-style-field placeholder="例如 artist:wlop, artist:ciloranko"'))}
-          ${field('固定正面', textArea('positive', s.positive, 'class="code" rows="2" data-style-field'))}
-          ${field('固定负面', textArea('negative-fixed', s.negative, 'class="code" rows="2" data-style-field'))}
-          <div class="actions" style="margin-top:0">${btn('save-style', '保存画风', 'primary')}</div>
-          ${help('正文出图和这里单独生图都会带上画风。每个引擎记住自己用的画风；GPT 不读画师串和固定负面。')}</div></details>
         <div class="segmented draw-tabs">${tabs.map(([k, l]) => `<button data-action="tab" data-tab="${k}" aria-pressed="${k === tab}">${l}</button>`).join('')}</div>
         ${body}
         <div class="savebar">${btn('generate', busy ? '正在画……' : q.free === false ? icon('alert') + (e === 'gpt' ? '生成（要花钱）' : '生成（会扣 Anlas）') : icon('paint') + '生成', 'primary', busy || !keyed || comfy?.missing ? 'disabled' : '')}</div>`);
@@ -165,7 +159,7 @@ export function drawApp(ctx) {
     let count;
     try { count = await loadCounter(budget.kind); } catch { for (const b of boxes) { b.hidden = false; b.textContent = '读不到分词表，暂时数不了 token'; } return; }
     if (ticket !== meterTicket || v.disposed) return;
-    const st = styleDraft || style(), join = list => list.map(x => (x || '').trim()).filter(Boolean).join(', ');
+    const st = style(), join = list => list.map(x => (x || '').trim()).filter(Boolean).join(', ');
     const used = countPicture(count, {prompt: join([st.artist, st.positive, prompt]), negative: join([st.negative, negative]),
       characters: characters.filter(c => c.prompt.trim()).map(c => ({prompt: c.prompt}))}, budget);
     const head = countField(count, join([st.artist, st.positive])), tag = tagCost(count);
@@ -236,7 +230,7 @@ export function drawApp(ctx) {
     tab = 'prompt';
     render();
   };
-  v.refresh = () => { styleDraft = null; render(); refreshSubscription(); };
+  v.refresh = () => { render(); refreshSubscription(); };
   v.onDraw = event => {
     if (event.subscription) subscription = event.subscription;
     if (event.queue) { queue = event.queue; cloudError = event.cloud || ''; }
@@ -251,13 +245,7 @@ export function drawApp(ctx) {
     else if (key === 'prompt') { prompt = el.value; meters(); }
     else if (key === 'negative') { negative = el.value; meters(); }
     else if (key === 'char') { characters[Number(el.dataset.index)].prompt = el.value; meters(); }
-    else if (el.hasAttribute('data-style-field')) {
-      meters();
-      styleDraft ||= {...style()};
-      styleDraft[key === 'negative-fixed' ? 'negative' : key] = el.value;
-      const mark = v.root.querySelector('[data-style-state]');
-      if (mark) mark.textContent = '未保存';
-    } else if (key === 'seed') seed = el.value === '' ? -1 : Math.max(-1, Math.floor(Number(el.value) || -1));
+    else if (key === 'seed') seed = el.value === '' ? -1 : Math.max(-1, Math.floor(Number(el.value) || -1));
   });
   v.on('input', '[data-param]', el => { el.previousElementSibling.querySelector('output').textContent = el.dataset.param === 'scale' ? Number(el.value).toFixed(1) : el.value; });
   v.on('change', '[data-param]', el => { api.saveDraw({params: {[el.dataset.param]: Number(el.value)}}); render(); });
@@ -291,7 +279,7 @@ export function drawApp(ctx) {
     const index = Number(el.dataset.index);
     switch (el.dataset.action) {
       case 'tab': tab = el.dataset.tab; await render(); break;
-      case 'draw-engine': api.saveDraw({engine: el.dataset.pick}); styleDraft = null; render(); refreshSubscription(); break;
+      case 'draw-engine': api.saveDraw({engine: el.dataset.pick}); render(); refreshSubscription(); break;
       case 'gpt-quality': api.saveDraw({gpt: {quality: el.dataset.value}}); render(); break;
       case 'gpt-orientation': api.saveDraw({gpt: {orientation: el.dataset.value}}); render(); break;
       case 'comfy-size': { const [, , width, height] = SIZES.find(s => s[0] === el.dataset.size); api.saveDraw({comfy: {width, height}}); render(); break; }
@@ -352,21 +340,12 @@ export function drawApp(ctx) {
         });
         break;
       case 'pick-style': pickStyle(); break;
-      case 'save-style': {
-        if (!styleDraft) { ctx.notify('画风没有改动'); break; }
-        if (!styleDraft.name.trim()) { ctx.notify('请填写画风名字'); break; }
-        api.saveStyle(styleDraft);
-        styleDraft = null;
-        render();
-        ctx.notify('画风已保存');
-        break;
-      }
       case 'generate': await generate(); break;
     }
   });
 
   async function generate() {
-    const s = styleDraft || style(), q = quote();
+    const s = style(), q = quote();
     let allowPaid = false;
     if (q.free === false && eng() === 'gpt') {
       const ask = api.paidPrompt();
@@ -422,26 +401,44 @@ export function drawApp(ctx) {
     });
   }
 
+  /** 画风: the ones there are (a tap uses one), and editing, adding or deleting the one in use. */
   function pickStyle() {
-    const d0 = state(), using = styleId();
-    const d = ctx.dialog('画风预设', `<div class="group">${d0.styles.map(s => `<button class="list-row" data-style="${esc(s.id)}"><span><strong>${esc(s.name)}</strong><small class="mono">${esc(s.artist || '没有画师串')}</small></span>${s.id === using ? plate('使用中') : icon('next')}</button>`).join('')}</div>
-      <div class="actions">${btn('new-style', icon('add') + '新建画风', 'secondary')}${d0.styles.length > 1 ? btn('delete-style', icon('trash') + '删除当前', 'danger') : ''}</div>`);
+    const d0 = state(), using = styleId(), now = style();
+    const d = ctx.dialog('画风', `<div class="pick-list">${d0.styles.map(s => `<button type="button" class="list-row" data-style="${esc(s.id)}">${icon(s.id === using ? 'check' : 'paint')}<span><strong>${esc(s.name)}</strong><small class="mono">${esc(s.artist || '没有画师串')}</small></span></button>`).join('')}
+      <button type="button" class="list-row" data-action="edit-style">${icon('edit')}<span><strong>改「${esc(now.name)}」</strong><small>名字、画师串、固定正面和负面</small></span></button>
+      <button type="button" class="list-row" data-action="new-style">${icon('add')}<span><strong>新建画风</strong></span></button>
+      ${d0.styles.length > 1 ? `<button type="button" class="list-row danger-row" data-action="delete-style">${icon('trash')}<span><strong>删除「${esc(now.name)}」</strong></span></button>` : ''}</div>`);
     d.body.addEventListener('click', async e => {
       const b = e.target.closest('button');
       if (!b) return;
       try {
-        if (b.dataset.style) { api.saveDraw({activeStyle: b.dataset.style}); styleDraft = null; d.close(); render(); }
+        if (b.dataset.style) { api.saveDraw({activeStyle: b.dataset.style}); d.close(); render(); }
+        if (b.dataset.action === 'edit-style') { d.close(); editStyle(); }
         if (b.dataset.action === 'new-style') {
-          const created = api.saveStyle({name: '新画风 ' + (d0.styles.length + 1), artist: '', positive: style().positive, negative: style().negative});
+          const created = api.saveStyle({name: '新画风 ' + (d0.styles.length + 1), artist: '', positive: now.positive, negative: now.negative});
           api.saveDraw({activeStyle: created.id});
-          styleDraft = null; d.close(); render();
-          ctx.notify('已新建画风，在下面改名字、填写画师串');
+          d.close(); render(); editStyle();
         }
         if (b.dataset.action === 'delete-style') {
           d.close();
-          if (await ctx.confirm('删除当前画风？', `「${style().name}」会被删除，其他画风保留。`)) { api.deleteStyle(style().id); styleDraft = null; render(); }
+          if (await ctx.confirm('删除当前画风？', `「${now.name}」会被删除，其他画风保留。`)) { api.deleteStyle(now.id); render(); }
         }
       } catch (error) { ctx.notify(error.message); }
+    });
+  }
+  /** The style in use, in a sheet: saved with its button, left as it was when the sheet is closed. */
+  function editStyle() {
+    const s = {...style()};
+    const d = ctx.dialog('画风', `${field('名字', input('name', s.name, 'text', 'maxlength="40"'))}
+      ${field('画师串', textArea('artist', s.artist, 'class="code" rows="3" placeholder="例如 artist:wlop, artist:ciloranko"'), '正文出图和这里单独生图都会带上画风。每个引擎记住自己用的画风；GPT 不读画师串和固定负面。')}
+      ${field('固定正面', textArea('positive', s.positive, 'class="code" rows="3"'))}
+      ${field('固定负面', textArea('negative-fixed', s.negative, 'class="code" rows="3"'))}
+      <div class="actions">${btn('save-style', '保存画风', 'primary')}</div>`);
+    d.body.addEventListener('input', e => { const key = e.target.dataset.field; if (key) s[key === 'negative-fixed' ? 'negative' : key] = e.target.value; });
+    d.body.addEventListener('click', e => {
+      if (!e.target.closest('[data-action=save-style]')) return;
+      if (!s.name.trim()) { ctx.notify('请填写画风名字'); return; }
+      try { api.saveStyle(s); d.close(); render(); ctx.notify('画风已保存'); } catch (error) { ctx.notify(error.message, {error: true}); }
     });
   }
 

@@ -1,4 +1,4 @@
-import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, empty} from './common.js';
+import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, empty, menu} from './common.js';
 import {icon, glyph} from './icons.js';
 import {APPS} from './apps.js';
 import {MARK_CHOICES} from '../core/voice-fx.js';
@@ -14,12 +14,13 @@ const KINDS = [['tts', '配音', 'listen'], ['chat', '聊天', 'chat'], ['draw',
 const USES = [['dm', '私聊'], ['group', '群聊'], ['moments', '朋友圈'], ['call', '电话'], ['forum', '论坛'], ['peek', '查手机'], ['story', '正文']];
 // Drawing rules: which engines an entry is sent with (none ticked or all ticked: every engine).
 const ENGINE_USES = [['nai', 'NovelAI'], ['gpt', 'GPT 生图'], ['comfy', 'ComfyUI']];
-const engineScope = e => e.engines?.length ? ' · 只给 ' + ENGINE_USES.filter(([k]) => e.engines.includes(k)).map(([, l]) => l).join('、') : '';
 
 export function presetsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'presets'), drafts = new Map();
   let current = null, currentKind = 'tts', kind = 'tts';
-  const mark = () => { const el = v.root.querySelector('[data-save-state]'); if (el) el.textContent = '未保存'; };
+  // Drafts changed since they were opened or saved: their bar says 未保存, also after the page is drawn again.
+  const dirty = new Set(), draftKey = () => currentKind + ':' + (current?.id || 'new');
+  const mark = () => { dirty.add(draftKey()); const el = v.root.querySelector('[data-save-state]'); if (el) el.textContent = '未保存'; };
   /** A fresh copy of the shipped preset of a kind: new entry ids, no preset id. */
   const shipped = k => {
     const base = structuredClone(k === 'chat' ? api.defaultChatPreset : k === 'draw' ? api.defaultDrawPreset : api.defaultVoicePreset);
@@ -52,12 +53,11 @@ export function presetsApp(ctx) {
       const draw = api.getState().draw;
       body = (kind === 'draw' && !draw.enabled ? '<p class="hint">正文出图没有开启，在「设置 · 绘图」里打开后，使用中的绘图预设才会加进聊天请求。</p>' : '')
         + o.list().map(p => `<button class="preset-card" data-action="edit-preset" data-kind="${kind}" data-id="${esc(p.id)}"${p.id === active ? ' data-active' : ''}>${tile(app)}<span><strong>${esc(p.name || '未命名预设')}</strong><small>${kind === 'chat' ? `读正文 ${p.context} 条 · 聊天记录 ${p.history} 条` : kind === 'draw' ? `每条回复 ${p.count} 张 · ${p.entries.length} 条规则` : `${p.entries.length} 条规则 · ${esc(positions.find(x => x[0] === p.injection.position)?.[1] || '')}`}</small></span>${p.id === active ? plate('使用中') : icon('next')}</button>`).join('')
-        + `<div class="actions">${btn('restore-default', icon('refresh') + '恢复默认预设', 'secondary')}</div>`
-        + `<p class="hint">${kind === 'draw'
+        + `<div class="actions">${btn('restore-default', icon('refresh') + '加回默认预设', 'text-button')}${help(kind === 'draw'
           ? '绘图预设是给正文模型看的出图规则：什么时候出图、标签怎么写。画师串和固定 tag 在绘图 App 的“画风”里。'
           : kind === 'chat'
           ? '聊天预设决定手机里的联系人怎么回消息、朋友圈怎么发、能看到多少剧情，以及“带进剧情”时怎么写进下一次正文。每条规则可以选用在私聊、群聊还是朋友圈。手机聊天和朋友圈单独生成，不会写进正文。'
-          : '配音预设让模型把台词写成带 TTS 标签的格式。角色配音不在预设里，切换预设不会改动角色。'}</p>`;
+          : '配音预设让模型把台词写成带 TTS 标签的格式。角色配音不在预设里，切换预设不会改动角色。')}</div>`;
     }
     v.draw(heading('预设', btn('add-preset', icon('add'), 'round-button', `aria-label="新增${label}预设"`), 'Preset · 3 类') + tabs + body);
   }
@@ -114,7 +114,7 @@ export function presetsApp(ctx) {
   function memoryFields(p) {
     const m = p.memory || {}, on = m.enabled !== false;
     const num = (key, label, value, min, max, note) => field(label, input('memory.' + key, value, 'number', `min="${min}" max="${max}" step="1"`), note);
-    return `<details data-group="preset-memory"><summary>记忆 ${help('聊得久了，最近几十条之外的消息模型就看不到了。打开记忆后，更早的消息会自动整理成摘要，摘要多了再合成阶段总结、长期总览（每整理一次调用一次文字模型）；回消息、打电话、查手机和朋友圈都会带上。每段聊天的记忆在右上角菜单 → 记忆 里看和改。')}</summary><div class="group pad">
+    return `<details data-group="preset-memory"><summary>记忆 ${help('聊得久了，最近几十条之外的消息模型就看不到了。打开记忆后，更早的消息会自动整理成摘要，摘要多了再合成阶段总结、长期总览（每整理一次调用一次文字模型）；回消息、打电话、查手机和朋友圈都会带上。每段聊天的记忆在右上角菜单 → 记忆 里看和改。')}<small class="fold-note">${on ? '开' : '关'}</small></summary><div class="fold-body">
       ${toggle('memory.enabled', '记住更早的聊天', on)}
       ${on ? num('batch', '每次整理多少条', m.batch ?? 40, 10, 200, '「读取聊天记录」那么多条之外的消息，攒够这么多条整理成一段聊天摘要。')
         + num('stage', '几段摘要合成一份阶段总结', m.stage ?? 5, 2, 20, '')
@@ -149,31 +149,82 @@ export function presetsApp(ctx) {
   }
   const storyName = key => storyList?.find(x => x.key === key)?.name || ({bakemono_memory: '剧情剪辑台', '1_memory': '酒馆总结'})[key] || key;
   let storyList = null;
+  // The editor keeps to what is changed most (name, format, the rules); the rest folds away, each rule is one row that
+  // opens in a sheet, and what is rare (发送预览, 恢复成默认内容, 删除预设) sits in the 「⋯」 of the title.
+  const ruleHelp = (e, draw, chat) => draw ? '可以用 {{出图格式}}、{{出图数量}}、{{角色列表}}。插件会在最后自动加上格式和张数的硬性要求。'
+    : chat ? '可以用 {{用户}}、{{对象}}；写语音消息规则时用 {{语音格式}}（手机固定用默认的台词格式，不跟配音预设走）、{{可发语音}}。用在朋友圈的规则只能用 {{用户}}。插件会在最后自动加上输出格式的硬性要求。'
+    : e.id === 'reading' ? '{{朗读规则}} 会换成这段剧情里每个说话者按自己的引擎和模型该怎么写（情绪、语气标签）。可以在前后加字；不想要就停用这一条。'
+    : e.id === 'contract' ? '{{格式}} 换成上面的台词格式；{{错误示例}} {{正确示例}} 会按台词格式自动写出例子，改了格式也不会对不上。可以随便改，改乱了点「恢复这一条」。'
+    : '启用规则的合计文字需包含 {{格式}} 和 {{语言}}。';
+  /** The small line under a rule's row: where it goes, or how it starts. */
+  function ruleNote(e, draw, chat) {
+    if (chat) { const used = USES.filter(([u]) => (e.use || []).includes(u)).map(([, l]) => l); return used.length ? used.join(' · ') : '哪里都没用'; }
+    if (draw) return e.engines?.length ? '只给 ' + ENGINE_USES.filter(([k]) => e.engines.includes(k)).map(([, l]) => l).join('、') : '三个引擎都用';
+    const text = String(e.text || '').replace(/\s+/g, ' ').trim();
+    return (e.injection ? '单独插入位置 · ' : '') + (text ? text.slice(0, 40) : '还是空的');
+  }
+  const fold = (group, title, note, body, info = '') => `<details data-group="${group}"><summary>${esc(title)}${info ? ' ' + help(info) : ''}${note ? `<small class="fold-note">${esc(note)}</small>` : ''}</summary><div class="fold-body">${body}</div></details>`;
   function renderEditor() {
     const p = current, o = ops(currentKind), draw = currentKind === 'draw', chat = currentKind === 'chat';
     const used = p.id && p.id === o.active();
-    v.draw(heading(p.id ? '编辑预设' : '新预设', '', draw ? 'Drawing Preset' : chat ? 'Chat Preset' : 'Voice Preset')
-      + `<div class="group pad">${field('名称', input('name', p.name))}${chat
-        ? `${field('读取最近的正文', input('context', p.context, 'number', 'min="0" max="100" step="1"'), '回消息时参考最近几条正文，0 表示不看剧情。')}${field('读取聊天记录', input('history', p.history, 'number', 'min="2" max="500" step="1"'), '回消息时带上最近多少条手机聊天。')}
+    const books = (p.loreSkipBooks || []).length, entries = (p.loreSkipEntries || []).length;
+    const basics = chat ? ''
+      : draw ? field('每条回复出图数量', input('count', p.count ?? 1, 'number', `min="1" max="${api.drawCountMax}" step="1"`), '每条回复固定出这么多张图。规则里写 {{出图数量}} 会换成这个数字；插件还会在规则最后加一段硬性要求，让张数更稳定。张数越多，出图越久。\n\n规则里写 {{出图格式}} 会换成下面这段（回复后单独配图时，还会多一行「位置」）；{{角色列表}} 会换成已登记的角色和他们的固定外貌。别的插件要排除出图内容时，排除标签填 <img></img>。\n\n' + api.picTagFormat)
+      : field('台词格式', textArea('format', p.format, 'class="code short" rows="3"'), '{译文}、{角色}、{情绪}、{文本} 各保留一次。译文供阅读，原语言供语音生成。默认格式是成对的 <tts></tts>，别的插件要排除语音原文时，排除标签填 <tts></tts>。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。');
+    const marks = p.marks || {inner: [], phone: []}, marked = (marks.inner || []).length + (marks.phone || []).length;
+    const folds = chat
+      ? fold('preset-read', '读多少', `正文 ${p.context} 条 · 聊天 ${p.history} 条`,
+          `${field('读取最近的正文', input('context', p.context, 'number', 'min="0" max="100" step="1"'), '回消息时参考最近几条正文，0 表示不看剧情。')}${field('读取聊天记录', input('history', p.history, 'number', 'min="2" max="500" step="1"'), '回消息时带上最近多少条手机聊天。')}
           ${field('每条正文最多（字）', input('storyEach', p.storyEach ?? 4000, 'number', 'min="0" step="500"'), '一条正文太长时只取前面这么多字。0 表示不限制。中文大约一个字一个 token。')}${field('正文一共最多（字）', input('storyTotal', p.storyTotal ?? 20000, 'number', 'min="0" step="1000"'), '最近的正文优先，加起来超过这么多字就不再往前读。0 表示不限制。')}
-          ${field('世界书最多（字）', input('loreMax', p.loreMax ?? 30000, 'number', 'min="0" step="1000"'), '手机读世界书时最多放这么多字，只放整条。0 表示插件不另外限制，只按酒馆「世界书」设置里的预算（占上下文的百分比）来。手机的每次请求（聊天、朋友圈、论坛、查手机、电话）都会带上世界书，放得越多越费 token，也越慢。')}${field('每次刷新朋友圈最多几条', input('posts', p.posts ?? 2, 'number', 'min="1" max="5" step="1"'), '在动态里刷新时，由模型挑 1 到这么多个人发动态。')}${toggle('lore', '带上世界书', p.lore !== false, '聊天、电话和朋友圈也带上酒馆的世界书：和写正文时一样，常驻的条目，以及在名字、最近的正文和聊天里触发关键词的条目（当前角色卡的世界书、全局和聊天绑定的世界书都算）。人设写在世界书里的话要打开。\n\n条目多的话会多占一些上下文。')}${p.lore !== false ? loreFields(p) : ''}${field('带进剧情的写法', textArea('bring', p.bring, 'class="code" rows="4"'), '选中的聊天消息会按这段文字注入下一次正文，只用一次。需要包含 {{聊天记录}}；也可以用 {{用户}}、{{对象}}。')}`
-        : draw
-        ? `${field('每条回复出图数量', input('count', p.count ?? 1, 'number', `min="1" max="${api.drawCountMax}" step="1"`), '每条回复固定出这么多张图。规则里写 {{出图数量}} 会换成这个数字；插件还会在规则最后加一段硬性要求，让张数更稳定。张数越多，出图越久。')}<div class="field"><span>出图块格式${help('规则里写 {{出图格式}} 会换成下面这段（回复后单独配图时，还会多一行「位置」）；{{角色列表}} 会换成已登记的角色和他们的固定外貌；{{出图数量}} 换成张数。别的插件要排除出图内容时，排除标签填 <img></img>。')}</span><pre class="code-preview" style="margin:0">${esc(api.picTagFormat)}</pre></div>`
-        : field('台词格式', textArea('format', p.format, 'class="code"'), '{译文}、{角色}、{情绪}、{文本} 各保留一次。译文供阅读，原语言供语音生成。默认格式是成对的 <tts></tts>，别的插件要排除语音原文时，排除标签填 <tts></tts>。\n\n这里的格式只管正文；手机里的语音消息和电话固定用默认格式，不跟着改。') + marksFields(p)}</div>
-        ${chat ? memoryFields(p) : ''}
-        <details data-group="preset-injection"><summary>${chat ? '带进剧情的插入位置' : '默认插入设置'} ${help(chat ? '带进剧情的文字插在正文请求的哪里。深度与身份仅在聊天内插入时生效。' : '深度与身份仅在聊天内插入时生效；条目可以单独覆盖。')}</summary><div>${injection(p.injection)}</div></details>
-        ${groupTitle(draw ? '出图规则' : chat ? '聊天与朋友圈规则' : '提示词条目', btn('add-entry', icon('add') + '条目', 'chip-button'))}
-        ${p.entries.map((e, i) => `<details data-group="entry:${esc(e.id)}" ${i === 0 ? 'open' : ''}><summary>${esc(e.title || '未命名条目')}${draw ? esc(engineScope(e)) : ''}${e.enabled ? '' : ' · 已停用'}</summary><div data-entry="${i}">
-          ${toggle('enabled', '启用此条目', e.enabled)}
-          ${field('条目名称', input('title', e.title))}
-          ${draw ? `<div class="field"><span>用在哪个引擎${help('勾了哪个，用那个引擎画图时才把这条规则发给模型。都勾或都不勾就是三个都用。在绘图 App 顶上选用哪个画。')}</span><div class="use-row">${ENGINE_USES.map(([u, l]) => `<label class="use-chip"><input type="checkbox" data-engine-use="${u}" ${!e.engines?.length || e.engines.includes(u) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>` : ''}
-          ${chat ? `<div class="field"><span>用在</span><div class="use-row">${USES.map(([u, l]) => `<label class="use-chip"><input type="checkbox" data-use="${u}" ${(e.use || []).includes(u) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>` : ''}${field(draw || chat ? '规则' : '提示词', textArea('text', e.text, 'class="code"'), draw ? '可以用 {{出图格式}}、{{出图数量}}、{{角色列表}}。插件会在最后自动加上格式和张数的硬性要求。' : chat ? '可以用 {{用户}}、{{对象}}；写语音消息规则时用 {{语音格式}}（手机固定用默认的台词格式，不跟配音预设走）、{{可发语音}}。用在朋友圈的规则只能用 {{用户}}。插件会在最后自动加上输出格式的硬性要求。' : e.id === 'reading' ? '{{朗读规则}} 会换成这段剧情里每个说话者按自己的引擎和模型该怎么写（情绪、语气标签）。可以在前后加字；不想要就停用这一条。' : e.id === 'contract' ? '{{格式}} 换成上面的台词格式；{{错误示例}} {{正确示例}} 会按台词格式自动写出例子，改了格式也不会对不上。可以随便改，改乱了点「恢复这一条」。' : '启用规则的合计文字需包含 {{格式}} 和 {{语言}}。')}${!draw && !chat && RULE_DEFAULTS[e.id] ? `<div class="actions">${btn('entry-default', icon('refresh') + '恢复这一条', 'text-button', `data-index="${i}"`)}</div>` : ''}
-          ${chat ? '' : toggle('customInjection', '单独设置插入位置', !!e.injection)}${!chat && e.injection ? injection(e.injection, i) : ''}
-          <div class="entry-tools">${btn('entry-up', icon('up') + '上移', 'text-button', `data-index="${i}" ${i === 0 ? 'disabled' : ''}`)}${btn('entry-down', icon('down') + '下移', 'text-button', `data-index="${i}" ${i === p.entries.length - 1 ? 'disabled' : ''}`)}${btn('delete-entry', icon('trash') + '删除', 'text-button', `data-index="${i}"`)}</div>
-        </div></details>`).join('')}
-        <div class="actions">${btn('prompt-preview', icon('eye') + '发送预览', 'secondary')}${p.id ? btn('use-preset', used ? '正在使用' : '保存并使用', 'secondary', used ? 'disabled' : '') : ''}</div>
-        <div class="savebar"><span class="save-state" data-save-state>草稿</span>${btn('save-preset', '保存预设', 'primary')}</div>
-        <div class="actions">${btn('reset-content', icon('refresh') + '恢复成默认内容', 'secondary')}${p.id ? btn('delete-preset', '删除预设', 'danger') : ''}</div>`);
+          ${field('每次刷新朋友圈最多几条', input('posts', p.posts ?? 2, 'number', 'min="1" max="5" step="1"'), '在动态里刷新时，由模型挑 1 到这么多个人发动态。')}`)
+        + fold('preset-lore', '世界书', p.lore === false ? '不带' : books || entries ? `不读 ${books} 本、${entries} 条` : '开着的都读',
+          `${toggle('lore', '带上世界书', p.lore !== false, '聊天、电话和朋友圈也带上酒馆的世界书：和写正文时一样，常驻的条目，以及在名字、最近的正文和聊天里触发关键词的条目（当前角色卡的世界书、全局和聊天绑定的世界书都算）。人设写在世界书里的话要打开。\n\n条目多的话会多占一些上下文。')}${p.lore !== false ? loreFields(p) + field('世界书最多（字）', input('loreMax', p.loreMax ?? 30000, 'number', 'min="0" step="1000"'), '手机读世界书时最多放这么多字，只放整条。0 表示插件不另外限制，只按酒馆「世界书」设置里的预算（占上下文的百分比）来。手机的每次请求（聊天、朋友圈、论坛、查手机、电话）都会带上世界书，放得越多越费 token，也越慢。') : ''}`)
+        + memoryFields(p)
+        + fold('preset-bring', '带进剧情', '', `${field('带进剧情的写法', textArea('bring', p.bring, 'class="code" rows="4"'), '选中的聊天消息会按这段文字注入下一次正文，只用一次。需要包含 {{聊天记录}}；也可以用 {{用户}}、{{对象}}。')}${injection(p.injection)}`, '带进剧情的文字插在正文请求的哪里。深度与身份仅在聊天内插入时生效。')
+      : (draw ? '' : fold('preset-marks', '心声和电话', marked ? `多认 ${marked} 种写法` : '看情绪字段', marksFields(p)))
+        + fold('preset-injection', '默认插入设置', positions.find(x => x[0] === p.injection.position)?.[1] || '', injection(p.injection), '深度与身份仅在聊天内插入时生效；条目可以单独覆盖。');
+    v.draw(heading(p.id ? '编辑预设' : '新预设', btn('preset-more', icon('more'), 'round-button', 'aria-label="更多"'), draw ? 'Drawing Preset' : chat ? 'Chat Preset' : 'Voice Preset')
+      + `<div class="group pad">${field('名称', input('name', p.name))}${basics}</div>${folds}
+        ${groupTitle(draw ? '出图规则' : chat ? '规则' : '提示词条目', btn('add-entry', icon('add') + '条目', 'chip-button'))}
+        <div class="group entry-list">${p.entries.map((e, i) => `<div class="setting-row entry-row${e.enabled ? '' : ' off'}"><button type="button" class="entry-open" data-action="open-entry" data-index="${i}"><span class="row-text"><strong>${esc(e.title || '未命名条目')}</strong><small>${esc(ruleNote(e, draw, chat))}</small></span></button><input class="switch" type="checkbox" data-entry-on="${i}" aria-label="启用「${esc(e.title || '未命名条目')}」" ${e.enabled ? 'checked' : ''}></div>`).join('') || '<p class="hint">还没有规则，点右上角「条目」加一条。</p>'}</div>
+        <div class="savebar"><span class="save-state" data-save-state>${dirty.has(draftKey()) ? '未保存' : '草稿'}</span>${p.id && !used ? btn('use-preset', '使用', 'secondary') : ''}${btn('save-preset', '保存预设', 'primary')}</div>`);
+  }
+  /** One rule in a sheet: name, where it goes, the text; moving and deleting at the bottom. */
+  function openEntry(i) {
+    const e = current?.entries[i];
+    if (!e) return;
+    const draw = currentKind === 'draw', chat = currentKind === 'chat';
+    const d = ctx.dialog(e.title || '未命名条目', `<div data-entry="${i}">
+      ${field('名称', input('title', e.title))}
+      ${draw ? `<div class="field"><span>用在哪个引擎${help('勾了哪个，用那个引擎画图时才把这条规则发给模型。都勾或都不勾就是三个都用。在绘图 App 顶上选用哪个画。')}</span><div class="use-row">${ENGINE_USES.map(([u, l]) => `<label class="use-chip"><input type="checkbox" data-engine-use="${u}" ${!e.engines?.length || e.engines.includes(u) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>` : ''}
+      ${chat ? `<div class="field"><span>用在${help('私聊、群聊、朋友圈、电话、论坛、查手机都是各自单独的一次请求。勾了哪几个，这条规则就在那几次请求里各出现一次。勾「正文」的话，写正文时也带上。')}</span><div class="use-row">${USES.map(([u, l]) => `<label class="use-chip"><input type="checkbox" data-use="${u}" ${(e.use || []).includes(u) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div></div>` : ''}
+      ${field(draw || chat ? '规则' : '提示词', textArea('text', e.text, 'class="code" rows="10"'), ruleHelp(e, draw, chat))}
+      ${!draw && !chat ? toggle('customInjection', '单独设置插入位置', !!e.injection) + (e.injection ? injection(e.injection, i) : '') : ''}
+      <div class="entry-tools">${btn('entry-up', icon('up') + '上移', 'text-button', i === 0 ? 'disabled' : '')}${btn('entry-down', icon('down') + '下移', 'text-button', i === current.entries.length - 1 ? 'disabled' : '')}${!draw && !chat && RULE_DEFAULTS[e.id] ? btn('entry-default', icon('refresh') + '恢复这一条', 'text-button') : ''}${btn('delete-entry', icon('trash') + '删除', 'text-button danger-text')}</div></div>`);
+    let next = null;
+    d.onClose(() => { render(); if (next !== null) openEntry(next); });
+    d.body.addEventListener('input', ev => { const el = ev.target; if (el.matches('[data-field]') && el.type !== 'checkbox' && el.tagName !== 'SELECT') update(el, false); });
+    d.body.addEventListener('change', ev => {
+      const el = ev.target;
+      if (el.matches('[data-use]')) setUse(el);
+      else if (el.matches('[data-engine-use]')) setEngines(el);
+      else if (el.matches('[data-field]') && (el.type === 'checkbox' || el.tagName === 'SELECT')) { update(el, false); if (el.dataset.field === 'customInjection') { next = i; d.close(); } }
+    });
+    d.body.addEventListener('click', async ev => {
+      const action = ev.target.closest('[data-action]')?.dataset.action;
+      if (action === 'entry-up' || action === 'entry-down') {
+        const to = i + (action === 'entry-up' ? -1 : 1);
+        if (to < 0 || to >= current.entries.length) return;
+        [current.entries[i], current.entries[to]] = [current.entries[to], current.entries[i]];
+        mark(); next = to; d.close();
+      } else if (action === 'entry-default') {
+        current.entries[i] = {...current.entries[i], text: RULE_DEFAULTS[e.id]};
+        d.body.querySelector('[data-field=text]').value = RULE_DEFAULTS[e.id];
+        mark(); ctx.notify('这一条换回默认了，记得保存');
+      } else if (action === 'delete-entry') {
+        if (await ctx.confirm('删除这条规则？', '保存预设后生效。')) { current.entries.splice(i, 1); mark(); render(); }
+      }
+    });
   }
 
   const render = () => current ? renderEditor() : renderList();
@@ -204,15 +255,13 @@ export function presetsApp(ctx) {
     if (redraw) render();
   }
   v.on('input', '[data-field]', el => { if (current && el.type !== 'checkbox' && el.tagName !== 'SELECT') update(el, false); });
-  v.on('change', '[data-engine-use]', el => {
+  function setEngines(el) {
     const entry = current?.entries[Number(el.closest('[data-entry]')?.dataset.entry)];
     if (!entry) return;
     const list = [...el.closest('.use-row').querySelectorAll('[data-engine-use]')].filter(x => x.checked).map(x => x.dataset.engineUse);
     if (!list.length || list.length === ENGINE_USES.length) delete entry.engines; else entry.engines = list;
-    const summary = el.closest('details')?.querySelector('summary');
-    if (summary) summary.textContent = (entry.title || '未命名条目') + engineScope(entry) + (entry.enabled ? '' : ' · 已停用');
     mark();
-  });
+  }
   v.on('change', '[data-story-key]', el => {
     if (!current) return;
     const keys = new Set(current.memory?.storyKeys || []);
@@ -222,10 +271,18 @@ export function presetsApp(ctx) {
     const line = el.closest('.story-field')?.querySelector('small.hint');
     if (line) line.textContent = keys.size ? '在读：' + [...keys].map(storyName).join('、') : '没有在读';
   });
-  v.on('change', '[data-use]', el => {
+  function setUse(el) {
     const entry = current?.entries[Number(el.closest('[data-entry]')?.dataset.entry)];
     if (!entry) return;
     entry.use = USES.map(([u]) => u).filter(u => u === el.dataset.use ? el.checked : (entry.use || []).includes(u));
+    mark();
+  }
+  // A rule's switch on its row.
+  v.on('change', '[data-entry-on]', el => {
+    const entry = current?.entries[Number(el.dataset.entryOn)];
+    if (!entry) return;
+    entry.enabled = el.checked;
+    el.closest('.entry-row')?.classList.toggle('off', !el.checked);
     mark();
   });
   v.on('change', '[data-field]', el => {
@@ -242,8 +299,9 @@ export function presetsApp(ctx) {
   v.on('change', '[data-mark]', el => setMarks(el.dataset.mark));
   v.on('input', '[data-mark-own]', el => setMarks(el.dataset.markOwn));
   function save() {
-    const key = currentKind + ':' + (current.id || 'new');
+    const key = draftKey();
     current = ops(currentKind).save(current);
+    dirty.delete(key);
     drafts.delete(key);
     drafts.set(currentKind + ':' + current.id, current);
     render();
@@ -271,58 +329,54 @@ export function presetsApp(ctx) {
         render();
         break;
       }
-      // Puts the shipped rules, format and insertion back into this preset; its name stays. Saving makes it stick.
-      case 'reset-content':
-        if (await ctx.confirm('恢复成默认内容？', '这个预设的条目、格式和插入位置会换成默认的，名字不变。保存之后才生效，不保存就不会改动。')) {
-          current = {...shipped(currentKind), id: current.id, name: current.name};
-          drafts.set(currentKind + ':' + (current.id || 'new'), current);
-          render();
-          mark();
-          ctx.notify('已换成默认内容，记得保存');
-        }
-        break;
       case 'save-preset': save(); break;
       case 'use-preset': save(); ops(currentKind).use(current.id); render(); break;
       case 'lore-pick': await pickLore(); break;
       case 'add-entry':
-        current.entries.push({id: crypto.randomUUID(), title: '新条目', enabled: true, text: ''});
-        render();
-        v.root.querySelector('details:last-of-type').open = true;
+        current.entries.push({id: crypto.randomUUID(), title: '新条目', enabled: true, text: '', ...(currentKind === 'chat' ? {use: ['dm', 'group']} : {})});
         mark();
+        render();
+        openEntry(current.entries.length - 1);
         break;
-      case 'delete-entry': if (await ctx.confirm('删除这条规则？', '保存预设后生效。')) { current.entries.splice(index, 1); render(); mark(); } break;
-      case 'entry-default':
-        if (RULE_DEFAULTS[current.entries[index]?.id]) { current.entries[index] = {...current.entries[index], text: RULE_DEFAULTS[current.entries[index].id]}; render(); mark(); ctx.notify('这一条换回默认了，记得保存'); }
-        break;
-      case 'entry-up':
-      case 'entry-down': {
-        const to = index + (el.dataset.action === 'entry-up' ? -1 : 1);
-        if (to >= 0 && to < current.entries.length) { [current.entries[index], current.entries[to]] = [current.entries[to], current.entries[index]]; render(); mark(); }
+      case 'open-entry': openEntry(index); break;
+      case 'preset-more': {
+        const picked = await menu(ctx, current.name || '预设', [
+          {key: 'preview', icon: 'eye', label: '发送预览', note: '看看发给模型的是什么'},
+          {key: 'reset', icon: 'refresh', label: '恢复成默认内容', note: '条目、格式和插入位置换成默认的，名字不变'},
+          current.id && {key: 'delete', icon: 'trash', label: '删除预设', danger: true}]);
+        if (picked === 'preview') preview();
+        if (picked === 'reset') await resetContent();
+        if (picked === 'delete' && await ctx.confirm('删除这个预设？', '角色配音和画风不会被删除。')) { ops(currentKind).remove(current.id); drafts.delete(currentKind + ':' + current.id); current = null; render(); }
         break;
       }
-      case 'delete-preset':
-        if (await ctx.confirm('删除这个预设？', '角色配音和画风不会被删除。')) { ops(currentKind).remove(current.id); drafts.delete(currentKind + ':' + current.id); current = null; render(); }
-        break;
       case 'story-sources': {
         try { storyList = api.storySources(); } catch (error) { ctx.notify(error.message, {error: true}); break; }
         render();
         break;
       }
-      case 'prompt-preview': {
-        const o = ops(currentKind), error = o.validate(current);
-        if (error) throw Error(error);
-        // The chat preset's preview holds one request per place (私聊, 群聊, 朋友圈…): shown one at a time, since all of them
-        // in a row read as if every request carried every copy.
-        const parts = String(o.preview(current)).split(/^━━ (.+?) ━━\n+/m), scenes = [];
-        for (let k = 1; k < parts.length; k += 2) scenes.push([parts[k], parts[k + 1].trim()]);
-        if (scenes.length < 2) { ctx.dialog('发送预览', `<pre class="code-preview">${esc(parts.join(''))}</pre>`); break; }
-        const d = ctx.dialog('发送预览', `<div class="field"><div class="use-row">${scenes.map(([name], k) => `<label class="use-chip"><input type="radio" name="pv-scene" value="${k}" ${k ? '' : 'checked'}><span>${esc(name.replace(/（.*）/, ''))}</span></label>`).join('')}</div></div>
-          <p class="hint">每个地方是单独的一次请求，用到时才发。条目勾了几个地方，就在那几次请求里各出现一次，不会叠在一起。</p><pre class="code-preview" data-pv-scene="${esc(scenes[0][0])}">${esc(scenes[0][1])}</pre>`);
-        d.body.addEventListener('change', e => { const k = Number(e.target.value), pre = d.body.querySelector('.code-preview'); if (!scenes[k]) return; pre.dataset.pvScene = scenes[k][0]; pre.textContent = scenes[k][1]; pre.scrollTop = 0; });
-        break;
-      }
     }
   });
+  // Puts the shipped rules, format and insertion back into this preset; its name stays. Saving makes it stick.
+  async function resetContent() {
+    if (!await ctx.confirm('恢复成默认内容？', '这个预设的条目、格式和插入位置会换成默认的，名字不变。保存之后才生效，不保存就不会改动。')) return;
+    current = {...shipped(currentKind), id: current.id, name: current.name};
+    drafts.set(currentKind + ':' + (current.id || 'new'), current);
+    render();
+    mark();
+    ctx.notify('已换成默认内容，记得保存');
+  }
+  function preview() {
+    const o = ops(currentKind), error = o.validate(current);
+    if (error) { ctx.notify(error, {error: true}); return; }
+    // The chat preset's preview holds one request per place (私聊, 群聊, 朋友圈…): shown one at a time, since all of them
+    // in a row read as if every request carried every copy.
+    const parts = String(o.preview(current)).split(/^━━ (.+?) ━━\n+/m), scenes = [];
+    for (let k = 1; k < parts.length; k += 2) scenes.push([parts[k], parts[k + 1].trim()]);
+    if (scenes.length < 2) { ctx.dialog('发送预览', `<pre class="code-preview">${esc(parts.join(''))}</pre>`); return; }
+    const d = ctx.dialog('发送预览', `<div class="field"><div class="use-row">${scenes.map(([name], k) => `<label class="use-chip"><input type="radio" name="pv-scene" value="${k}" ${k ? '' : 'checked'}><span>${esc(name.replace(/（.*）/, ''))}</span></label>`).join('')}</div></div>
+      <p class="hint">每个地方是单独的一次请求，用到时才发。条目勾了几个地方，就在那几次请求里各出现一次，不会叠在一起。</p><pre class="code-preview" data-pv-scene="${esc(scenes[0][0])}">${esc(scenes[0][1])}</pre>`);
+    d.body.addEventListener('change', e => { const k = Number(e.target.value), pre = d.body.querySelector('.code-preview'); if (!scenes[k]) return; pre.dataset.pvScene = scenes[k][0]; pre.textContent = scenes[k][1]; pre.scrollTop = 0; });
+  }
   render();
   return v;
 }

@@ -15,7 +15,7 @@ export const help = text => `<button type="button" class="info" data-help="${esc
 export const field = (label, control, info = '') => `<div class="field"><span>${esc(label)}${info ? help(info) : ''}</span>${control.replace(/aria-label="[^"]*"/, 'aria-label="' + esc(label) + '"')}</div>`;
 export const input = (key, value = '', type = 'text', attrs = '') => `<input data-field="${esc(key)}" aria-label="${esc(key)}" type="${type}" value="${esc(value)}" ${attrs}>`;
 export const select = (key, value, choices, attrs = '') => `<span class="select"><select data-field="${esc(key)}" aria-label="${esc(key)}" ${attrs}>${choices.map(([v, t, disabled]) => `<option value="${esc(v)}" ${String(value) === String(v) ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(t)}</option>`).join('')}</select></span>`;
-export const textArea = (key, value, attrs = '') => `<textarea data-field="${esc(key)}" aria-label="${esc(key)}" rows="5" ${attrs}>${esc(value)}</textarea>`;
+export const textArea = (key, value, attrs = '') => `<textarea data-field="${esc(key)}" aria-label="${esc(key)}" ${/\brows=/.test(attrs) ? '' : 'rows="5" '}${attrs}>${esc(value)}</textarea>`;
 export const toggle = (key, label, value, info = '') => `<div class="setting-row"><span>${esc(label)}${info ? help(info) : ''}</span><input class="switch" aria-label="${esc(label)}" type="checkbox" data-field="${esc(key)}" ${value ? 'checked' : ''}></div>`;
 export const empty = (title, detail = '', art = 'music') => `<div class="empty">${icon(art)}<h2>${esc(title)}</h2>${detail ? `<p>${esc(detail)}</p>` : ''}</div>`;
 
@@ -33,6 +33,18 @@ export async function copyText(win, text) {
   return done;
 }
 export const groupTitle = (title, extra = '') => `<div class="group-title"><span>${esc(title)}</span>${extra}</div>`;
+/**
+ * The 「⋯」 of a page: what is not used every time, as a sheet of rows. items: [{key, icon, label, note, danger}] (falsy
+ * ones are left out). Resolves to the key tapped, or null when the sheet is closed.
+ */
+export function menu(ctx, title, items) {
+  return new Promise(resolve => {
+    let picked = null;
+    const d = ctx.dialog(title, `<div class="pick-list">${items.filter(Boolean).map(x => `<button type="button" class="list-row${x.danger ? ' danger-row' : ''}" data-menu="${esc(x.key)}">${icon(x.icon || 'next')}<span><strong>${esc(x.label)}</strong>${x.note ? `<small>${esc(x.note)}</small>` : ''}</span></button>`).join('')}</div>`);
+    d.onClose(() => resolve(picked));
+    d.body.addEventListener('click', e => { const key = e.target.closest('[data-menu]')?.dataset.menu; if (key) { picked = key; d.close(key); } });
+  });
+}
 
 // A skewed name plate; engine colour comes from the nearest data-engine ancestor.
 export const plate = (text, attrs = '') => `<span class="plate" ${attrs}><span>${esc(text)}</span></span>`;
@@ -61,13 +73,17 @@ export function createView(ctx, name) {
     // Replaces the view content while keeping scroll position, open <details> groups and the scroll of inner lists
     // marked data-keep-scroll.
     draw(html) {
-      const y = root.scrollTop;
+      const y = root.scrollTop, doc = root.ownerDocument, active = root.contains(doc.activeElement) ? doc.activeElement : null;
+      // The box being typed in stays the one with the cursor (a field saved when left redraws the page).
+      const focus = active?.dataset.field ? `[data-field="${active.dataset.field}"]` : active?.dataset.param ? `[data-param="${active.dataset.param}"]` : '';
       const opened = [...root.querySelectorAll('details[open]')].map(el => el.dataset.group);
       const inner = new Map([...root.querySelectorAll('[data-keep-scroll]')].map(el => [el.dataset.keepScroll, el.scrollTop]));
       root.innerHTML = html;
       for (const el of root.querySelectorAll('details')) if (opened.includes(el.dataset.group)) el.open = true;
       for (const el of root.querySelectorAll('[data-keep-scroll]')) if (inner.has(el.dataset.keepScroll)) el.scrollTop = inner.get(el.dataset.keepScroll);
       root.scrollTop = y;
+      const again = focus && root.querySelector(focus);
+      if (again && again !== doc.activeElement) { again.focus({preventScroll: true}); if (/^(text|url|search|password)$/.test(again.type) || again.tagName === 'TEXTAREA') try { again.setSelectionRange(again.value.length, again.value.length); } catch { /* not a text box */ } }
     },
     on(type, selector, fn) {
       root.addEventListener(type, event => {

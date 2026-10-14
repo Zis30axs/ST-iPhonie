@@ -2275,3 +2275,23 @@ button.aui-card:active{transform:scale(.98)}
 @media (prefers-reduced-motion:reduce){.music-now .music-cover::before,.music-tile-disc::before{animation:none}}
 .music-lyrics{overflow-x:hidden}
 .music-selfhost{display:flex;gap:8px;align-items:center}.music-selfhost input{flex:1;min-width:0}.music-selfhost button{flex:none;white-space:nowrap}
+/* 预设编辑：折起来的部分在标题右边写一句现在的样子；规则一行一条，点开在弹窗里改 */
+.fold-note{margin-left:auto;min-width:0;max-width:58%;font-size:12px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
+.entry-list{padding:0 16px}
+.entry-row{min-height:60px;padding:4px 0}
+.entry-open{flex:1;min-width:0;display:flex;padding:8px 0;text-align:left;color:inherit}
+.entry-open .row-text{display:grid;gap:2px;min-width:0}
+.entry-open strong{font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entry-open small{font-size:12px;font-weight:600;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entry-row.off .row-text{opacity:.45}
+.danger-row,.danger-row .icon,.text-button.danger-text{color:var(--danger)}
+.field textarea.code.short{min-height:72px}
+/* 引擎：密钥框里带一个小眼睛；离开框就保存 */
+.key-box{position:relative;display:flex}
+.key-box input{flex:1;min-width:0;padding-right:46px}
+.key-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:12px;display:grid;place-items:center;color:var(--ink2)}
+.key-eye[aria-pressed=true]{color:var(--accent-ink)}
+.key-eye svg{width:18px;height:18px}
+.field textarea.key-paste{min-height:46px}
+.group>.setting-row+.list-row,.group>.list-row+.setting-row,.group>.storage-fold+.setting-row{border-top:1px solid var(--line)}
