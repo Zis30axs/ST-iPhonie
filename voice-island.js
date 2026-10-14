@@ -29,7 +29,7 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
     <div class="vi-card"><div class="vi-head"><span class="vi-ico">${WAVE}</span><b data-vi-title></b><button type="button" class="vi-btn vi-all" data-vi="all"></button><button type="button" class="vi-btn vi-close" data-vi="close" aria-label="收起">${CLOSE}</button></div>
       <div class="vi-list" data-vi-list></div></div>`;
   doc.body.append(el);
-  let place = null, dismissed = '', reply = null, built = '', expanded = false, width = 0;
+  let place = null, dismissed = '', reply = null, built = '', expanded = false, width = 0, openedAt = 0, dragged = false;
   try { place = JSON.parse(win.localStorage.getItem(KEY) || 'null'); } catch { /* the top middle */ }
   const free = () => !place || !Number.isFinite(place.cx) || !Number.isFinite(place.y);
   function where() {
@@ -64,7 +64,7 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
   }
   function setExpanded(on) {
     if (expanded === on) return;
-    expanded = on;
+    expanded = on; openedAt = on ? Date.now() : 0;
     el.dataset.expanded = on ? '1' : '';
     if (on) el.querySelector('.vi-row[data-state]')?.scrollIntoView?.({block: 'nearest'});
     (win.requestAnimationFrame || (fn => win.setTimeout(fn, 16))).call(win, where);
@@ -98,13 +98,17 @@ export function createVoiceIsland({doc = document, enabled, latest, now, play, p
   el.addEventListener('pointerup', e => {
     if (!drag || e.pointerId !== drag.id) return;
     const moved = drag.live; drag = null; delete el.dataset.dragging;
-    if (moved) { try { win.localStorage.setItem(KEY, JSON.stringify(place)); } catch { /* this visit */ } return; }
-    if (!e.target.closest('.vi-list')) setExpanded(!expanded);
+    if (moved) { dragged = true; try { win.localStorage.setItem(KEY, JSON.stringify(place)); } catch { /* this visit */ } }
   });
   el.addEventListener('pointercancel', () => { drag = null; delete el.dataset.dragging; });
+  // Opening and closing happen on click, not on pointerup: a phone hit-tests the tap's click after the card has opened
+  // under the finger, and that click used to land on 整条 or a line and play it. A tap in the first moment after
+  // opening is that same tap, so it does nothing.
   el.addEventListener('click', e => {
+    if (dragged) { dragged = false; return; }
     const b = e.target.closest('[data-vi], [data-vi-i]');
-    if (!b || !reply) return;
+    if (!b) { if (!e.target.closest('.vi-list')) setExpanded(!expanded); return; }
+    if (!reply || Date.now() - openedAt < 350) return;
     const id = reply.id;
     if (b.dataset.viI !== undefined) Promise.resolve().then(() => play(id, Number(b.dataset.viI))).catch(() => {});
     else if (b.dataset.vi === 'all') { const s = now(); Promise.resolve().then(() => s && s.id === id && [...BUSY, 'paused'].includes(s.phase) ? play(id, s.index) : playAll(id)).catch(() => {}); }

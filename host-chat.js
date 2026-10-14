@@ -8,13 +8,15 @@ import {pictureInputs, photoCast} from './core/draw.js';
 import {storyLines} from './core/moments.js';
 
 const BRING_KEY = 'sttts.bring';
+/** The note older versions wrote into the chat for a choice; the chat shows the pending choice by itself now. */
+export const BRING_NOTE = /^\d+ 条消息会带进下一次正文$/;
 
 export function createChatHost({context, settings, backend, notice, memory = null, onCall = () => {}, storage = globalThis.localStorage}) {
   const busy = new Map();
   // What the next story reply brings along; kept over a page reload (it used to be lost without a word).
   let pending = (() => { try { const p = JSON.parse(storage?.getItem(BRING_KEY) || 'null'); return p?.threadId && p.text ? p : null; } catch { return null; } })();
   const keepBring = () => { try { if (pending) storage?.setItem(BRING_KEY, JSON.stringify(pending)); else storage?.removeItem(BRING_KEY); } catch { /* this visit only */ } };
-  /** The chat's note「N 条消息会带进下一次正文」goes when that choice is replaced, cancelled or used. */
+  /** A note「N 条消息会带进下一次正文」an older version wrote for the choice goes when that choice is replaced, cancelled or used. */
   const dropNote = p => p?.noteId ? backend.chatMutate(p.threadId, () => backend.chats.removeMessages(p.threadId, [p.noteId])).catch(() => {}) : Promise.resolve();
 
   const userName = () => context()?.name1 || '我';
@@ -120,8 +122,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     // A new choice takes the place of the one before (only one goes into the story), and so does its note.
     pending = null; keepBring();
     await dropNote(before);
-    const saved = await backend.chatMutate(threadId, () => backend.chats.append(threadId, [{from: 'me', kind: 'system', text: `${chosen.length} 条消息会带进下一次正文`}], {read: true}));
-    pending = {threadId, name: thread.name, count: chosen.length, text: bringText(preset, {thread, messages: chosen, user: userName()}), noteId: saved?.messages?.at(-1)?.id || ''};
+    pending = {threadId, name: thread.name, count: chosen.length, text: bringText(preset, {thread, messages: chosen, user: userName()})};
     keepBring();
     return {...pending, replaced: before ? before.count : 0};
   }
@@ -305,8 +306,19 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     } catch { /* not worth interrupting the story */ }
   }
 
+  /**
+   * Older versions wrote「N 条消息会带进下一次正文」into the chat and could lose the choice itself (a reload), leaving
+   * notes that promised forever what would never happen. They are taken out of this card's chats.
+   */
+  async function tidyNotes() {
+    for (const t of await backend.chats.list()) {
+      const thread = await backend.chats.get(t.id), stale = (thread?.messages || []).filter(m => m.kind === 'system' && BRING_NOTE.test(m.text || '')).map(m => m.id);
+      if (stale.length) await backend.chatMutate(t.id, () => backend.chats.removeMessages(t.id, stale)).catch(() => {});
+    }
+  }
+
   return {
-    reply, bring, bringPlan, drawPhoto, storyPlan, storyReplied, askFriend,
+    reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, askFriend,
     typing: threadId => busy.has(threadId),
     pendingBring: () => pending && {threadId: pending.threadId, name: pending.name, count: pending.count},
     cancelBring: () => { const p = pending; pending = null; keepBring(); return dropNote(p).finally(() => { if (p) backend.emit('chat', {threadId: p.threadId, bring: false}); }); }

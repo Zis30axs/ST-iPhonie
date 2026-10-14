@@ -327,7 +327,8 @@ export function chatApp(ctx) {
   }
   function lineHTML(m) {
     const mid = `data-mid="${esc(m.id)}"`;
-    if (m.kind === 'system') return `<div class="sys">${icon('book')}${esc(m.text)}</div>`;
+    // 「N 条消息会带进下一次正文」is the line under the chat while a choice waits; older versions also wrote it in as a note.
+    if (m.kind === 'system') return /^\d+ 条消息会带进下一次正文$/.test(m.text || '') ? '' : `<div class="sys">${icon('book')}${esc(m.text)}</div>`;
     if (m.kind === 'pat') return `<div class="note-line" ${mid}>${esc(patText(m))}</div>`;
     if (m.kind === 'notice') return `<div class="note-line" ${mid}>${/红包/.test(m.text) ? '<span class="pk-dot" aria-hidden="true"></span>' : ''}${esc(noticeText(m))}</div>`;
     const again = m.from === 'me' && recalled.has(m.id) ? btn('re-edit', '重新编辑', 'text-button', mid) : '';

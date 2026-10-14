@@ -311,7 +311,14 @@ export function presetsApp(ctx) {
       case 'prompt-preview': {
         const o = ops(currentKind), error = o.validate(current);
         if (error) throw Error(error);
-        ctx.dialog('发送预览', `<pre class="code-preview">${esc(o.preview(current))}</pre>`);
+        // The chat preset's preview holds one request per place (私聊, 群聊, 朋友圈…): shown one at a time, since all of them
+        // in a row read as if every request carried every copy.
+        const parts = String(o.preview(current)).split(/^━━ (.+?) ━━\n+/m), scenes = [];
+        for (let k = 1; k < parts.length; k += 2) scenes.push([parts[k], parts[k + 1].trim()]);
+        if (scenes.length < 2) { ctx.dialog('发送预览', `<pre class="code-preview">${esc(parts.join(''))}</pre>`); break; }
+        const d = ctx.dialog('发送预览', `<div class="field"><div class="use-row">${scenes.map(([name], k) => `<label class="use-chip"><input type="radio" name="pv-scene" value="${k}" ${k ? '' : 'checked'}><span>${esc(name.replace(/（.*）/, ''))}</span></label>`).join('')}</div></div>
+          <p class="hint">每个地方是单独的一次请求，用到时才发。条目勾了几个地方，就在那几次请求里各出现一次，不会叠在一起。</p><pre class="code-preview" data-pv-scene="${esc(scenes[0][0])}">${esc(scenes[0][1])}</pre>`);
+        d.body.addEventListener('change', e => { const k = Number(e.target.value), pre = d.body.querySelector('.code-preview'); if (!scenes[k]) return; pre.dataset.pvScene = scenes[k][0]; pre.textContent = scenes[k][1]; pre.scrollTop = 0; });
         break;
       }
     }
