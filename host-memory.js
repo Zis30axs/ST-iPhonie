@@ -2,6 +2,7 @@
 // gives the chat, call, 查手机, 朋友圈 and (when switched on) story requests what a chat remembers: the written-up
 // layers and the older messages that match what is being talked about now. Writing uses the 文字模型 and costs one
 // request per summary; searching is local unless a 向量模型 is set up.
+import {currentDm} from './core/chats.js';
 import {nextBatch, nextMerge, addNode, buildMemoryRequest, parseMemory, memoryText, chunks, recall, recallText, textKey, transcript, roots, storyMemoryText, unwritten, STORY_MEMORY} from './core/memory.js';
 import {activeChatPreset} from './core/chat.js';
 
@@ -105,7 +106,7 @@ export function createMemoryHost({context, settings, backend, notice = () => {}}
   }
   /** The private chat with someone (their memory is what 查手机 and 朋友圈 can draw on). */
   async function privateChat(name) {
-    const thread = (await backend.threads()).find(t => t.type === 'dm' && t.members[0] === name);
+    const thread = currentDm(await backend.threads(), name);
     return thread ? backend.chats.get(thread.id) : null;
   }
   /** The memory of private chats with these people, for 查手机 and 朋友圈 (written-up layers only, kept short). */

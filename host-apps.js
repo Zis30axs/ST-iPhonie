@@ -1,5 +1,6 @@
 // 论坛 and 查手机, tavern side. Like 朋友圈, they are generated apart from the story with the tavern's connected model (or
 // the phone's own text model) and nothing is written into the story. One model request per app at a time.
+import {currentDm} from './core/chats.js';
 import {buildForumRequest, parseForum} from './core/forum.js';
 import {buildPeekRequest, parsePeek, peekId, mergePeek} from './core/peek.js';
 import {storyLines} from './core/moments.js';
@@ -95,7 +96,7 @@ export function createAppsHost({context, settings, backend, memory = null}) {
       const key = backend.spaceKey(), {preset, user} = base(), contact = backend.contacts().find(c => c.name === name);
       if (!contact) throw Error(`联系人里没有「${name}」`);
       const person = {name, persona: contact.persona, card: contact.persona ? '' : card(name)};
-      const thread = (await backend.threads()).find(t => t.type === 'dm' && t.members[0] === name);
+      const thread = currentDm(await backend.threads(), name);
       const history = thread ? (await backend.chats.get(thread.id)).messages.filter(m => m.kind !== 'system').slice(-20) : [];
       const story = storyLines(ctx.chat, preset, user);
       const remembered = memory ? await memory.aboutPeople([name]).catch(() => '') : '';

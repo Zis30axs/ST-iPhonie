@@ -15,12 +15,17 @@ import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './c
 import {openImageViewer} from './image-viewer.js';
 import {downloadAction} from './download.js';
 import {plainStory} from './core/chat.js';
+import {voicePlanRequest, combinedRequest, insertVoiced} from './core/voice-plan.js';
 import {TIER_NAMES, NAI_MODEL_NAMES} from './core/novelai.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? record.versions : record.url ? [{...record}] : [];
 
-export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice}) {
+/**
+ * voice: 回复后单独配音 ({wanted(), has(text), rules(), format()}): whether it is on, whether a reply already has its
+ * lines voiced, the voice preset's prompt for the speakers and its 台词格式. Without it replies are never voiced here.
+ */
+export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null}) {
   const jobs = new Map(); // queue key -> {state: 'generating'|'error', message}
   const folds = new Map(); // `${id}:${hash}` -> true/false, this session's fold choice per picture
   // The latest single tap on a picture: {key, id, message, tag, was, at, rect, timer, done}. It folds or unfolds the
@@ -142,6 +147,38 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       return true;
     } finally { planning.delete(id); }
   }
+  /**
+   * 回复后单独配音, and with 回复后单独配图 on too, both in one request: voices the lines of a reply (and puts its
+   * pictures in). force: do it again, replacing what is there. Returns what was done: {voiced, pictured}.
+   */
+  async function planReply(id, {voiced: wantVoice, pictured: wantPictures, force = false}) {
+    const ctx = context(), s = settings(), message = ctx.chat[id];
+    if (!message || message.is_user || message.is_system || planning.has(id) || (!wantVoice && !wantPictures)) return {voiced: 0, pictured: 0};
+    planning.add(id);
+    notice(wantVoice && wantPictures ? '正在给这条回复配音、挑画面……' : wantVoice ? '正在给这条回复配音……' : '正在给这条回复挑画面……');
+    try {
+      const source = force && wantPictures ? withoutPictures(message.mes) : message.mes, format = voice?.format();
+      const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
+      const pictures = wantPictures ? planRequest(s, {message: source, before: before(id)}) : null;
+      const prompt = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
+        : wantVoice ? voicePlanRequest({rules: voice.rules(), format, message: source, before: before(id)}) : pictures;
+      const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? 500 + preset.count * 400 : 0);
+      const reply = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: Math.min(6000, length)});
+      if (context().chat[id] !== message) return {voiced: 0, pictured: 0};
+      let text = source, pictured = 0, voiced = 0;
+      if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply));
+      if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, format));
+      if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文」里点「给最新回复配音」再试一次' : '这次没有挑出画面，可以在绘图 App 里点“给最新回复配图”再试一次');
+      message.mes = text;
+      if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
+      await ctx.saveChat();
+      redrawMessage(id, message);
+      scheduleRender();
+      if (wantVoice && !voiced) notice('画面挑好了，台词这次没配上，可以在「设置 → 正文」里点「给最新回复配音」');
+      if (wantPictures && !pictured) notice('台词配好了，画面这次没挑出来，可以在绘图 App 里点“给最新回复配图”');
+      return {voiced, pictured};
+    } finally { planning.delete(id); }
+  }
   /** Saves 新外貌 lines of a reply to the 角色 App: new named characters, or roles that have no appearance yet. */
   function registerAppearances(message) {
     const added = [];
@@ -163,13 +200,17 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
    */
   async function autoPictures(id) {
     const s = settings();
-    if (!s.draw.enabled) return;
     let message = context().chat[id];
     if (!message || message.is_user || message.is_system) return;
-    if (s.draw.mode === 'separate' && !parsePictures(message.mes).length) {
-      try { if (!await planPictures(id)) return; } catch (error) { notice(error.message); return; }
+    const wantVoice = !!voice?.wanted() && !voice.has(message.mes);
+    const wantPictures = s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
+    if (wantVoice || wantPictures) {
+      let done;
+      try { done = await planReply(id, {voiced: wantVoice, pictured: wantPictures}); } catch (error) { notice(error.message); return; }
+      if (wantPictures && !done.pictured) return;
       message = context().chat[id];
     }
+    if (!s.draw.enabled) return;
     registerAppearances(message);
     if (!s.draw.auto) return;
     const tags = parsePictures(message.mes).filter(tag => !stored(message, tag.hash));
@@ -444,6 +485,20 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     }
     throw Error('聊天里还没有角色的回复');
   }
+  /** The newest reply from a character: voice its lines again (回复后单独配音), replacing the ones there. */
+  async function voiceLatest() {
+    const chat = context().chat;
+    for (let id = chat.length - 1; id >= 0; id--) {
+      const m = chat[id];
+      if (!m || m.is_user || m.is_system) continue;
+      if (!voice) throw Error('配音没有开');
+      const was = m.mes;
+      if (voice.has(m.mes)) m.mes = voice.strip(m.mes);
+      // The lines go back as they were when nothing new could be put in.
+      try { const {voiced} = await planReply(id, {voiced: true, pictured: false}); return voiced; } catch (error) { if (context().chat[id] === m) m.mes = was; throw error; }
+    }
+    throw Error('聊天里还没有角色的回复');
+  }
 
-  return {decorate, click, autoPictures, planPictures, planLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
+  return {decorate, click, autoPictures, planPictures, planLatest, voiceLatest, registerAppearances, recentMessages, insertImage, suggestPrompt, writePrompt, subscriptionLabel, pictureStats, clearPictures};
 }

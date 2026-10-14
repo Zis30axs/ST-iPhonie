@@ -2299,4 +2299,11 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .me-pic{position:relative;display:inline-grid;border-radius:50%;padding:0}
 .me-pic-edit{position:absolute;right:-2px;bottom:-2px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--card);color:var(--accent-ink);box-shadow:var(--shadow)}
 .me-pic-edit svg{width:15px;height:15px}
+/* 聊天窗口：一个联系人的几段私聊 */
+.window-row{gap:6px}
+.window-open{flex:1;min-width:0;display:flex;align-items:center;gap:12px;text-align:left;color:inherit;padding:0}
+.window-open>span{min-width:0;flex:1}
+.window-open strong{display:block;font-size:15px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.window-open small{display:block;font-size:12px;margin-top:3px;color:var(--ink2)}
+.window-open>.icon{width:18px;height:18px;color:var(--ink2);flex:none}
 

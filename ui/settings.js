@@ -178,6 +178,7 @@ export function settingsApp(ctx) {
       + groupTitle('正文')
       + `<div class="group pad">${languageField('defaultLanguage', s.general.defaultLanguage, false, typedLanguages(api.getState()))}
           ${toggle('voiceEnabled', '正文语音', s.general.voiceEnabled !== false, '关掉后，聊天请求里不再加入语音规则，模型只写普通对白；正文里已有的语音标签只显示中文译文，不显示声波；手机聊天里的联系人也只发文字。打开后恢复。')}
+          ${s.general.voiceEnabled !== false ? `<div class="field"><span>配音方式${help('正文里顺手写：把配音规则加进正文请求，模型写故事时顺手把台词写成配音格式。只要一次请求，但规则较长，有时会影响正文，或者和破限、文风预设打架、漏写格式。\n\n回复后单独配音：正文模型只管写故事，不带任何配音规则；回复写完后，插件用同一个模型再单独请求一次，把正文里的台词配上音（声波稍等一会儿才出来）。格式更稳，不挤占正文，每条回复多一次请求。\n\n绘图里也选了「回复后单独配图」的话，配音和配图合成一次请求，不会多发两次。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配音']].map(([k, l]) => `<button data-action="voice-mode" data-value="${k}" aria-pressed="${(s.general.voiceMode || 'inline') === k}">${l}</button>`).join('')}</div>${s.general.voiceMode === 'separate' && api.planLatestVoice ? `<div class="actions" style="margin:6px 0 0">${btn('voice-latest', icon('wave') + '给最新回复配音', 'text-button')}</div>` : ''}</div>` : ''}
           ${toggle('drawEnabled', '正文出图', s.draw.enabled, '开启后，绘图预设会加进聊天请求，让模型在正文里写出图标签。新回复要不要自动画、图片要不要收起，在绘图 App 的「正文出图」里改；免费档守卫在绘图 App 的「参数」里。')}
           ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上开了视觉小说模式，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
         </div>
@@ -218,6 +219,7 @@ export function settingsApp(ctx) {
       if (!el.checked && api.syncStatus?.()?.available && await ctx.confirm('也删掉酒馆里的那份吗？', '关掉后小手机不再往酒馆存。酒馆里已经存的聊天记录与记忆、助手会话与记忆、朋友圈、备忘录和相册还在，别的设备打开同步还能读到。点确定会把它们从酒馆删掉；这台设备上的内容不受影响。')) await clearTavernCopy();
       return;
     }
+    if (key === 'voiceEnabled') { api.updateGeneral({voiceEnabled: el.checked}); await render(); return; }
     if (['voiceEnabled', 'hideStoryWaves', 'voiceIsland', 'floatingEnabled', 'waveformEnabled', 'cacheEnabled', 'wallpaperMotion', 'stripVoice', 'voiceExample'].includes(key)) { api.updateGeneral({[key]: el.checked}); if (key === 'stripVoice') await render(); }
     else if (key === 'drawEnabled') api.saveDraw({enabled: el.checked});
     else if (key === 'defaultLanguage') api.updateGeneral({defaultLanguage: el.value});
@@ -269,6 +271,8 @@ export function settingsApp(ctx) {
   v.on('click', '[data-action]', async el => {
     switch (el.dataset.action) {
       case 'theme': await api.savePhone({theme: el.dataset.value}); await render(); break;
+      case 'voice-mode': api.updateGeneral({voiceMode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); break;
+      case 'voice-latest': await v.busy(el, async () => { const n = await api.planLatestVoice(); ctx.notify(n ? `配好了 ${n} 句台词` : '这条回复里没有找到台词'); }); break;
       // A skin brings its own wallpaper, unless a personal photo is the wallpaper.
       case 'skin': { const p = await api.getPhone(); await api.savePhone({skin: el.dataset.value, ...(p.wallpaper.kind === 'builtin' ? {wallpaper: {kind: 'builtin', key: el.dataset.value}} : {})}); await render(); break; }
       case 'appearance': { const p = await api.getPhone(); appearance = {wallpaper: p.wallpaper, icons: p.icons, iconStyle: p.iconStyle}; await render(); break; }

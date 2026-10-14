@@ -32,7 +32,7 @@ import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS }
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams } from './novelai.js';
 import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
-import { ChatStore, money } from './chats.js';
+import { ChatStore, money, currentDm } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
 import { CloudQueue, KeyHashQueue, newRoomCode, validRoom, sha256Hex } from './cloud-queue.js';
 import { vibeKey, readVibeFile, imageVibe, mergeVibe, encodingFor, withEncoding, vibeSummary, vibeParameters, singleFile, bundleFile, chatu8File, strength as vibeStrength, MAX_FREE_VIBES, VIBE_ANLAS } from './vibes.js';
@@ -296,6 +296,11 @@ export class TTSBackend {
         const next = this.getState();
         for (const key of ['voiceEnabled', 'hideStoryWaves', 'cacheEnabled', 'floatingEnabled', 'waveformEnabled', 'wallpaperMotion', 'stripVoice', 'voiceExample', 'autoVoice', 'voiceIsland']) if (key in patch) {
             if (typeof patch[key] !== 'boolean') throw Error('开关设置无效'); next.general[key] = patch[key];
+        }
+        // 配音方式: the story model writes the voice tags itself ('inline'), or they are added after the reply ('separate').
+        if ('voiceMode' in patch) {
+            if (!['inline', 'separate'].includes(patch.voiceMode)) throw Error('配音方式无效');
+            next.general.voiceMode = patch.voiceMode;
         }
         if ('defaultLanguage' in patch) {
             if (typeof patch.defaultLanguage !== 'string' || !patch.defaultLanguage.trim() || patch.defaultLanguage.length > 40) throw Error('默认语言无效');
@@ -1976,7 +1981,7 @@ export class TTSBackend {
     // ---------- 删好友 ----------
     /** The private chat with `name` on this card (made when there is none yet). */
     async dmThread(name) {
-        const here = (await this.threads()).find(t => t.type === 'dm' && t.members.length === 1 && t.members[0] === name);
+        const here = currentDm(await this.threads(), name);
         return here || this.chats.create({ type: 'dm', members: [name], space: this.cardKey() });
     }
     /** The user deletes a contact: the chat is put away (kept), and what they send meanwhile becomes 好友申请. */

@@ -57,6 +57,7 @@ export interface GeneralSettings {
     autoVoice?: boolean;
     /** 台词小窗: the latest reply's lines in a pill on the tavern page, to hear one by one (off by default). */
     voiceIsland?: boolean;
+    voiceMode?: 'inline' | 'separate';
 }
 export interface Injection {
     position: InjectionPosition;
@@ -853,6 +854,8 @@ export interface BackendAPI extends BackendFacade {
     chatPictureStats(): { count: number };
     /** Plans the pictures of the newest character reply again and queues them. */
     planLatestPictures(): Promise<boolean>;
+    /** 回复后单独配音: voices the newest reply again; how many lines were voiced. */
+    planLatestVoice?(): Promise<number>;
     /** Deletes every picture of the open chat from the tavern; their tags show "点击生成" again. */
     clearChatPictures(): Promise<{ count: number; failed: number }>;
     /** A picture the chat asked to open in the drawing app, if any. */

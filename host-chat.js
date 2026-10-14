@@ -2,6 +2,7 @@
 // (generateRaw): the prompt carries the chat preset, each contact's persona or character card, the user's persona,
 // recent story messages and the chat history. Nothing is written into the story unless the user brings a chat
 // into it; that text is injected once, into the next story reply.
+import {currentDm} from './core/chats.js';
 import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneBlocks, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoCast} from './core/draw.js';
@@ -234,7 +235,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
   /** The private chat with `name` here (this card, with 分区), made when there is none yet. */
   async function dmWith(name) {
-    const here = (await backend.threads()).find(t => t.type === 'dm' && t.members.length === 1 && t.members[0] === name);
+    const here = currentDm(await backend.threads(), name);
     return here || backend.chatMutate(null, () => backend.chats.create({type: 'dm', members: [name], space: backend.cardKey()}));
   }
   /** Messages that came to the phone: kept unread, said on the island, and photos drawn when that costs nothing. */

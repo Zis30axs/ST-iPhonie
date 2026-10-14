@@ -1,3 +1,4 @@
+import {currentDm, dmWindows} from '../core/chats.js';
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText} from './common.js';
 import {songOf} from '../core/music.js';
 import {icon} from './icons.js';
@@ -186,7 +187,7 @@ export function chatApp(ctx) {
     const atMe = t.type === 'group' && t.unread && last && last.from !== 'me' && String(last.text || '').includes('@' + me) ? '<em class="at-me">[有人@我]</em>' : '';
     const badge = t.unread ? `<span class="badge${t.muted ? ' muted' : ''}">${t.unread > 99 ? '99+' : t.unread}</span>` : '';
     const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">🔥${t.streak}</span>` : '';
-    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${atMe}${esc(who + preview(last))}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
+    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${atMe}${esc(who + preview(last))}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
   }
   async function renderMessages(ticket) {
     const [threads] = await Promise.all([api.listThreads(), counts()]);
@@ -194,16 +195,20 @@ export function chatApp(ctx) {
     const q = search.trim().toLowerCase(), me = myName();
     // A chat with someone the user deleted is put away until they are added back.
     const away = new Set(threads.filter(t => t.type === 'dm' && t.friend?.by === 'me').map(t => t.members[0]));
-    const shown = threads.filter(t => !(t.type === 'dm' && t.friend?.by === 'me')).filter(t => !q || [t.name, ...t.members, preview(t.last)].some(x => String(x || '').toLowerCase().includes(q)));
+    // 聊天窗口: a contact's other private chats stay out of the list (a search finds them too); their unread count
+    // goes on the one in use.
+    const inUse = t => t.type !== 'dm' || currentDm(threads, t.members[0])?.id === t.id;
+    const unreadOf = t => t.type !== 'dm' ? t.unread : dmWindows(threads, t.members[0]).reduce((n, x) => n + (x.unread || 0), 0);
+    const rows = threads.filter(t => !(t.type === 'dm' && t.friend?.by === 'me')).filter(t => q ? [t.name, t.label, ...t.members, preview(t.last)].some(x => String(x || '').toLowerCase().includes(q)) : inUse(t)).map(t => ({...t, unread: q ? t.unread : unreadOf(t)}));
     const people = q ? api.chatContacts().filter(c => c.name.toLowerCase().includes(q) && !away.has(c.name) && !threads.some(t => t.type === 'dm' && t.members[0] === c.name)) : [];
     const bring = pendingBring();
     v.draw(frame(`<header class="qq-top"><button type="button" class="qq-me" data-action="me" aria-label="我的资料和个性装扮">${myAvatar(42)}<span class="qq-me-text"><strong>${esc(me)}</strong><small>${statusLine()}</small></span></button>${btn('plus-menu', icon('add'), 'round-button', 'aria-label="发起聊天、添加联系人"')}</header>
       <label class="qq-search">${icon('search')}<input data-field="chat-search" type="search" value="${esc(search)}" placeholder="搜索聊天和联系人" aria-label="搜索" autocomplete="off"></label>`
       + (bring ? `<div class="banner bring-banner">${icon('book')}<span>和${esc(bring.name)}的 ${bring.count} 条消息会带进下一次正文</span>${btn('cancel-bring', '取消', 'chip-button')}</div>` : '')
       + (live ? '' : '<div class="banner">' + icon('alert') + '<span>在酒馆里打开小手机时，联系人才会回复。</span></div>')
-      + (shown.length ? `<div class="conv-list qq-list">${shown.map(t => convRow(t, me)).join('')}</div>` : q ? '' : empty('还没有聊天', '点右上角的加号，和角色私聊，或者拉一个群。联系人来自角色 App，也可以手动添加。', 'chat'))
+      + (rows.length ? `<div class="conv-list qq-list">${rows.map(t => convRow(t, me)).join('')}</div>` : q ? '' : empty('还没有聊天', '点右上角的加号，和角色私聊，或者拉一个群。联系人来自角色 App，也可以手动添加。', 'chat'))
       + (people.length ? groupTitle('联系人') + `<div class="group">${people.map(c => `<button class="list-row" data-action="dm-open" data-name="${esc(c.name)}">${avatar(c.name, c.engine, 40)}<span><strong>${esc(shown(c.name))}</strong><small>发消息</small></span>${icon('next')}</button>`).join('')}</div>` : '')
-      + (q && !shown.length && !people.length ? `<p class="hint">没有找到「${esc(search)}」</p>` : '')));
+      + (q && !rows.length && !people.length ? `<p class="hint">没有找到「${esc(search)}」</p>` : '')));
     if (searching) { const box = v.root.querySelector('[data-field=chat-search]'); box?.focus({preventScroll: true}); box?.setSelectionRange?.(box.value.length, box.value.length); }
   }
 
@@ -268,7 +273,7 @@ export function chatApp(ctx) {
   }
   /** 最近在听: the last song this contact shared in your private chat. */
   async function listeningOf(name) {
-    const t = (await api.listThreads()).find(x => x.type === 'dm' && x.members[0] === name);
+    const t = currentDm(await api.listThreads(), name);
     if (!t) return null;
     return (await api.getThread(t.id))?.messages.findLast(m => m.kind === 'song' && m.from === name)?.song || null;
   }
@@ -945,7 +950,7 @@ export function chatApp(ctx) {
       if (!b) return;
       ctx.win.Promise.resolve().then(async () => {
         if (b.dataset.newDm) {
-          const existing = (await api.listThreads()).find(t => t.type === 'dm' && t.members[0] === b.dataset.newDm);
+          const existing = currentDm(await api.listThreads(), b.dataset.newDm);
           const t = existing || await api.createThread({type: 'dm', members: [b.dataset.newDm]});
           d.close(); open(t.id);
         }
@@ -956,6 +961,43 @@ export function chatApp(ctx) {
         }
         if (b.dataset.action === 'manage-contacts') { d.close(); mode = 'list'; tab = 'contacts'; contactDraft = null; render(); }
       }).catch(error => ctx.notify(error.message));
+    });
+  }
+  /**
+   * 聊天窗口 with one contact, like the tavern's chats: each its own messages and memory. A tap opens one (and makes
+   * it the one in use: the list shows it, replies and calls go to it); 新开 starts an empty one; each can be renamed
+   * or deleted. Deleting the last one leaves the contact, without a chat.
+   */
+  async function windowsSheet(name) {
+    const d = ctx.dialog(`和${shown(name)}的聊天窗口`, '<p class="hint">正在读取……</p>');
+    const paint = async () => {
+      const list = dmWindows(await api.listThreads(), name);
+      if (!d.live) return;
+      const when = at => at ? new Date(at).toLocaleString('zh-CN', {hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : '';
+      d.body.innerHTML = `<div class="pick-list">${list.map((t, i) => `<div class="list-row window-row"><button type="button" class="window-open" data-window="${esc(t.id)}">${icon(i === 0 ? 'check' : 'chat')}<span><strong>${esc(t.label || (t.last ? preview(t.last) : '空的窗口'))}</strong><small>${i === 0 ? '正在用 · ' : ''}${t.count} 条${t.last ? ' · ' + when(t.last.at) : ''}</small></span></button>${btn('window-rename', icon('edit'), 'icon-button', `data-id="${esc(t.id)}" aria-label="改名"`)}${btn('window-delete', icon('trash'), 'icon-button', `data-id="${esc(t.id)}" aria-label="删除这个窗口"`)}</div>`).join('')}
+        <button type="button" class="list-row" data-window-new>${icon('add')}<span><strong>新开一个窗口</strong><small>从头聊，之前的窗口都留着</small></span></button></div>`;
+    };
+    await paint();
+    d.body.addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      ctx.win.Promise.resolve().then(async () => {
+        if (b.dataset.window) { d.close(); await api.updateThread(b.dataset.window, {open: true}); open(b.dataset.window); }
+        if (b.hasAttribute('data-window-new')) { d.close(); const t = await api.createThread({type: 'dm', members: [name]}); open(t.id); ctx.notify('新开了一个聊天窗口'); }
+        if (b.dataset.action === 'window-rename') {
+          const t = (await api.listThreads()).find(x => x.id === b.dataset.id);
+          const r = ctx.dialog('窗口的名字', `${field('名字', input('window-label', t?.label || '', 'text', 'maxlength="40" placeholder="比如：第二周目、平行世界"'))}<div class="actions">${btn('window-label-save', '保存', 'primary')}</div>`);
+          r.body.addEventListener('click', async ev => { if (!ev.target.closest('[data-action=window-label-save]')) return; await api.updateThread(b.dataset.id, {label: r.body.querySelector('[data-field=window-label]').value}); r.close(); render(); windowsSheet(name); });
+        }
+        if (b.dataset.action === 'window-delete') {
+          const id = b.dataset.id;
+          if (!await ctx.confirm('删除这个聊天窗口？', '这个窗口里的聊天记录和记忆会删掉，别的窗口不受影响。')) return windowsSheet(name);
+          await api.deleteThread(id);
+          if (id === threadId) { const next = currentDm(await api.listThreads(), name); if (next) open(next.id); else { mode = 'list'; threadId = null; render(); } }
+          else render();
+          windowsSheet(name);
+        }
+      }).catch(error => ctx.notify(error.message, {error: true}));
     });
   }
   /** Options for voice messages in every chat: what 转文字 shows, and whether it happens by itself. */
@@ -1091,7 +1133,7 @@ export function chatApp(ctx) {
     });
   }
   async function openDm(name) {
-    const existing = (await api.listThreads()).find(t => t.type === 'dm' && t.members[0] === name);
+    const existing = currentDm(await api.listThreads(), name);
     const t = existing || await api.createThread({type: 'dm', members: [name]});
     open(t.id);
   }
@@ -1100,6 +1142,7 @@ export function chatApp(ctx) {
     const d = ctx.dialog(thread.name, `<div class="pick-list">
       ${live ? `<button class="list-row" data-menu="reroll">${icon('refresh')}<span><strong>重新回复最后一轮</strong></span></button>` : ''}
       ${group ? `<button class="list-row" data-menu="rename">${icon('edit')}<span><strong>改群名</strong></span></button><button class="list-row" data-menu="group-avatar">${icon('image')}<span><strong>换群头像</strong><small>从相册选一张或上传，也可以换回成员拼的头像</small></span></button>` : ''}
+      ${group ? '' : `<button class="list-row" data-menu="windows">${icon('layers')}<span><strong>聊天窗口</strong><small>和${esc(shown(thread.members[0]))}开好几个聊天，切换、新开、删除</small></span></button>`}
       <button class="list-row" data-menu="memory">${icon('book')}<span><strong>记忆</strong><small>更早的聊天整理成的摘要和总结，可以改</small></span></button>
       <button class="list-row" data-menu="voice-text">${icon('book')}<span><strong>语音消息</strong><small>转文字显示什么、要不要自动转</small></span></button>
       <button class="list-row" data-menu="pace">${icon('chat')}<span><strong>逐条显示回复：${api.getState().chat.pace !== false ? '开' : '关'}</strong><small>对方的消息像真人打字一样一条条出来；关掉就一次全显示</small></span></button>
@@ -1119,6 +1162,7 @@ export function chatApp(ctx) {
         if (action === 'group-avatar') await avatarSheet('g:' + threadId, {title: `${thread.name} 的群头像`, reset: '用成员拼的头像'});
         if (action === 'pace') { const on = api.getState().chat.pace === false; api.saveChatOptions({pace: on}); if (!on) { ctx.win.clearTimeout(pace.timer); pace.timer = 0; pace.queue = []; pace.hidden.clear(); render(); } ctx.notify(on ? '对方的消息会一条条出来' : '对方的消息会一次全显示'); }
         if (action === 'memory') memorySheet(ctx, {threadId, title: thread.name});
+        if (action === 'windows') await windowsSheet(thread.members[0]);
         if (action === 'clear' && await ctx.confirm('清空聊天记录？', '这段聊天会保留，消息全部删除。')) await api.deleteChatMessages(threadId, thread.messages.map(m => m.id));
         if (action === 'delete' && await ctx.confirm('删除这段聊天？', '聊天记录会一起删除，联系人不受影响。')) { if (api.getState().chat.avatars?.['g:' + threadId]) api.saveChatOptions({avatars: {['g:' + threadId]: null}}); await api.deleteThread(threadId); mode = 'list'; threadId = null; render(); }
       }).catch(error => ctx.notify(error.message));
