@@ -5,7 +5,8 @@
 import {createView, esc, btn, help, menu, empty} from './common.js';
 import {saveFile} from '../download.js';
 import {allBrushes, userBrushes, saveUserBrushes, cleanBrush, BRUSHES, FIELDS, tipMask, coloredTip, maskFromImage} from './paint/brushes.js';
-import {createPicture, activeLayer, undo, redo, addLayer, removeLayer, moveLayer, clearLayer, flatten, stampOf} from './paint/engine.js';
+import {createPicture, undo, redo, flatten, stampOf, layerInfo} from './paint/engine.js';
+import {layersPanel} from './paint/layers-panel.js';
 import {createStage} from './paint/stage.js';
 import {paintStore} from './paint/store.js';
 import {hsvToRgb, rgbToHsv, rgbToHex, hexToRgb, colorWheel} from './paint/color.js';
@@ -93,7 +94,7 @@ export function paintApp(ctx) {
     if (!pic || !work || savedAt === pic.changed) return saving || Promise.resolve();
     const p = pic, at = p.changed, w = work;
     saving = (saving || Promise.resolve()).then(async () => {
-      const layers = await Promise.all(p.layers.map(async l => ({id: l.id, name: l.name, opacity: l.opacity, visible: l.visible, blob: await blobOf(l.canvas)})));
+      const layers = await Promise.all(p.layers.map(async l => ({...layerInfo(l), blob: await blobOf(l.canvas)})));
       const flat = flatten(p), s = Math.min(1, 360 / Math.max(p.width, p.height)), t = ctx.doc.createElement('canvas');
       t.width = Math.round(p.width * s); t.height = Math.round(p.height * s);
       t.getContext('2d')?.drawImage(flat, 0, 0, t.width, t.height);
@@ -134,7 +135,7 @@ export function paintApp(ctx) {
       tool: () => ({kind: tools.kind, brush: brushOf(current().id), size: current().size, opacity: current().opacity, color: tools.color}),
       picked: color => setColor(color, {keep: false}),
       stroked: () => { saveSoon(); syncSide(); },
-      undo: () => doUndo(), redo: () => doRedo()});
+      undo: () => doUndo(), redo: () => doRedo(), locked: () => ctx.notify('这个图层锁定了：在图层里左滑解锁')});
     tipMask(ctx.doc, brushOf(tools.brush.id)).onready = () => stage?.render();
     syncTools();
   }
@@ -269,40 +270,7 @@ export function paintApp(ctx) {
 
   // ---------- 图层 ----------
   function layerSheet() {
-    const d = ctx.dialog('图层', '');
-    const paint = () => {
-      const on = activeLayer(pic);
-      d.body.innerHTML = `<div class="actions paint-layer-tools">${btn('layer-add', '＋ 新图层', 'chip-button')}</div><div class="pick-list paint-layers">${[...pic.layers].reverse().map(l => `<div class="list-row paint-layer${l.id === on.id ? ' on' : ''}" data-layer="${esc(l.id)}">
-          <canvas class="paint-layer-thumb" width="60" height="60" data-layer-thumb="${esc(l.id)}"></canvas><span class="grow"><strong>${esc(l.name)}</strong><small>${Math.round(l.opacity * 100)}%</small></span>
-          <button type="button" class="icon-button" data-layer-eye="${esc(l.id)}" aria-label="${l.visible ? '隐藏' : '显示'}">${l.visible ? I.eye : I.eyeOff}</button></div>
-          ${l.id === on.id ? `<div class="paint-layer-more"><div class="field"><div class="meter-label"><span>不透明度</span><output>${Math.round(l.opacity * 100)}%</output></div><input class="slider" type="range" min="0" max="100" value="${Math.round(l.opacity * 100)}" data-layer-opacity></div>
-            <div class="actions">${btn('layer-up', '上移', 'chip-button')}${btn('layer-down', '下移', 'chip-button')}${btn('layer-clear', '清空', 'chip-button')}${btn('layer-delete', '删除', 'chip-button danger', pic.layers.length < 2 ? 'disabled' : '')}</div></div>` : ''}`).join('')}
-          <div class="list-row paint-layer paint-bg"><input type="color" value="${esc(pic.background)}" data-bg-color aria-label="背景颜色"><span class="grow"><strong>背景颜色</strong><small>${pic.showBackground ? esc(pic.background) : '透明'}</small></span><button type="button" class="icon-button" data-bg-eye aria-label="${pic.showBackground ? '隐藏' : '显示'}背景">${pic.showBackground ? I.eye : I.eyeOff}</button></div></div>`;
-      for (const c of d.body.querySelectorAll('[data-layer-thumb]')) {
-        const l = pic.layers.find(x => x.id === c.dataset.layerThumb), g = c.getContext('2d'), s = Math.min(60 / pic.width, 60 / pic.height);
-        g?.drawImage(l.canvas, (60 - pic.width * s) / 2, (60 - pic.height * s) / 2, pic.width * s, pic.height * s);
-      }
-    };
-    const changed = () => { stage.render(); syncSide(); saveSoon(); paint(); };
-    paint();
-    d.body.addEventListener('click', async e => {
-      const eye = e.target.closest('[data-layer-eye]');
-      if (eye) { const l = pic.layers.find(x => x.id === eye.dataset.layerEye); l.visible = !l.visible; pic.changed++; return changed(); }
-      if (e.target.closest('[data-bg-eye]')) { pic.showBackground = !pic.showBackground; pic.changed++; return changed(); }
-      const a = e.target.closest('[data-action]')?.dataset.action, on = activeLayer(pic);
-      if (a === 'layer-add') { addLayer(pic); return changed(); }
-      if (a === 'layer-up') { moveLayer(pic, on.id, 1); return changed(); }
-      if (a === 'layer-down') { moveLayer(pic, on.id, -1); return changed(); }
-      if (a === 'layer-clear') { clearLayer(pic, on.id); return changed(); }
-      if (a === 'layer-delete') { removeLayer(pic, on.id); return changed(); }
-      const row = e.target.closest('[data-layer]');
-      if (row && !e.target.closest('input')) { pic.active = row.dataset.layer; pic.changed++; paint(); }
-    });
-    d.body.addEventListener('input', e => {
-      if (e.target.matches('[data-layer-opacity]')) { activeLayer(pic).opacity = Number(e.target.value) / 100; e.target.previousElementSibling.querySelector('output').textContent = e.target.value + '%'; pic.changed++; stage.render(); }
-      if (e.target.matches('[data-bg-color]')) { pic.background = e.target.value; pic.showBackground = true; pic.changed++; stage.render(); }
-    });
-    d.body.addEventListener('change', e => { if (e.target.matches('[data-layer-opacity], [data-bg-color]')) { saveSoon(); paint(); } });
+    layersPanel({ctx, pic, color: () => tools.color, changed: ({quiet = false} = {}) => { stage.render(); if (!quiet) { syncSide(); saveSoon(); } }});
   }
 
   async function actions() {
@@ -310,11 +278,13 @@ export function paintApp(ctx) {
       {key: 'album', icon: 'image', label: '存到相册', note: '把所有图层合成一张放进相册'},
       {key: 'download', icon: 'download', label: '下载 PNG'},
       {key: 'fit', icon: 'next', label: '适应屏幕', note: '回到整张画都看得见的样子'},
+      {key: 'flip', icon: 'swap', label: stage.flipped ? '翻转回来' : '左右翻转画面', note: '只是换个方向看，检查画歪了没有；画本身不变'},
       {key: 'rename', icon: 'edit', label: '重命名'}]);
     try {
       if (a === 'album') await toAlbum(pic, work.name);
       if (a === 'download') { const blob = await blobOf(flatten(pic)); if (blob) ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, work.name)); }
       if (a === 'fit') stage.fit();
+      if (a === 'flip') { stage.flip(); ctx.notify(stage.flipped ? '画面左右翻转了（画本身没变）' : '翻转回来了'); }
       if (a === 'rename') {
         const d = ctx.dialog('作品名字', `<div class="field"><input data-field="work-name" maxlength="40" value="${esc(work.name)}"></div><div class="actions">${btn('work-name-save', '保存', 'primary')}</div>`);
         d.body.addEventListener('click', e => { if (!e.target.closest('[data-action=work-name-save]')) return; work.name = d.body.querySelector('[data-field=work-name]').value.trim() || work.name; d.close(); pic.changed++; save(); });

@@ -25,14 +25,13 @@ export function fitView(pic, w, h) {
  * host: the element the canvas fills. tool(): {kind: 'brush'|'eraser'|'pick', brush, size, opacity, color}.
  * picked(color): the eyedropper found a colour. stroked(): a stroke went onto the picture. undo(), redo().
  */
-export function createStage({doc, win, host, pic, tool, picked, stroked, undo, redo}) {
+export function createStage({doc, win, host, pic, tool, picked, stroked, undo, redo, locked = () => {}}) {
   const canvas = doc.createElement('canvas');
   canvas.className = 'paint-view';
   canvas.style.touchAction = 'none';
   host.append(canvas);
   const g = canvas.getContext('2d');
-  const scratch = (() => { const c = doc.createElement('canvas'); c.width = pic.width; c.height = pic.height; return {canvas: c, g: c.getContext('2d')}; })();
-  let w = 0, h = 0, ratio = 1, view = null, raf = 0, penSeen = false, spaceDown = false;
+  let w = 0, h = 0, ratio = 1, view = null, raf = 0, penSeen = false, spaceDown = false, flipped = false;
   const pointers = new Map();
   let drawing = null, gesture = null, panning = null, taps = null;
 
@@ -52,12 +51,14 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
     g.clearRect(0, 0, canvas.width, canvas.height);
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
     g.translate(view.x, view.y); g.rotate(view.angle); g.scale(view.scale, view.scale);
+    // 左右翻转画面: only how it is seen.
+    if (flipped) { g.translate(pic.width, 0); g.scale(-1, 1); }
     g.shadowColor = 'rgba(0,0,0,.25)'; g.shadowBlur = 18 / view.scale;
     g.fillStyle = '#fff'; g.fillRect(0, 0, pic.width, pic.height);
     g.shadowBlur = 0; g.shadowColor = 'transparent';
     if (!pic.showBackground) checker();
     g.imageSmoothingEnabled = view.scale < 2;
-    compose(pic, g, {scratch});
+    compose(pic, g);
   }
   // Behind a picture without its background: a light chequer, so what is see-through shows.
   function checker() {
@@ -69,14 +70,14 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
   const local = e => { const r = canvas.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
   // Pressure: a pen's own; a mouse or a finger (most report nothing useful) presses fully.
   const pressure = e => e.pointerType === 'pen' ? Math.max(.02, e.pressure || 0) : 1;
-  function point(e) { const s = local(e), p = viewMath(view).toPicture(s.x, s.y); return {x: p.x, y: p.y, p: pressure(e), sx: s.x, sy: s.y}; }
+  function point(e) { const s = local(e), p = viewMath(view).toPicture(s.x, s.y); return {x: flipped ? pic.width - p.x : p.x, y: p.y, p: pressure(e), sx: s.x, sy: s.y}; }
 
   function startDrawing(e) {
     const t = tool(), at = point(e);
     if (t.kind === 'pick') { drawing = {id: e.pointerId, pick: true}; pick(at); return; }
     const brush = {...t.brush, opacity: t.brush.opacity * t.opacity};
     drawing = {id: e.pointerId, start: at, smooth: at, raw: at, moved: 0, at: Date.now(), streamline: brush.streamline};
-    beginStroke(pic, {brush, size: t.size, color: t.color, erase: t.kind === 'eraser'}, at);
+    if (!beginStroke(pic, {brush, size: t.size, color: t.color, erase: t.kind === 'eraser'}, at)) { drawing = null; locked(); return; }
     // Held still: the eyedropper instead.
     drawing.hold = win.setTimeout(() => { if (drawing && !drawing.pick && drawing.moved < 6) { endStroke(pic, {cancel: true}); drawing.pick = true; pick(drawing.raw); later(); } }, HOLD);
     later();
@@ -186,6 +187,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, undo, r
   return {
     render: later,
     fit() { view = fitView(pic, w, h); later(); },
+    flip() { flipped = !flipped; later(); },
+    get flipped() { return flipped; },
     zoomBy(factor) { zoomAt(w / 2, h / 2, factor); },
     /** Space held: the picture is dragged instead of drawn on. */
     space(on) { spaceDown = on; canvas.style.cursor = on ? 'grab' : ''; },
