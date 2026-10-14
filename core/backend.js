@@ -24,7 +24,7 @@ import { normalizeSettings, validateSettings, modelRules, freshState } from './s
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
-import { TTSParameters, FISH_DRAMA_NOTE } from './parameters.js';
+import { TTSParameters, FISH_API } from './parameters.js';
 import { KeyStore, keyTail, validateKey, parseTextKeys, joinTextKeys } from './keys.js';
 import { Providers, buildRequest } from './providers.js';
 import { AudioCache } from './cache.js';
@@ -2148,7 +2148,10 @@ export class TTSBackend {
         engineCheck(engine); modelCheck(engine, connection.model);
         const current = clone(connection); TTSParameters.normalize(engine, current);
         const catalog = clone(TTSParameters.catalogs[engine]);
-        catalog.models = catalog.models.map(id => engine === 'fish' && TTSParameters.fishDramaBlocked({ ...current, model: id }) ? { id, supported: false, reason: FISH_DRAMA_NOTE } : { id, supported: true, reason: '' });
+        catalog.models = catalog.models.map(id => ({ id, supported: true, reason: '' }));
+        // Models only on Fish's own /v1/tts: without a relay they go through the tavern's proxy, which must be on.
+        const native = engine === 'fish' && TTSParameters.fishBase(current) === FISH_API ? catalog.models.filter(m => TTSParameters.fishNative({ ...current, model: m.id })).map(m => m.id) : [];
+        catalog.modelNote = native.length ? `${native.join('、')} 现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆（用中转的不用改）。Fish 把它放进网页能用的接口以后会自动直连。` : '';
         catalog.groups = catalog.groups.map(group => ({ ...group, fields: group.fields.map(field => ({
             ...field, ...(field.type === 'select' ? { options: TTSParameters.allowed(engine, field, current) } : {}),
             unavailable: TTSParameters.unavailable(engine, field, current),
@@ -2281,7 +2284,7 @@ export class TTSBackend {
             comfyLoraInfo: () => this.comfyLoraInfo(), editComfyLoras: change => this.editComfyLoras(clone(change || {})), restoreComfyWorkflow: () => this.restoreComfyWorkflow(),
             comfyLoras: options => this.comfyLoras(options),
             saveDrawPreset: preset => this.saveDrawPreset(preset), deleteDrawPreset: id => this.deleteDrawPreset(id), previewDrawPrompt: preset => this.previewDrawPrompt(preset),
-            naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
+            naiSubscription: refresh => this.naiSubscription(refresh), naiProbe: () => this.naiProbe(), fishCatalog: () => this.providers.fishCatalog(), fishProbe: () => { this.assertOpen(); keyCheck('fish'); return this.providers.probeFish(clone(this.settings.connections.fish)); },
             listVibes: () => this.listVibes(), compactVibes: () => this.compactVibes(), importVibes: (files, options) => this.importVibes(files, clone(options || {})), updateVibe: (id, patch) => this.updateVibe(id, clone(patch || {})), deleteVibe: id => this.deleteVibe(id), deleteVibes: ids => this.deleteVibes([...(ids || [])]), exportVibes: target => this.exportVibes(clone(target || {})), vibePlan: model => clone(this.vibePlan(model || this.settings.draw.params.model)), drawQuote: params => this.drawQuote(params),
             generateImage: input => this.generateImage(input).then(({ blob, ...result }) => result),
             drawQueue: () => this.drawQueue.list(), cancelDraw: key => this.drawQueue.cancel(key), cancelAllDraws: () => this.drawQueue.cancelAll(),

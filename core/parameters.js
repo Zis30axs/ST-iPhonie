@@ -87,10 +87,17 @@ function unavailable(key,f,c){const p=c.params,k=f.key;
 }
 /** Fish Audio's address, or the relay (中转) the user set: every Fish request (speech, voices, balance) goes there. */
 export const FISH_API='https://api.fish.audio';
-// Drama 3 is served only on Fish's own /v1/tts, which answers no CORS preflight, so a browser cannot call it; the
-// compat endpoint we use lists s2.1-pro, s2.1-pro-free, s2-pro and s1 (GET /compat/v1/models, checked 2026-10-14).
-export const FISH_DRAMA_NOTE='Fish 还没把 drama-3 放进网页能用的接口：它现在只在 Fish 自己的 /v1/tts 上，那个接口不让浏览器直接调用。等 Fish 放开就能选；用 OpenAI 格式的中转时看中转支不支持。';
-const fishDramaBlocked=c=>c.model==='drama-3'&&!fishOpenAI(c);
+// Which models Fish's compat endpoint (the one web pages may call) serves. GET /compat/v1/models is read once a page
+// (Providers.fishCatalog); until then, the list as checked on 2026-10-14. A model not there (drama-3 so far) goes to
+// Fish's own /v1/tts, which answers no CORS preflight: through a relay, or through the tavern's proxy (enableCorsProxy).
+let fishCompat=new Set(['s2.1-pro','s2.1-pro-free','s2-pro','s1']);
+/** The compat endpoint's catalog as read (ids like fish-audio/s1); true when it changed what goes where. */
+export function setFishCompat(ids){const next=new Set((ids||[]).map(id=>String(id).replace(/^fish-audio\//,'')).filter(Boolean));if(!next.size)return false;const changed=catalogs.fish.models.some(m=>next.has(m)!==fishCompat.has(m));fishCompat=next;return changed;}
+/** Whether this connection's model is sent to Fish's own /v1/tts (an OpenAI-form relay takes every model its own way). */
+export const fishNative=c=>!fishOpenAI(c)&&!fishCompat.has(c?.model);
+/** A /v1/tts request without a relay goes through the tavern's proxy: what to do when that is off. */
+export const FISH_PROXY_NOTE='这个模型现在只在 Fish 自己的接口上，网页不能直接调用，要借酒馆转发：在酒馆的 config.yaml 里把 enableCorsProxy 改成 true，然后重启酒馆。用中转的不用改。';
+export const FISH_NATIVE_REFS='这个模型走 Fish 自己的接口，那里不能这样带参考音频：在 Fish 引擎里去掉参考音频，角色的「音色」填 Fish 的音色 ID';
 export const fishBase=c=>typeof c?.relay==='string'&&/^https?:\/\/[^\s]+$/.test(c.relay)?c.relay:FISH_API;
 /** A relay speaks Fish's own paths ('fish': /compat/v1/audio/speech, /model, /wallet) or OpenAI's ('openai': /v1/audio/speech only). */
 export const fishOpenAI=c=>!!(c?.relay&&c.relayApi==='openai');
@@ -103,7 +110,9 @@ function setPath(target,key,value){const parts=key.split('.');let node=target;fo
 // (eleven_v4 rejects apply_language_text_normalization:false).
 const ELEVEN_DEFAULTS={apply_text_normalization:'auto',apply_language_text_normalization:false,use_pvc_as_ivc:false,enable_logging:true};
 function requestPreview(key,c,voice='角色音色 ID',text='雨还没停。再坐一会儿吧。',model=c.model){c=structuredClone(c);c.model=model;normalize(key,c);const values=activeParameters(key,c);let body={},query={};for(let [k,v] of Object.entries(values)){if(['dictionary_mode','inline_dictionary'].includes(k))continue;if(key==='eleven'&&Object.hasOwn(ELEVEN_DEFAULTS,k)&&ELEVEN_DEFAULTS[k]===v)continue;if(key==='eleven'&&['output_format','enable_logging','optimize_streaming_latency'].includes(k)){query[k]=v;continue;}const f=catalogs[key].groups.flatMap(g=>g.fields).find(f=>f.key===k);if(f?.type==='lines')v=String(v).split('\n').map(x=>x.trim()).filter(Boolean);setPath(body,k,v);}
- if(key==='fish'){if(c.params.dictionary_mode==='inline'&&c.params.inline_dictionary.length)body.pronunciation_dictionary=[{items:c.params.inline_dictionary}];if(body.references)body.references=body.references.map(r=>({audio:'[本地参考音频：'+r.audio+']',text:r.text}));const format=body.format;delete body.format;return {url:fishBase(c)+'/compat/v1/audio/speech',body:{model:'fish-audio/'+model,input:text,voice:body.references?'':voice,response_format:format,provider:{options:{'fish-audio':body}}}};}
+ if(key==='fish'){if(c.params.dictionary_mode==='inline'&&c.params.inline_dictionary.length)body.pronunciation_dictionary=[{items:c.params.inline_dictionary}];if(body.references)body.references=body.references.map(r=>({audio:'[本地参考音频：'+r.audio+']',text:r.text}));const format=body.format;delete body.format;const compat={url:fishBase(c)+'/compat/v1/audio/speech',body:{model:'fish-audio/'+model,input:text,voice:body.references?'':voice,response_format:format,provider:{options:{'fish-audio':structuredClone(body)}}}};
+ // Fish's own /v1/tts: the model in a header, the same fields at the top (the compat request is kept for the cache).
+ if(!fishNative({...c,model}))return compat;return {url:fishBase(c)+'/v1/tts',headers:{model},native:true,compat,body:{text,...(body.references||!voice?{}:{reference_id:voice}),format,...body}};}
  if(key==='mimo'){const mode=mimoMode(model),style=[mode==='design'?voice:'',c.params.style].map(x=>String(x||'').trim()).filter(Boolean).join('\n'),audio={format:'wav'};
   if(mode==='preset')audio.voice=voice;else if(mode==='clone')audio.voice='[克隆样本：'+voice+']';
   return {url:'https://api.xiaomimimo.com/v1/chat/completions',body:{model,messages:[...(style?[{role:'user',content:style}]:[]),{role:'assistant',content:text}],audio}};}
@@ -146,4 +155,4 @@ function emotionTag(key,model,emotion,text){let word=String(emotion||'').trim();
  if(key==='fish'&&fishS1(model)){const w=word.toLowerCase();return FISH_S1_EMOTIONS.includes(w)||FISH_S1_TONES.includes(w)?`(${w}) ${text}`:text;}
  if(key==='fish'||key==='eleven'&&elevenTagged(model))return /^[a-z][a-z ,'-]{1,40}$/i.test(word)?`[${word.toLowerCase()}] ${text}`:text;
  return text;}
-export const TTSParameters={fishBase,fishOpenAI,fishDramaBlocked,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};
+export const TTSParameters={fishBase,fishOpenAI,fishNative,openaiSpeech,catalogs,defaults,allowed,unavailable,normalize,activeParameters,requestPreview,validate,tags,tagNote,miniEmotion,emotionTag,vocab:{FISH_S1_EMOTIONS,FISH_S1_TONES,FISH_S1_SOUNDS,MINI_SOUNDS,ELEVEN_TAGS,MIMO_STYLES,MIMO_SOUNDS,MIMO_VOICES},mimoMode};

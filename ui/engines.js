@@ -367,7 +367,7 @@ export function enginesApp(ctx) {
       + `<div class="group pad">
           ${keyRows(engine)}
           ${field(saved ? '再加一个密钥' : engine === 'custom' ? '密钥（不用密钥的接口可以不填）' : 'API Key', textArea('key', '', `rows="1" class="code key-paste" autocomplete="off" spellcheck="false" placeholder="${saved ? '粘贴新的密钥' : '粘贴密钥，多个就每行一个'}"`), '粘贴完点一下别处就保存了。可以保存多个账号的密钥，新加的排在后面，不用的可以单独删掉。先用排在前面的；某个密钥被拒（401、403）、额度用完（402）或请求太频繁（429）时，自动换下一个重试，这次打开页面里不再用它。想手动换，点那个密钥的「用这个」：马上改用它，并把它排到第一个，以后打开也先用它。\n\n密钥只保存在当前浏览器和酒馆地址，按账户分别保存。')}
-          ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || '角色没有单独指定模型时使用这里的模型。') : ''}
+          ${schema.models.length > 1 ? field('默认模型', select('model', c.model, schema.models.map(m => [m.id, m.id, !m.supported])), unsupported || [schema.modelNote, '角色没有单独指定模型时使用这里的模型。'].filter(Boolean).join('\n\n')) : ''}
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
       + (fish ? `<details data-group="fish-relay"><summary>中转<small class="fold-note">${fish.relay ? esc(fish.relay.replace(/^https?:\/\//, '')) : '直连 Fish Audio'}</small></summary><div class="fold-body">${fishRelay()}</div></details>` : '')
@@ -456,6 +456,8 @@ export function enginesApp(ctx) {
     dirty = JSON.stringify(draft()) !== JSON.stringify(api.getState().connections[id]);
     render();
     v.root.scrollTop = 0;
+    // Fish: which models web pages may call now (drama-3 moves there once Fish adds it); drawn again when that changed.
+    if (id === 'fish') api.fishCatalog?.().then(changed => { if (changed && engine === 'fish') render(); }).catch(() => {});
   }
   v.edit = edit;
   // The card in front of its pocket lifts out and becomes the card on top of its page, and goes back in (ui/carry.js).

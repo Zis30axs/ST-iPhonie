@@ -1,4 +1,5 @@
 import { buildRequest } from './providers.js';
+import { TTSParameters } from './parameters.js';
 import { findRoute } from './routes.js';
 import { requestHash } from './cache.js';
 import { effectChain, lineEffect } from './voice-fx.js';
@@ -228,6 +229,8 @@ export class DialoguePlayer {
  /** A line's audio: from the cache, or made and kept. found(fromCache, key) is told before any making starts. */
  async make(line, route, s, signal, found = () => {}, still = () => !signal.aborted) {
   const effective = { ...structuredClone(route), language: route.language || s.general.defaultLanguage, model: route.model || s.connections[route.engine].model };
+  // A Fish model web pages may not call yet (drama-3): first ask whether Fish has opened it to them by now.
+  if (route.engine === 'fish' && TTSParameters.fishNative({ ...s.connections.fish, model: effective.model })) await this.providers.fishCatalog?.();
   const request = buildRequest(route.engine, s.connections[route.engine], effective, line, this.providers.references);
   const key = await requestHash(request);
   if (!still()) return null;

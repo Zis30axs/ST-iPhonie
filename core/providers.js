@@ -1,6 +1,6 @@
 import { validateKey, MULTI_KEY, keyTail } from './keys.js';
 import { languageCode } from './languages.js';
-import { TTSParameters as P, FISH_DRAMA_NOTE } from './parameters.js';
+import { TTSParameters as P, FISH_PROXY_NOTE, FISH_NATIVE_REFS, FISH_API, setFishCompat } from './parameters.js';
 import { speakable } from './voice-fx.js';
 import { buildCustomRequest, customInit, readCustomAnswer, customVoices, readVoiceList } from './custom-voice.js';
 const names={fish:'Fish Audio',mini:'MiniMax',eleven:'ElevenLabs',mimo:'小米 MiMo',custom:'自己的接口'};
@@ -40,11 +40,11 @@ export function buildRequest(engine,connection,route,line,references=new Map()){
  // any other name is explained here instead of MiMo's English "Unknown voice".
  if(engine==='mimo'&&P.mimoMode(c.model)==='preset'&&route.voice?.trim()){const v=route.voice.trim();if(!P.vocab.MIMO_VOICES.some(([id])=>id===v)){if((c.params.samples||[]).some(x=>String(x.name).trim()===v))c.model=P.catalogs.mimo.models.find(m=>P.mimoMode(m)==='clone');else throw Error('小米 MiMo：「'+v+'」不是预置音色（预置音色有：'+P.vocab.MIMO_VOICES.map(([id])=>id).join('、')+'）。想用自己的声音，就在 MiMo 引擎的「克隆样本」里上传一段，名字填「'+v+'」；想用文字描述声音，就把这个角色的模型换成 voicedesign，音色里写描述。');}}
  P.normalize(engine,c);const error=P.validate(engine,c);if(error)throw Error(error);
- if(engine==='fish'&&P.fishDramaBlocked(c))throw Error(FISH_DRAMA_NOTE);
  if(engine==='mimo'&&!route.voice?.trim()){const mode=P.mimoMode(c.model);throw Error(mode==='design'?'请先在角色里填写音色描述':mode==='clone'?'请先在角色里填写克隆样本的名字':'请先选择角色音色');}
  if(!route.voice?.trim()&&!(engine==='fish'&&c.params.references.length)&&!(engine==='mini'&&c.params.timbre_weights.length))throw Error('请先选择角色音色');
  // The 情绪 field becomes the model's own opening tag (Fish, Eleven v3/v4) unless the text already starts with one.
  const request=P.requestPreview(engine,c,route.voice,P.emotionTag(engine,c.model,line.emotion,line.text),c.model);
+ if(engine==='fish'&&request.native&&c.params.references.length)throw Error(FISH_NATIVE_REFS);
  if(engine==='fish'&&c.params.references.length){request.body.provider.options['fish-audio'].references=c.params.references.map(r=>{const audio=references.get(r.audio);if(typeof audio!=='string'||!audio)throw Error('请在引擎设置重新选择参考音频：'+r.audio);return {audio,text:r.text};});}
  // MiniMax takes a fixed emotion list: Chinese or English words map onto it; anything else lets the model choose.
  if(engine==='mini'&&!request.body.voice_setting.emotion){const emotion=P.miniEmotion(c.model,line.emotion);if(emotion)request.body.voice_setting.emotion=emotion;else delete request.body.voice_setting.emotion;}
@@ -53,7 +53,8 @@ export function buildRequest(engine,connection,route,line,references=new Map()){
  if(engine==='eleven'&&!request.body.language_code&&c.model!=='eleven_multilingual_v2'){const code=languageCode(route.language).split('-')[0];if(/^[a-z]{2,3}$/.test(code))request.body.language_code=code;}
  // A relay in OpenAI's form (/v1/audio/speech): the standard fields only. What Fish itself would get is kept, so the
  // cache (core/cache.js requestHash) finds the same line whichever way it went.
- let official=null;
+ let official=null,extra={};
+ if(request.native){official=request.compat;extra={headers:request.headers,...(P.fishBase(c)===FISH_API?{viaTavern:true}:{})};}
  if(engine==='fish'&&P.fishOpenAI(c)){
   if(c.params.references.length)throw Error('这个中转是 OpenAI 格式，不能带参考音频：在 Fish 引擎里去掉参考音频，角色的「音色」填 Fish 的音色 ID');
   const fish=request.body.provider?.options?.['fish-audio']||{},speed=Number(fish.prosody?.speed);
@@ -62,7 +63,7 @@ export function buildRequest(engine,connection,route,line,references=new Map()){
   request.body={model:c.model,input:request.body.input,voice:request.body.voice,response_format:request.body.response_format,...(Number.isFinite(speed)&&speed!==1?{speed}:{})};
  }
  const url=new URL(request.url);for(const [k,v] of Object.entries(request.query||{}))url.searchParams.set(k,String(v));
- return {engine,url:url.href,body:request.body,...(official?{official}:{}),format:engine==='mimo'?'wav':engine==='fish'?c.params.format:engine==='mini'?c.params['audio_setting.format']:c.params.output_format,sampleRate:engine==='mimo'?24000:engine==='fish'?c.params.sample_rate:engine==='mini'?c.params['audio_setting.sample_rate']:Number(c.params.output_format.split('_')[1]),channels:engine==='mini'?c.params['audio_setting.channel']:1};
+ return {engine,url:url.href,body:request.body,...(official?{official}:{}),...extra,format:engine==='mimo'?'wav':engine==='fish'?c.params.format:engine==='mini'?c.params['audio_setting.format']:c.params.output_format,sampleRate:engine==='mimo'?24000:engine==='fish'?c.params.sample_rate:engine==='mini'?c.params['audio_setting.sample_rate']:Number(c.params.output_format.split('_')[1]),channels:engine==='mini'?c.params['audio_setting.channel']:1};
 }
 export function hexBytes(hex){if(typeof hex!=='string'||!hex.length||hex.length%2||!/^[\da-f]+$/i.test(hex))throw Error('返回的音频数据无效');return Uint8Array.from(hex.match(/../g),x=>parseInt(x,16));}
 export function wavePCM(bytes,rate=24000,channels=1){if(bytes.length%2||!Number.isFinite(rate)||rate<8000||rate>192000||![1,2].includes(channels))throw Error('PCM 音频参数无效');const out=new Uint8Array(44+bytes.length),v=new DataView(out.buffer),ascii=(p,s)=>[...s].forEach((x,i)=>v.setUint8(p+i,x.charCodeAt(0)));ascii(0,'RIFF');v.setUint32(4,36+bytes.length,true);ascii(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,channels,true);v.setUint32(24,rate,true);v.setUint32(28,rate*channels*2,true);v.setUint16(32,channels*2,true);v.setUint16(34,16,true);ascii(36,'data');v.setUint32(40,bytes.length,true);out.set(bytes,44);return out;}
@@ -225,7 +226,13 @@ export class Providers{
   try{this.onSpend?.('eleven');}catch{}
   const bytes=await limitedBytes(response);if(!bytes.length)throw Error('ElevenLabs 没有返回声音');
   return new Blob([bytes],{type:'audio/mpeg'});}
- post(request,body,signal){return this.fetch(request.url,{method:'POST',headers:{...this.headers(request.engine),'Content-Type':'application/json'},body:JSON.stringify(body)},signal);}
+ post(request,body,signal){const init={method:'POST',headers:{...this.headers(request.engine),'Content-Type':'application/json',...request.headers},body:JSON.stringify(body)};return request.viaTavern?this.viaTavern(request.url,init,signal):this.fetch(request.url,init,signal);}
+ /** Fish's own /v1/tts lets no web page call it: asked through the tavern's proxy, which must be switched on. */
+ async viaTavern(url,init,signal){if(!this.proxy)throw Error(FISH_PROXY_NOTE);const r=await this.proxy(url,init,signal).catch(error=>{if(signal?.aborted)throw error;throw Error('连不上酒馆的转发。'+FISH_PROXY_NOTE);});
+  if(!r.ok&&/CORS proxy is disabled/i.test(await r.clone().text().catch(()=>'')))throw Error(FISH_PROXY_NOTE);return r;}
+ /** The models Fish's compat endpoint serves (no key needed), read once a page and again after half an hour; true when what goes where changed. */
+ fishCatalog(){const now=Date.now();if(this.catalogRead&&now-this.catalogAt<30*60*1000)return this.catalogRead;this.catalogAt=now;
+  return this.catalogRead=fetchWithPolicy(this.fetcher,FISH_API+'/compat/v1/models',{}).then(async r=>{if(!r.ok)throw Error('HTTP '+r.status);const json=await r.json();return setFishCompat((json?.data||[]).map(m=>m?.id).filter(id=>typeof id==='string'));}).catch(()=>{this.catalogRead=null;return false;});}
  /** What a voice list says about a voice besides its name (description, tags, gender and age, languages), for picking one. */
  static voiceInfo(engine,v){const list=x=>Array.isArray(x)?x.filter(y=>typeof y==='string'):[];const parts=engine==='fish'?[v.description,list(v.tags).join(' '),list(v.languages).join('/')]:engine==='mini'?[Array.isArray(v.description)?list(v.description).join('；'):v.description]:[Object.values(v.labels&&typeof v.labels==='object'?v.labels:{}).filter(x=>typeof x==='string').join(' '),v.description];return parts.filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim().replace(/\s+/g,' ')).join(' · ').slice(0,240);}
  async voices(engine,c,{search='',page=0,token=''}={}){

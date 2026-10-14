@@ -4,7 +4,7 @@ import {connectionLost} from './idb.js';
 const MAX_BYTES = 200 * 1024 * 1024;
 export async function requestHash(request) {
  // A Fish line is the same audio straight or through a relay: the address is left out, so switching keeps the cache.
- if (request?.engine === 'fish' && typeof request.url === 'string') { const {official, ...rest} = request; request = {...rest, url: 'https://api.fish.audio/compat/v1/audio/speech', body: official?.body ?? request.body}; }
+ if (request?.engine === 'fish' && typeof request.url === 'string') { const {official, headers, viaTavern, ...rest} = request; request = {...rest, url: 'https://api.fish.audio/compat/v1/audio/speech', body: official?.body ?? request.body}; }
  return sha256Hex(JSON.stringify(request));
 }
 export class AudioCache {
