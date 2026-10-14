@@ -152,12 +152,12 @@ export class ChatStore {
   async get(id) {
     return this.#tx('readonly', (store, done) => this.#get(store, id, row => done(this.#public(row))));
   }
-  async create({type = 'dm', name = '', members = [], space = ''} = {}) {
+  async create({type = 'dm', name = '', members = [], space = '', windowOf = ''} = {}) {
     const list = [...new Set((Array.isArray(members) ? members : []).map(m => clip(m, 40).trim()).filter(Boolean))];
     if (!list.length) throw fail('请选择聊天对象');
     if (list.length > CHAT_STORE_LIMITS.members) throw fail('群聊最多 20 人');
     if (type === 'group' && list.length < 2) throw fail('群聊至少要选两个人');
-    const now = this.#now(), row = {scope: this.#scope, id: this.#id(), type: type === 'group' ? 'group' : 'dm', name: clip(name, 40).trim() || (type === 'group' ? list.join('、').slice(0, 40) : list[0]), members: type === 'group' ? list : [list[0]], unread: 0, createdAt: now, updatedAt: now, messages: [], ...(space ? {space: clip(space, 300)} : {})};
+    const now = this.#now(), row = {scope: this.#scope, id: this.#id(), type: type === 'group' ? 'group' : 'dm', name: clip(name, 40).trim() || (type === 'group' ? list.join('、').slice(0, 40) : list[0]), members: type === 'group' ? list : [list[0]], unread: 0, createdAt: now, updatedAt: now, messages: [], ...(space ? {space: clip(space, 300)} : {}), ...(type === 'group' && windowOf ? {windowOf: clip(windowOf, 512)} : {})};
     await this.#tx('readwrite', (store, done) => { store.put(row); done(); });
     return this.#public(row);
   }
@@ -263,7 +263,7 @@ export class ChatStore {
       const members = [...new Set((Array.isArray(t.members) ? t.members : []).map(m => clip(m, 40).trim()).filter(Boolean))].slice(0, CHAT_STORE_LIMITS.members);
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
-      return {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}),
+      return {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}),
         unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {})};
     });
     const rows = prepare(threads);
@@ -284,11 +284,21 @@ export class ChatStore {
 }
 
 // ---------- 聊天窗口 ----------
+const openedLast = (a, b) => Math.max(b.openedAt || 0, b.createdAt || 0) - Math.max(a.openedAt || 0, a.createdAt || 0);
 /** A contact's private chats (聊天窗口), the one in use first: the one opened (or started) last. */
 export function dmWindows(threads, name) {
-  const at = t => Math.max(t.openedAt || 0, t.createdAt || 0);
-  return (threads || []).filter(t => t.type === 'dm' && t.members.length === 1 && t.members[0] === name).sort((a, b) => at(b) - at(a));
+  return (threads || []).filter(t => t.type === 'dm' && t.members.length === 1 && t.members[0] === name).sort(openedLast);
 }
 /** The private chat with a contact that is in use, or undefined. */
 export const currentDm = (threads, name) => dmWindows(threads, name)[0];
+/** Which group a group chat is a window of: the first one's id (windowOf), kept when that one is deleted. */
+export const groupKey = t => t.windowOf || t.id;
+/** The 聊天窗口 a chat belongs with, the one in use first: a contact's private chats, or one group's windows. */
+export function chatWindows(threads, thread) {
+  if (thread?.type !== 'group') return dmWindows(threads, thread?.members?.[0]);
+  const key = groupKey(thread);
+  return (threads || []).filter(t => t.type === 'group' && groupKey(t) === key).sort(openedLast);
+}
+/** The window in use among a chat's windows, or undefined. */
+export const currentWindow = (threads, thread) => chatWindows(threads, thread)[0];
 

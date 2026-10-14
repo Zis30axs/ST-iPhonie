@@ -1,4 +1,4 @@
-import {currentDm, dmWindows} from '../core/chats.js';
+import {currentDm, chatWindows, currentWindow, groupKey} from '../core/chats.js';
 import {createView, esc, btn, field, input, textArea, toggle, heading, groupTitle, avatar, avatarPicture, empty, help, copyText} from './common.js';
 import {songOf} from '../core/music.js';
 import {icon} from './icons.js';
@@ -111,8 +111,8 @@ export function chatApp(ctx) {
 
   const engine = name => ctx.engineOf(name);
   const groupAvatar = (members, size) => `<span class="group-av" style="--s:${size}px">${members.slice(0, 3).map(m => `<i data-engine="${engine(m)}">${esc(m.slice(0, 1))}</i>`).join('')}</span>`;
-  // A group's own picture when one was chosen ('g:' + its id), else its members' first letters.
-  const threadAvatar = (t, size = 48) => t.type === 'group' ? (avatarPicture('g:' + t.id) ? avatar(t.name, 'none', size, 'g:' + t.id) : groupAvatar(t.members, size)) : avatar(t.members[0], engine(t.members[0]), size);
+  // A group's own picture when one was chosen ('g:' + the group's first window), else its members' first letters.
+  const threadAvatar = (t, size = 48) => t.type === 'group' ? (avatarPicture('g:' + groupKey(t)) ? avatar(t.name, 'none', size, 'g:' + groupKey(t)) : groupAvatar(t.members, size)) : avatar(t.members[0], engine(t.members[0]), size);
   const pendingBring = () => api.chatPendingBring?.() || null;
   const typing = () => !!threadId && !!api.chatTyping?.(threadId);
   // A reply comes in like on a phone: its messages are stored at once (memory, unread counts and other devices see
@@ -195,10 +195,10 @@ export function chatApp(ctx) {
     const q = search.trim().toLowerCase(), me = myName();
     // A chat with someone the user deleted is put away until they are added back.
     const away = new Set(threads.filter(t => t.type === 'dm' && t.friend?.by === 'me').map(t => t.members[0]));
-    // 聊天窗口: a contact's other private chats stay out of the list (a search finds them too); their unread count
-    // goes on the one in use.
-    const inUse = t => t.type !== 'dm' || currentDm(threads, t.members[0])?.id === t.id;
-    const unreadOf = t => t.type !== 'dm' ? t.unread : dmWindows(threads, t.members[0]).reduce((n, x) => n + (x.unread || 0), 0);
+    // 聊天窗口: a contact's (or a group's) other chats stay out of the list (a search finds them too); their unread
+    // count goes on the one in use.
+    const inUse = t => currentWindow(threads, t)?.id === t.id;
+    const unreadOf = t => chatWindows(threads, t).reduce((n, x) => n + (x.unread || 0), 0);
     const rows = threads.filter(t => !(t.type === 'dm' && t.friend?.by === 'me')).filter(t => q ? [t.name, t.label, ...t.members, preview(t.last)].some(x => String(x || '').toLowerCase().includes(q)) : inUse(t)).map(t => ({...t, unread: q ? t.unread : unreadOf(t)}));
     const people = q ? api.chatContacts().filter(c => c.name.toLowerCase().includes(q) && !away.has(c.name) && !threads.some(t => t.type === 'dm' && t.members[0] === c.name)) : [];
     const bring = pendingBring();
@@ -217,7 +217,7 @@ export function chatApp(ctx) {
     const [threads] = await Promise.all([api.listThreads(), counts()]);
     if (v.disposed || ticket !== epoch) return;
     const cut = threads.filter(t => t.type === 'dm' && t.friend?.by === 'me'), away = new Set(cut.map(t => t.members[0]));
-    const contacts = api.chatContacts().filter(c => !away.has(c.name)), stars = starred(), groups = threads.filter(t => t.type === 'group');
+    const contacts = api.chatContacts().filter(c => !away.has(c.name)), stars = starred(), groups = threads.filter(t => t.type === 'group' && currentWindow(threads, t)?.id === t.id);
     const asks = cut.reduce((n, t) => n + (t.friend.requests?.length ? 1 : 0), 0);
     const row = c => `<button class="list-row" data-action="profile" data-name="${esc(c.name)}">${avatar(c.name, c.engine, 42)}<span><strong>${esc(c.name)}</strong><small>${esc(signatureOf(c))}</small></span>${stars.includes(c.name) ? '<span class="star-mark" aria-label="特别关心">★</span>' : icon('next')}</button>`;
     const special = contacts.filter(c => stars.includes(c.name));
@@ -964,14 +964,15 @@ export function chatApp(ctx) {
     });
   }
   /**
-   * 聊天窗口 with one contact, like the tavern's chats: each its own messages and memory. A tap opens one (and makes
-   * it the one in use: the list shows it, replies and calls go to it); 新开 starts an empty one; each can be renamed
-   * or deleted. Deleting the last one leaves the contact, without a chat.
+   * 聊天窗口 with one contact or one group, like the tavern's chats: each its own messages and memory. A tap opens one
+   * (and makes it the one in use: the list shows it, replies and calls go to it); 新开 starts an empty one; each can be
+   * renamed or deleted. Deleting a contact's last one leaves the contact, without a chat; a group's last one, the group.
    */
-  async function windowsSheet(name) {
-    const d = ctx.dialog(`和${shown(name)}的聊天窗口`, '<p class="hint">正在读取……</p>');
+  async function windowsSheet(base) {
+    const group = base.type === 'group', name = base.members[0];
+    const d = ctx.dialog(group ? `「${base.name}」的聊天窗口` : `和${shown(name)}的聊天窗口`, '<p class="hint">正在读取……</p>');
     const paint = async () => {
-      const list = dmWindows(await api.listThreads(), name);
+      const list = chatWindows(await api.listThreads(), base);
       if (!d.live) return;
       const when = at => at ? new Date(at).toLocaleString('zh-CN', {hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : '';
       d.body.innerHTML = `<div class="pick-list">${list.map((t, i) => `<div class="list-row window-row"><button type="button" class="window-open" data-window="${esc(t.id)}">${icon(i === 0 ? 'check' : 'chat')}<span><strong>${esc(t.label || (t.last ? preview(t.last) : '空的窗口'))}</strong><small>${i === 0 ? '正在用 · ' : ''}${t.count} 条${t.last ? ' · ' + when(t.last.at) : ''}</small></span></button>${btn('window-rename', icon('edit'), 'icon-button', `data-id="${esc(t.id)}" aria-label="改名"`)}${btn('window-delete', icon('trash'), 'icon-button', `data-id="${esc(t.id)}" aria-label="删除这个窗口"`)}</div>`).join('')}
@@ -983,19 +984,29 @@ export function chatApp(ctx) {
       if (!b) return;
       ctx.win.Promise.resolve().then(async () => {
         if (b.dataset.window) { d.close(); await api.updateThread(b.dataset.window, {open: true}); open(b.dataset.window); }
-        if (b.hasAttribute('data-window-new')) { d.close(); const t = await api.createThread({type: 'dm', members: [name]}); open(t.id); ctx.notify('新开了一个聊天窗口'); }
+        if (b.hasAttribute('data-window-new')) {
+          d.close();
+          const now = chatWindows(await api.listThreads(), base)[0] || base;
+          const t = await api.createThread(group ? {type: 'group', members: now.members, name: now.name, windowOf: groupKey(base)} : {type: 'dm', members: [name]});
+          open(t.id); ctx.notify('新开了一个聊天窗口');
+        }
         if (b.dataset.action === 'window-rename') {
           const t = (await api.listThreads()).find(x => x.id === b.dataset.id);
           const r = ctx.dialog('窗口的名字', `${field('名字', input('window-label', t?.label || '', 'text', 'maxlength="40" placeholder="比如：第二周目、平行世界"'))}<div class="actions">${btn('window-label-save', '保存', 'primary')}</div>`);
-          r.body.addEventListener('click', async ev => { if (!ev.target.closest('[data-action=window-label-save]')) return; await api.updateThread(b.dataset.id, {label: r.body.querySelector('[data-field=window-label]').value}); r.close(); render(); windowsSheet(name); });
+          r.body.addEventListener('click', async ev => { if (!ev.target.closest('[data-action=window-label-save]')) return; await api.updateThread(b.dataset.id, {label: r.body.querySelector('[data-field=window-label]').value}); r.close(); render(); windowsSheet(base); });
         }
         if (b.dataset.action === 'window-delete') {
           const id = b.dataset.id;
-          if (!await ctx.confirm('删除这个聊天窗口？', '这个窗口里的聊天记录和记忆会删掉，别的窗口不受影响。')) return windowsSheet(name);
+          const last = chatWindows(await api.listThreads(), base).length <= 1;
+          if (!await ctx.confirm(last && group ? '删除这个群聊？' : '删除这个聊天窗口？', last && group ? '这是群里最后一个窗口，删掉后这个群就没有了。' : '这个窗口里的聊天记录和记忆会删掉，别的窗口不受影响。')) return windowsSheet(base);
+          // Whether it was open is read first: a redraw after the delete leaves a missing chat for the list.
+          const wasOpen = id === threadId;
           await api.deleteThread(id);
-          if (id === threadId) { const next = currentDm(await api.listThreads(), name); if (next) open(next.id); else { mode = 'list'; threadId = null; render(); } }
+          const next = currentWindow(await api.listThreads(), base);
+          if (!next && group) forgetGroupAvatar(base);
+          if (wasOpen) { if (next) open(next.id); else { mode = 'list'; threadId = null; render(); } }
           else render();
-          windowsSheet(name);
+          if (next) windowsSheet(base);
         }
       }).catch(error => ctx.notify(error.message, {error: true}));
     });
@@ -1101,7 +1112,7 @@ export function chatApp(ctx) {
         if (action === 'pin') await api.updateThread(id, {pinned: !t.pinned});
         if (action === 'mute') await api.updateThread(id, {muted: !t.muted});
         if (action === 'read') await api.markThreadRead(id);
-        if (action === 'delete' && await ctx.confirm('删除这段聊天？', '聊天记录会一起删除，联系人不受影响。')) await api.deleteThread(id);
+        if (action === 'delete' && await ctx.confirm('删除这段聊天？', '聊天记录会一起删除，联系人不受影响。')) { await api.deleteThread(id); if (t.type === 'group' && !currentWindow(await api.listThreads(), t)) forgetGroupAvatar(t); }
         render();
       }).catch(error => ctx.notify(error.message));
     });
@@ -1132,6 +1143,8 @@ export function chatApp(ctx) {
       render();
     });
   }
+  /** A group's own picture goes with its last window. */
+  function forgetGroupAvatar(t) { if (api.getState().chat.avatars?.['g:' + groupKey(t)]) api.saveChatOptions({avatars: {['g:' + groupKey(t)]: null}}); }
   async function openDm(name) {
     const existing = currentDm(await api.listThreads(), name);
     const t = existing || await api.createThread({type: 'dm', members: [name]});
@@ -1142,12 +1155,11 @@ export function chatApp(ctx) {
     const d = ctx.dialog(thread.name, `<div class="pick-list">
       ${live ? `<button class="list-row" data-menu="reroll">${icon('refresh')}<span><strong>重新回复最后一轮</strong></span></button>` : ''}
       ${group ? `<button class="list-row" data-menu="rename">${icon('edit')}<span><strong>改群名</strong></span></button><button class="list-row" data-menu="group-avatar">${icon('image')}<span><strong>换群头像</strong><small>从相册选一张或上传，也可以换回成员拼的头像</small></span></button>` : ''}
-      ${group ? '' : `<button class="list-row" data-menu="windows">${icon('layers')}<span><strong>聊天窗口</strong><small>和${esc(shown(thread.members[0]))}开好几个聊天，切换、新开、删除</small></span></button>`}
+      <button class="list-row" data-menu="windows">${icon('layers')}<span><strong>聊天窗口</strong><small>${group ? '这个群' : '和' + esc(shown(thread.members[0]))}开好几个聊天，切换、新开、删除</small></span></button>
       <button class="list-row" data-menu="memory">${icon('book')}<span><strong>记忆</strong><small>更早的聊天整理成的摘要和总结，可以改</small></span></button>
       <button class="list-row" data-menu="voice-text">${icon('book')}<span><strong>语音消息</strong><small>转文字显示什么、要不要自动转</small></span></button>
       <button class="list-row" data-menu="pace">${icon('chat')}<span><strong>逐条显示回复：${api.getState().chat.pace !== false ? '开' : '关'}</strong><small>对方的消息像真人打字一样一条条出来；关掉就一次全显示</small></span></button>
-      ${group ? `<button class="list-row" data-menu="clear">${icon('trash')}<span><strong>清空聊天记录</strong></span></button>
-      <button class="list-row danger-row" data-menu="delete">${icon('close')}<span><strong>删除这个群聊</strong></span></button>` : ''}</div>`);
+</div>`);
     d.body.addEventListener('click', e => {
       const action = e.target.closest('[data-menu]')?.dataset.menu;
       if (!action) return;
@@ -1156,15 +1168,15 @@ export function chatApp(ctx) {
         if (action === 'reroll') await reroll();
         if (action === 'rename') {
           const r = ctx.dialog('改群名', `${field('群名', input('rename', thread.name, 'text', 'maxlength="40"'))}<div class="actions">${btn('rename-save', '保存', 'primary')}</div>`);
-          r.body.addEventListener('click', ev => { if (ev.target.closest('[data-action=rename-save]')) { const name = r.body.querySelector('[data-field=rename]').value; r.close(); api.updateThread(threadId, {name}).catch(err => ctx.notify(err.message)); } });
+          // The group's name is every window's.
+          const base = thread;
+          r.body.addEventListener('click', ev => { if (ev.target.closest('[data-action=rename-save]')) { const name = r.body.querySelector('[data-field=rename]').value; r.close(); api.listThreads().then(list => Promise.all(chatWindows(list, base).map(t => api.updateThread(t.id, {name})))).catch(err => ctx.notify(err.message)); } });
         }
         if (action === 'voice-text') voiceTextSheet();
-        if (action === 'group-avatar') await avatarSheet('g:' + threadId, {title: `${thread.name} 的群头像`, reset: '用成员拼的头像'});
+        if (action === 'group-avatar') await avatarSheet('g:' + groupKey(thread), {title: `${thread.name} 的群头像`, reset: '用成员拼的头像'});
         if (action === 'pace') { const on = api.getState().chat.pace === false; api.saveChatOptions({pace: on}); if (!on) { ctx.win.clearTimeout(pace.timer); pace.timer = 0; pace.queue = []; pace.hidden.clear(); render(); } ctx.notify(on ? '对方的消息会一条条出来' : '对方的消息会一次全显示'); }
         if (action === 'memory') memorySheet(ctx, {threadId, title: thread.name});
-        if (action === 'windows') await windowsSheet(thread.members[0]);
-        if (action === 'clear' && await ctx.confirm('清空聊天记录？', '这段聊天会保留，消息全部删除。')) await api.deleteChatMessages(threadId, thread.messages.map(m => m.id));
-        if (action === 'delete' && await ctx.confirm('删除这段聊天？', '聊天记录会一起删除，联系人不受影响。')) { if (api.getState().chat.avatars?.['g:' + threadId]) api.saveChatOptions({avatars: {['g:' + threadId]: null}}); await api.deleteThread(threadId); mode = 'list'; threadId = null; render(); }
+        if (action === 'windows') await windowsSheet(thread);
       }).catch(error => ctx.notify(error.message));
     });
   }
