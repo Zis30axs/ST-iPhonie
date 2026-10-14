@@ -1,4 +1,5 @@
 import '../core/compat.js';
+import {findRoute} from '../core/routes.js';
 import {connectBackend} from './backend-client.js';
 import {glyph, icon, spark, wave} from './icons.js';
 import {esc, avatar, plate, setAvatarPictures} from './common.js';
@@ -197,7 +198,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   }
   const help = text => dialog('说明', `<p class="help-copy">${esc(text)}</p>`);
 
-  const routeFor = name => api.getState().routes.find(r => r.name === name);
+  const routeFor = name => findRoute(api.getState().routes, name);
   const engineOf = name => { const r = routeFor(name); return r?.voice ? r.engine : 'none'; };
   const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
     editEngine: id => views.get('engines')?.edit?.(id), showPresetKind: kind => views.get('presets')?.showKind?.(kind), momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};

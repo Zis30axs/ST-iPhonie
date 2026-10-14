@@ -20,7 +20,7 @@ import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, SHOP_GIFTS, LEDGER_KINDS, premiumO
 import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
 import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource} from './comfy-loras.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
-import { normalizeRoute, switchRouteEngine, removeRoute } from './routes.js';
+import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
 import { DEFAULT_PROMPT, DEFAULT_FORMAT, promptPlan, validatePreset, parseDialogue, isPlaceholderRole, knownFormats } from './protocol.js';
 import { normalizeMarks, withMarks } from './voice-fx.js';
 import { TTSParameters } from './parameters.js';
@@ -378,7 +378,7 @@ export class TTSBackend {
     parse(text) {
         // 心声 and 电话 written the story's own way (*…* and the like, as the 配音预设 says) play as such.
         const formats = knownFormats(this.settings), marks = this.settings.presets.find(p => p.id === this.settings.activePreset)?.marks;
-        for (const format of formats) { const lines = parseDialogue(text, format); if (lines.length) return { format, lines: withMarks(text, lines, marks) }; }
+        for (const format of formats) { const lines = parseDialogue(text, format); if (lines.length) return { format, lines: withRoles(this.settings.routes, withMarks(text, lines, marks)) }; }
         return { format: formats[0], lines: [] };
     }
     setKey(engine, key) {
@@ -1423,7 +1423,7 @@ export class TTSBackend {
     }
     /** A role from the 角色 App joins this card's contacts (the card's story has not met them yet). */
     addRoleContact(name) {
-        const route = this.settings.routes.find(r => r.name === name);
+        const route = findRoute(this.settings.routes, name);
         if (!route) throw Error('角色 App 里没有这个角色');
         if (this.spaceKey()) this.tagRoles([name], this.spaceKey());
         return clone(this.contacts());
@@ -2260,7 +2260,7 @@ export class TTSBackend {
         const methods = {
             getState: () => this.getState(), getSnapshot: () => this.getSnapshot(), save: (next, revision) => this.save(next, revision),
             updateGeneral: patch => this.updateGeneral(patch), saveRoute: route => this.saveRoute(route), saveVoicePool: list => this.saveVoicePool(clone(list)), deleteRoute: id => this.deleteRoute(id),
-            switchRouteEngine, validRoleName: name => typeof name === 'string' && !!name.trim() && !isPlaceholderRole(name),
+            switchRouteEngine, cleanAliases, validRoleName: name => typeof name === 'string' && !!name.trim() && !isPlaceholderRole(name),
             saveConnection: (engine, patch) => this.saveConnection(engine, patch),
             savePreset: preset => this.savePreset(preset), deletePreset: id => this.deletePreset(id), selectPreset: id => this.selectPreset(id),
             validatePreset: preset => { try { validatePreset(preset); return ''; } catch (error) { return message(error); } },

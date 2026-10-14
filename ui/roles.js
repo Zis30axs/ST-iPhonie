@@ -58,7 +58,8 @@ export function rolesApp(ctx) {
             <div class="id-fields"><span>ENGINE</span><span>${engines[r.engine]}</span><span>VOICE</span><span data-id-voice>${esc(voiced ? voiceLabel(r.voice) : '未选择')}</span><span>LANG</span><span>${esc(r.language ? languageName(r.language) : '跟随默认')}</span></div></div></div>
           <div class="barcode">${barcode((r.name || '') + r.engine + (r.voice || ''))}</div><span class="id-stamp">${voiced ? '已配音' : '待配音'}</span>
         </div>
-        <div class="group pad">${field('角色名称', input('name', r.name, 'text', 'placeholder="与台词里的说话者一致"'))}</div>
+        <div class="group pad">${field('角色名称', input('name', r.name, 'text', 'placeholder="与台词里的说话者一致"'))}
+          ${field('别名', input('aliases', Array.isArray(r.aliases) ? r.aliases.join('、') : r.aliases || '', 'text', 'placeholder="正文里的其他叫法，用逗号隔开"'), '正文里有时写全名、有时只写名或姓，比如「夏尔」和「夏尔·凡多姆海恩」：把其他叫法填在这里，都用这个角色的音色，不会再多出一个角色。全名里带「·」的会自动认出来。')}</div>
         ${groupTitle('引擎', help('每个角色在各家引擎里各自记住一套音色和模型，切过去再切回来不会丢。'))}
         <div class="engine-tabs">${Object.entries(engines).map(([k, label]) => {
           const bound = k === r.engine ? r.voice : r.bindings?.[k]?.voice;
@@ -214,6 +215,14 @@ export function rolesApp(ctx) {
         break;
       case 'save-role':
       case 'continue-role': {
+        // An 别名 that is another role's name: that role was this one all along, so it can be merged in.
+        const aliases = api.cleanAliases(current.aliases, current.name);
+        const twins = api.getState().routes.filter(x => x.id !== current.id && aliases.includes(x.name));
+        if (twins.length && await ctx.confirm(`把「${twins.map(x => x.name).join('」「')}」合并进来？`, `${twins.length > 1 ? '这些名字' : '这个名字'}现在是单独的角色。合并后删掉${twins.length > 1 ? '它们' : '它'}，以后都用「${current.name.trim()}」的音色。`)) {
+          // Its cards too (分区); a role that is everyone's stays so.
+          if (current.cards?.length) current.cards = twins.some(x => !x.cards?.length) ? [] : [...new Set([...current.cards, ...twins.flatMap(x => x.cards)])];
+          for (const x of twins) { api.deleteRoute(x.id); drafts.delete(x.id); }
+        }
         const previous = current.id || 'new';
         current = api.saveRoute(current);
         drafts.delete(previous);

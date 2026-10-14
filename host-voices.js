@@ -3,6 +3,7 @@
 // saved marked as picked automatically (autoVoice, with the reason). One character at a time.
 import {normalizePool, poolLine, voiceProfile, pickRequest, parsePick, searchRequest, parseSearch} from './core/auto-voice.js';
 import {plainStory} from './core/chat.js';
+import {findRoute} from './core/routes.js';
 
 const ENGINE_NAMES = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: 'MiMo', custom: '自己的接口'};
 
@@ -50,7 +51,7 @@ export function createVoiceHost({context, settings, backend, saidBy = () => []})
     return chosen ? {...candidates[chosen.index], reason: chosen.reason, from: `${ENGINE_NAMES[engine]} 音色库`} : null;
   }
   async function choose(name, force) {
-    const route = settings().routes.find(r => r.name === name);
+    const route = findRoute(settings().routes, name);
     if (route?.voice && !force) return route;
     const profile = profileOf(name), pool = normalizePool(settings().voicePool);
     let chosen = null;

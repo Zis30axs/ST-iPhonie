@@ -167,3 +167,17 @@ export async function zipFiles(files) {
   return new Blob([...parts, ...central, end.buffer], {type: 'application/zip'});
 }
 
+// ---------- 不带生成信息 ----------
+/**
+ * The picture as a JPG: what it was drawn with does not come along. NovelAI writes it in the PNG's text and also hides it
+ * in the transparency, so only a new picture without either drops it (the transparent parts on white).
+ */
+export async function plainImage(doc, blob) {
+  const win = doc.defaultView || globalThis, bitmap = await win.createImageBitmap(blob);
+  const canvas = doc.createElement('canvas');
+  canvas.width = bitmap.width; canvas.height = bitmap.height;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.drawImage(bitmap, 0, 0);
+  bitmap.close?.();
+  return new Promise((resolve, reject) => canvas.toBlob(out => out ? resolve(out) : reject(Error('这张图转不成 JPG')), 'image/jpeg', 0.95));
+}

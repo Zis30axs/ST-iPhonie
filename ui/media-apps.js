@@ -1,4 +1,4 @@
-import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help} from './common.js';
+import {createView, esc, engines, btn, heading, empty, size, field, input, textArea, groupTitle, avatar, help, pictureCopies} from './common.js';
 import {icon, wave, halo} from './icons.js';
 import {openAlbum} from './album-viewer.js';
 import {saveFile, shareFile, canShareFiles, zipFiles} from '../download.js';
@@ -108,7 +108,7 @@ export function galleryApp(ctx) {
       load: id => api.getPhoto(id),
       actions: [
         {key: 'wallpaper', icon: 'image', label: '设为壁纸', run: async id => { await api.savePhone({wallpaper: {kind: 'photo', photoId: id}}); ctx.notify('已设为壁纸'); }},
-        {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await photoFile(id); await saveAs(ctx, {blob: source, name}); }},
+        {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await photoFile(id); const [file] = await pictureCopies(ctx, [{blob: source, name}]) || []; if (file) await saveAs(ctx, file); }},
         ...(canShareFiles(ctx.win) ? [{key: 'share', icon: 'share', label: '分享', run: async id => { const {source, name} = await photoFile(id); try { await shareFile(ctx.doc, source, name); } catch (error) { ctx.notify(error.message, {error: !/已取消/.test(error.message)}); } }}] : []),
         {key: 'delete', icon: 'trash', label: '删除', danger: true, run: async id => {
           if (!await ctx.confirm('删除这张照片？', '使用它的壁纸和图标会恢复默认。')) return;
@@ -147,9 +147,11 @@ export function galleryApp(ctx) {
         const ids = shown.filter(id => selecting.has(id));
         if (!ids.length) break;
         await v.busy(el, async () => {
-          const files = [];
+          let files = [];
           for (const id of ids) { const photo = await api.getPhoto(id); if (photo?.blob) files.push({name: photo.name, blob: photo.blob}); }
           if (!files.length) throw Error('选中的照片已经不在了');
+          files = await pictureCopies(ctx, files);
+          if (!files) return;
           if (files.length === 1) { ctx.notify('已下载 ' + await saveFile(ctx.doc, files[0].blob, files[0].name)); return; }
           const d = new Date(), stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
           const name = await saveFile(ctx.doc, await zipFiles(files), `ST-iPhonie 相册 ${stamp} ${files.length} 张`);

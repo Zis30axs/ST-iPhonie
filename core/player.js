@@ -1,4 +1,5 @@
 import { buildRequest } from './providers.js';
+import { findRoute } from './routes.js';
 import { requestHash } from './cache.js';
 import { effectChain, lineEffect } from './voice-fx.js';
 
@@ -162,7 +163,7 @@ export class DialoguePlayer {
  getVolume() { return this.volume; }
  /** The cache key a line's audio has with its speaker's current voice settings, or null without a speaker. */
  async lineKey(line) {
-  const s = this.settings(), route = s.routes.find(r => r.name === line.role);
+  const s = this.settings(), route = findRoute(s.routes, line.role);
   if (!route) return null;
   return requestHash(buildRequest(route.engine, s.connections[route.engine], { ...route, language: route.language || s.general.defaultLanguage }, line, this.providers.references));
  }
@@ -244,7 +245,7 @@ export class DialoguePlayer {
  }
  /** Starts making the line at `index` now (one ahead of the one about to play); null when there is nothing to make. */
  makeAhead(index, signal) {
-  const line = this.queue[index], s = this.settingsOverride || this.settings(), route = line && s.routes.find(r => r.name === line.role);
+  const line = this.queue[index], s = this.settingsOverride || this.settings(), route = line && findRoute(s.routes, line.role);
   if (!route?.voice?.trim() && !(route?.engine === 'fish' && s.connections.fish.params.references.length) && !(route?.engine === 'mini' && s.connections.mini.params.timbre_weights.length)) return null;
   const made = this.make(line, route, s, signal, () => {}, () => !signal.aborted && this.valid());
   made.catch(() => {});
@@ -256,7 +257,7 @@ export class DialoguePlayer {
    while (this.index < this.queue.length) {
     if (!this.canContinue(epoch)) return;
     const s = this.settingsOverride || this.settings(), line = this.queue[this.index];
-    const route = s.routes.find(r => r.name === line.role);
+    const route = findRoute(s.routes, line.role);
     this.line = line;
     this.speaker = line.role;
     this.engine = route?.engine || '';

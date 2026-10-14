@@ -1,4 +1,5 @@
 import './core/compat.js';
+import {withRoles} from './core/routes.js';
 import { TTSBackend } from './core/backend.js';
 import { normalizeSettings,validateSettings,modelRules,NAMESPACE } from './core/state.js';
 import { DEFAULT_FORMAT,parseDialogue,renderDialogue,plainDialogue,promptPlan,validatePreset,isPlaceholderRole,DEFAULT_PROMPT,knownFormats,dialogueProblems,escapeHTML,unwaveFramed,markDialogue,waveMarks,unmark } from './core/protocol.js';
@@ -114,7 +115,9 @@ const soundsOn=()=>settings?.sounds?.enabled===true;
 let lastRoles=[];const phoneNote=text=>String(text).replace(/<phone\b[^>]*>([\s\S]*?)<\/phone\s*>/gi,(m,inside)=>{const who=[...new Set(inside.split(/\n/).map(l=>l.match(/^\s*\**\s*[[【]?([^\]】:：\n]{1,40}?)[\]】]?\s*[:：]/)?.[1]?.trim()).filter(Boolean))];return who.length?`<span class="sttts-phone-note">📱 ${escapeHTML(who.join('、'))} 给你发了消息</span>`:'';});function transform(text,marks=false){const out=renderBgm(renderSounds(renderPictures(phoneNote(text),marker),marker,soundsOn()),marker,settings?.music?.bgm&&settings.music.bgm!=='off');const p=parsed(out);lastRoles=p.lines.map(l=>l.role);return p.lines.length?(storyWavesOn()?(marks?markDialogue(out,p.format):renderDialogue(out,p.format,marker)):plainDialogue(out,p.format)):out;}
 // Remembered by text: every redraw of the chat reads each reply again, and long replies (HTML 小剧场) are slow to read.
 const readings=new Map();function remembered(key,kind,fn){const list=formats().join('|'),hit=readings.get(key);if(hit&&hit.list===list&&kind in hit){readings.delete(key);readings.set(key,hit);return hit[kind];}const entry=hit&&hit.list===list?hit:{list};entry[kind]=fn();readings.delete(key);readings.set(key,entry);if(readings.size>60)readings.delete(readings.keys().next().value);return entry[kind];}
-function parsed(message){return remembered(String(message),'parsed',()=>{for(const format of formats()){try{const lines=parseDialogue(message,format);if(lines.length)return {format,lines};}catch{}}return {format:formats()[0],lines:[]};});}
+// 别名: a line's speaker is the role it means (夏尔·凡多姆海恩 is 夏尔's), so one role has one voice. The roles' names are part of the key.
+const roleKey=()=>(settings?.routes||[]).map(r=>r.name+'='+(r.aliases||[]).join(',')).join('|');
+function parsed(message){return remembered(String(message)+'\u0001'+roleKey(),'parsed',()=>{for(const format of formats()){try{const lines=withRoles(settings?.routes,parseDialogue(message,format));if(lines.length)return {format,lines};}catch{}}return {format:formats()[0],lines:[]};});}
 function clearPrompts(){const ctx=context();if(!ctx)return;for(const key of Object.keys(ctx.extensionPrompts||{})){if(key.startsWith('sttts.entry.'))ctx.setExtensionPrompt(key,'',-1,0);}prompts.clear();}
 // Who may speak in this reply: the chat's character (all members in a group), anyone who spoke with a voice tag in the
 // last 8 messages, and anyone named in the last 3. Reading rules and the language line are written only for them.

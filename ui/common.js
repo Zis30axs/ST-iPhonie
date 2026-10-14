@@ -1,4 +1,5 @@
 import {icon, spark} from './icons.js';
+import {plainImage} from '../download.js';
 
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 export const engines = {fish: 'Fish Audio', mini: 'MiniMax', eleven: 'ElevenLabs', mimo: '小米 MiMo', custom: '自己的接口'};
@@ -154,4 +155,18 @@ function bindCombos(root, signal) {
   root.ownerDocument.addEventListener('pointerdown', e => {
     for (const menu of root.querySelectorAll('.combo-menu:not([hidden])')) if (!menu.closest('.field').contains(e.target)) show(menu.closest('.field'), false);
   }, {signal});
+}
+
+const drawn = f => /^image\/(png|webp)/.test(f?.blob?.type || '');
+/**
+ * 下载 pictures: 原图 keeps what they were drawn with (dropped into NovelAI it reads back the prompt), 不带生成信息
+ * makes JPGs without it, to give away. files: [{blob, name}]; null when the choice was closed. JPGs are asked nothing.
+ */
+export async function pictureCopies(ctx, files) {
+  if (!files.some(drawn)) return files;
+  const pick = await menu(ctx, '下载哪种？', [
+    {key: 'original', icon: 'image', label: '原图', note: '带着生成信息，拖进 NovelAI 能读出提示词和参数'},
+    {key: 'plain', icon: 'lock', label: '不带生成信息', note: '转成 JPG 再下载，别人拿到也读不出提示词'}]);
+  if (pick !== 'plain') return pick ? files : null;
+  return Promise.all(files.map(async f => drawn(f) ? {...f, blob: await plainImage(ctx.doc, f.blob)} : f));
 }

@@ -24,6 +24,8 @@ export interface Route {
     appearance?: string;
     /** The voice was picked by 自动挑音色 (cleared when it is changed by hand), with the voice's name and why. */
     autoVoice?: boolean; autoName?: string; autoReason?: string;
+    /** 别名: other names the story calls this role by; their lines use this voice. */
+    aliases?: string[];
 }
 export type RouteInput = Pick<Route, 'name'> & Partial<Omit<Route, 'name'>>;
 export type RequestRoute = Pick<Route, 'voice'> & Partial<Omit<Route, 'voice'>>;
@@ -507,6 +509,8 @@ export interface BackendFacade {
     deleteRoute(id: string): Settings;
     /** Returns a changed draft; it does not save the route. */
     switchRouteEngine(route: RouteInput, engine: Engine): Route;
+    /** A role's 别名 cleaned: from a comma list or an array, without its own name. */
+    cleanAliases(value: string | string[] | undefined, name?: string): string[];
     validRoleName(name: unknown): boolean;
     saveConnection(engine: Engine, patch: ConnectionPatch): Connection;
     savePreset(preset: PresetInput): Preset;

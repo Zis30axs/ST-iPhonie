@@ -1,4 +1,4 @@
-import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, avatar, empty} from './common.js';
+import {createView, esc, btn, field, input, select, textArea, toggle, heading, help, groupTitle, plate, avatar, empty, pictureCopies} from './common.js';
 import {icon} from './icons.js';
 import {saveFile, shareFile, canShareFiles} from '../download.js';
 import {openAlbum} from './album-viewer.js';
@@ -314,7 +314,7 @@ export function drawApp(ctx) {
         viewer = openAlbum({ctx, host: v.root.closest('.screen') || ctx.doc.body, ids: results.map(r => r.photoId), index: Math.max(0, current), from: img?.getBoundingClientRect() || null,
           load: id => api.getPhoto(id),
           actions: [
-            {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await file(id); ctx.notify('已下载 ' + await saveFile(ctx.doc, source, name)); }},
+            {key: 'download', icon: 'download', label: '下载', run: async id => { const {source, name} = await file(id); const [copy] = await pictureCopies(ctx, [{blob: source, name}]) || []; if (copy) ctx.notify('已下载 ' + await saveFile(ctx.doc, copy.blob, copy.name)); }},
             ...(canShareFiles(ctx.win) ? [{key: 'share', icon: 'share', label: '分享', run: async id => { const {source, name} = await file(id); try { await shareFile(ctx.doc, source, name); } catch (error) { ctx.notify(error.message, {error: !/已取消/.test(error.message)}); } }}] : []),
             {key: 'delete', icon: 'trash', label: '删除', danger: true, run: async id => {
               if (!await ctx.confirm('删除这张图？', '相册里的这张也会一起删掉。')) return;
