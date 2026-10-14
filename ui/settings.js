@@ -16,6 +16,30 @@ export function settingsApp(ctx) {
    * 整篇朗读: 播放全部 reads the story between the lines too, in the 旁白's voice — the system's (free, not kept) or the
    * 旁白 role's in the 角色 App (an engine's: costs its characters, kept). Tags listed are read past, lines in them too.
    */
+  /**
+   * 正文联动手机: what happens on the phone in the story (messages, photos, money, presents, songs, calls, 朋友圈, group
+   * messages) really arrives on the phone. Written by the story model at the end of its reply, or — with 回复后单独配音
+   * or 配图 — in that request. Besides, every so many replies someone may text first (a request of its own).
+   */
+  function storyPhoneSheet() {
+    const d = ctx.dialog('正文联动手机', '');
+    const paint = () => {
+      if (!d.live) return;
+      const s = api.getState(), o = s.chat.proactive, after = (s.general.voiceEnabled !== false && s.general.voiceMode === 'separate') || (s.draw.enabled && s.draw.mode === 'separate');
+      d.body.innerHTML = `<div class="group pad">${toggle('p-on', '正文里的事发到手机', o.on, '打开后，正文里有人用手机联系你——发消息、发照片、转账、发红包、送礼物、分享歌曲、打电话，或者发了朋友圈、在群里说话——这些事会真的出现在小手机上：消息进聊天，电话会响，动态进朋友圈。正文里只留一行「📱 谁给你发了消息」。\n\n照片：能出图时会画出来；没开出图就是一张文字照片，写着拍到了什么，以后也能点「画出来」。\n\n只有角色 App 里的角色和手机里的联系人能发；群消息只发到已经有的群。什么时候发、怎么发，在预设 App 的聊天预设里改「正文里主动发消息」这条规则（用在「正文」）。')}
+        ${o.on ? `<p class="hint">${after ? '现在开着「回复后单独配音 / 配图」：手机上的事在那次请求里一起写，正文请求不变，也不多花一次请求。' : '正文模型写回复时顺手写在最后，不多花一次请求。开了「回复后单独配音 / 配图」的话，会改成在那次请求里一起写。'}</p>` : ''}
+        <div class="field"><span>正文里没发的话，每几条正文主动找你一次${help('0 表示只在正文里发。设成几，就每隔这么多条正文回复，让一个角色（优先是当前卡的角色）主动给你发消息，每次用文字模型请求一次。')}</span><input data-field="p-every" type="number" min="0" max="100" value="${o.every}" ${o.on ? '' : 'disabled'}></div>
+        <div class="field"><span>这样主动找你，每天最多</span><input data-field="p-dailyMax" type="number" min="1" max="20" value="${o.dailyMax}" ${o.on && o.every ? '' : 'disabled'}></div></div>`;
+    };
+    paint();
+    d.onClose(() => render());
+    d.body.addEventListener('change', e => {
+      const key = e.target.dataset.field?.replace(/^p-/, '');
+      if (!key) return;
+      try { api.saveChatOptions({proactive: {[key]: key === 'on' ? e.target.checked : Number(e.target.value)}}); } catch (error) { ctx.notify(error.message, {error: true}); }
+      paint();
+    });
+  }
   function narrationSheet() {
     const speech = browserSpeech(ctx.win);
     const d = ctx.dialog('整篇朗读', '');
@@ -225,6 +249,7 @@ export function settingsApp(ctx) {
           ${toggle('drawEnabled', '正文出图', s.draw.enabled, '开启后，绘图预设会加进聊天请求，让模型在正文里写出图标签。新回复要不要自动画、图片要不要收起，在绘图 App 的「正文出图」里改；免费档守卫在绘图 App 的「参数」里。')}
           ${s.draw.enabled ? `<div class="field"><span>配图方式${help('单独配图：正文模型只管写故事；回复写完后，插件用同一个模型再单独请求一次，读这条回复、挑画面、写出图块，再把图插到对应的段落后面。出图规则不会挤占正文，张数和格式更稳，每条回复多一次请求。上面配音也选了「回复后单独配音」的话，配音和配图合成一次请求。\n\n正文里顺手写：把出图规则加进正文请求，模型写故事时顺手写出图块。只要一次请求，但规则较长，偶尔会影响正文或漏写。')}</span><div class="segmented" style="margin:0">${[['inline', '正文里顺手写'], ['separate', '回复后单独配图']].map(([k, l]) => `<button data-action="draw-mode" data-value="${k}" aria-pressed="${s.draw.mode === k}">${l}</button>`).join('')}</div>${api.planLatestPictures ? `<div class="actions" style="margin:6px 0 0">${btn('draw-latest', icon('image') + '给最新回复配图', 'text-button')}</div>` : ''}</div>` : ''}
           ${s.general.voiceEnabled !== false ? `<button class="list-row" data-action="narration"><span><strong>整篇朗读</strong><small>${narrationNote(s)}</small></span>${icon('next')}</button>` : ''}
+          <button class="list-row" data-action="story-phone"><span><strong>正文联动手机</strong><small>${s.chat.proactive?.on ? '开 · 正文里的消息、照片、转账、来电会真的出现在手机上' : '关'}</small></span>${icon('next')}</button>
           ${toggle('voiceIsland', '台词小窗', s.general.voiceIsland === true, '在酒馆页面上浮一个小窗，列出最新一条回复里的台词，点哪句念哪句（再点暂停），「整条」从头念到尾。正文里的声波点不到时（比如手机上开了视觉小说模式，立绘盖住了正文）、或者想按自己的节奏一句句听时打开。可以拖到不挡视线的地方；✕ 收起到下一条回复。')}
         </div>
         <details data-group="voice-more"><summary>更多<small class="fold-note">声波、旧配音标签、音量</small></summary><div class="fold-body">
@@ -319,6 +344,7 @@ export function settingsApp(ctx) {
       case 'draw-mode': api.saveDraw({mode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配图' : '以后模型写正文时顺手写出图块'); break;
       case 'draw-latest': await v.busy(el, () => api.planLatestPictures()); break;
       case 'narration': narrationSheet(); break;
+      case 'story-phone': storyPhoneSheet(); break;
       case 'voice-mode': api.updateGeneral({voiceMode: el.dataset.value}); await render(); ctx.notify(el.dataset.value === 'separate' ? '以后回复写完再单独配音' : '以后模型写正文时顺手写配音'); break;
       case 'voice-latest': await v.busy(el, async () => { const n = await api.planLatestVoice(); ctx.notify(n ? `配好了 ${n} 句台词` : '这条回复里没有找到台词'); }); break;
       // A skin brings its own wallpaper, unless a personal photo is the wallpaper.

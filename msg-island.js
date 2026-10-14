@@ -11,14 +11,14 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '
 const SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>';
 const ASK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v11H11l-5 4v-4H4zM8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01"/></svg>';
 const CLOSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>';
-const KINDS = {photo: '[图片]', sticker: '[表情包]', redpacket: '[红包]', transfer: '[转账]', gift: '[礼物]', location: '[位置]', call: '[通话]', pat: '[拍一拍]', dice: '[骰子]'};
+const KINDS = {song: '[分享歌曲]', photo: '[图片]', sticker: '[表情包]', redpacket: '[红包]', transfer: '[转账]', gift: '[礼物]', location: '[位置]', call: '[通话]', pat: '[拍一拍]', dice: '[骰子]'};
 /** A message as one line of text. */
 export function messageText(m) {
   if (!m) return '';
   if (m.kind === 'text') return m.text || '';
   if (m.kind === 'voice') return '[语音] ' + (m.translation || m.text || '');
   if (m.kind === 'notice' || m.kind === 'system') return '';
-  return [KINDS[m.kind] || '[消息]', m.text || m.gift?.name || ''].filter(Boolean).join(' ');
+  return [KINDS[m.kind] || '[消息]', m.kind === 'song' ? [m.song?.title, m.song?.artist].filter(Boolean).join(' - ') : m.text || m.gift?.name || ''].filter(Boolean).join(' ');
 }
 
 /**

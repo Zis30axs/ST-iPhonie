@@ -16,6 +16,7 @@ import {openImageViewer} from './image-viewer.js';
 import {downloadAction} from './download.js';
 import {plainStory} from './core/chat.js';
 import {voicePlanRequest, combinedRequest, insertVoiced} from './core/voice-plan.js';
+import {withPhone, phoneSection} from './core/chat.js';
 import {TIER_NAMES, NAI_MODEL_NAMES} from './core/novelai.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -25,7 +26,7 @@ const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? rec
  * voice: 回复后单独配音 ({wanted(), has(text), rules(), format()}): whether it is on, whether a reply already has its
  * lines voiced, the voice preset's prompt for the speakers and its 台词格式. Without it replies are never voiced here.
  */
-export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null}) {
+export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null, phone = null}) {
   const jobs = new Map(); // queue key -> {state: 'generating'|'error', message}
   const folds = new Map(); // `${id}:${hash}` -> true/false, this session's fold choice per picture
   // The latest single tap on a picture: {key, id, message, tag, was, at, rect, timer, done}. It folds or unfolds the
@@ -151,7 +152,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
    * 回复后单独配音, and with 回复后单独配图 on too, both in one request: voices the lines of a reply (and puts its
    * pictures in). force: do it again, replacing what is there. Returns what was done: {voiced, pictured}.
    */
-  async function planReply(id, {voiced: wantVoice, pictured: wantPictures, force = false}) {
+  async function planReply(id, {voiced: wantVoice, pictured: wantPictures, force = false, phoned = false}) {
     const ctx = context(), s = settings(), message = ctx.chat[id];
     if (!message || message.is_user || message.is_system || planning.has(id) || (!wantVoice && !wantPictures)) return {voiced: 0, pictured: 0};
     planning.add(id);
@@ -160,20 +161,35 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
       const source = force && wantPictures ? withoutPictures(message.mes) : message.mes, format = voice?.format();
       const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
       const pictures = wantPictures ? planRequest(s, {message: source, before: before(id)}) : null;
-      const prompt = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
+      const asked = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
         : wantVoice ? voicePlanRequest({rules: voice.rules(), format, message: source, before: before(id)}) : pictures;
-      const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? 500 + preset.count * 400 : 0);
-      const reply = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: Math.min(6000, length)});
+      // 正文联动手机: what happens on the phone is asked for at the end of the same request (【手机】).
+      const phoneRule = phoned && phone?.wanted() ? await phone.rule() : '';
+      const prompt = withPhone(asked, phoneRule);
+      const length = (wantVoice ? Math.min(3000, 400 + source.length * 2) : 0) + (wantPictures ? 500 + preset.count * 400 : 0) + (phoneRule ? 500 : 0);
+      const answer = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: Math.min(6000, length)});
       if (context().chat[id] !== message) return {voiced: 0, pictured: 0};
+      const {rest: reply, phone: sent} = phoneRule ? phoneSection(answer) : {rest: answer, phone: ''};
       let text = source, pictured = 0, voiced = 0;
       if (wantPictures) ({text, count: pictured} = insertPlanned(text, reply));
       if (wantVoice) ({text, count: voiced} = insertVoiced(text, reply, format));
+      // The phone part is kept at the end of the reply like the story's own <phone> (shown as a note), then delivered.
+      if (sent) {
+        text = `${text}\n${sent}`;
+        if (!voiced && !pictured) {
+          message.mes = text;
+          if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
+          await ctx.saveChat(); redrawMessage(id, message); scheduleRender();
+          phone.deliver(id).catch(() => {});
+        }
+      }
       if (!voiced && !pictured) throw Error(wantVoice ? '这次没有配上音，可以在小手机的「设置 → 正文」里点「给最新回复配音」再试一次' : '这次没有挑出画面，可以在小手机的「设置 → 正文」里点「给最新回复配图」再试一次');
       message.mes = text;
       if (Array.isArray(message.swipes)) message.swipes[message.swipe_id ?? 0] = text;
       await ctx.saveChat();
       redrawMessage(id, message);
       scheduleRender();
+      if (sent) phone.deliver(id).catch(() => {});
       if (wantVoice && !voiced) notice('画面挑好了，台词这次没配上，可以在「设置 → 正文」里点「给最新回复配音」');
       if (wantPictures && !pictured) notice('台词配好了，画面这次没挑出来，可以在「设置 → 正文」里点「给最新回复配图」');
       return {voiced, pictured};
@@ -206,7 +222,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     const wantPictures = s.draw.enabled && s.draw.mode === 'separate' && !parsePictures(message.mes).length;
     if (wantVoice || wantPictures) {
       let done;
-      try { done = await planReply(id, {voiced: wantVoice, pictured: wantPictures}); } catch (error) { notice(error.message); return; }
+      try { done = await planReply(id, {voiced: wantVoice, pictured: wantPictures, phoned: true}); } catch (error) { notice(error.message); return; }
       if (wantPictures && !done.pictured) return;
       message = context().chat[id];
     }

@@ -2,8 +2,8 @@
 // (generateRaw): the prompt carries the chat preset, each contact's persona or character card, the user's persona,
 // recent story messages and the chat history. Nothing is written into the story unless the user brings a chat
 // into it; that text is injected once, into the next story reply.
-import {currentDm} from './core/chats.js';
-import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneBlocks, inSpace} from './core/chat.js';
+import {currentDm, currentWindow} from './core/chats.js';
+import {buildChatRequest, parseChatReply, bringText, plainStory, activeChatPreset, messageLine, cleanTagged, chatContacts, storyTextRule, phoneAfterRule, phoneParts, inSpace} from './core/chat.js';
 import {worldInfoFor, loreOptions} from './host-lore.js';
 import {pictureInputs, photoCast} from './core/draw.js';
 import {storyLines} from './core/moments.js';
@@ -200,9 +200,14 @@ export function createChatHost({context, settings, backend, notice, memory = nul
     return job;
   }
   // Who is not friends with whom on the phone (every card's), for the story: kept here because inject() cannot wait.
-  let cuts = [], cutsLoaded = false;
+  // The group chats' names too, for the story's phone rule (<phone group="…">).
+  let cuts = [], cutsLoaded = false, groups = [];
   function refreshCuts() {
-    Promise.resolve().then(() => backend.chats.list()).then(list => { cutsLoaded = true; cuts = list.filter(t => t.type === 'dm' && t.friend).map(t => ({name: t.members[0], by: t.friend.by, space: t.space || ''})); }).catch(() => {});
+    Promise.resolve().then(() => backend.chats.list()).then(list => {
+      cutsLoaded = true;
+      cuts = list.filter(t => t.type === 'dm' && t.friend).map(t => ({name: t.members[0], by: t.friend.by, space: t.space || ''}));
+      groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || ''}));
+    }).catch(() => {});
   }
   refreshCuts();
   backend.subscribe?.(event => { if (event?.type === 'chat' && event.friend) refreshCuts(); });
@@ -217,11 +222,28 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
 
   // ---------- 主动发消息 ----------
-  /** The 正文 rule for the story request while 主动发消息 is on: who can text, and how (<phone>). */
+  /** The group chats of this card (分区), by name, once each. */
+  const groupNames = () => { const here = backend.here?.(); return [...new Set(groups.filter(g => inSpace(g, here)).map(g => g.name))]; };
+  /**
+   * 正文联动手机 with 回复后单独配音 or 配图 on: the phone part goes in that request (after the reply) instead of the
+   * story's own, so the story request stays as it is.
+   */
+  function phoneAfter() {
+    const s = settings();
+    return s.chat.proactive?.on === true && ((s.general.voiceEnabled !== false && s.general.voiceMode === 'separate') || (s.draw.enabled && s.draw.mode === 'separate'));
+  }
+  /** The phone part's rule for that request; '' when there is no one to send anything. */
+  async function phoneAfterPlan() {
+    const list = await backend.chats.list().catch(() => null);
+    if (list) groups = list.filter(t => t.type === 'group').map(t => ({name: t.name, space: t.space || ''}));
+    return phoneAfterRule(activeChatPreset(settings().chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.()});
+  }
+  /** The 正文 rule for the story request while 正文联动手机 is on: who can send what, and how (<phone>). */
   function storyPlan() {
     const s = settings(), friends = friendsPlan();
-    if (!s.chat.proactive?.on) return friends;
-    const text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name)});
+    if (!s.chat.proactive?.on || phoneAfter()) return friends;
+    refreshCuts();
+    const text = storyTextRule(activeChatPreset(s.chat), {user: userName(), names: backend.contacts().map(c => c.name), groups: groupNames(), images: !!backend.drawReady?.()});
     return [...(text ? [{key: 'sttts.entry.phone', text, position: 1, depth: 0, role: 0}] : []), ...friends];
   }
   const SENT_KEY = 'sttts.phoneSent', DAY_KEY = 'sttts.phoneDay';
@@ -256,16 +278,38 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   async function storyReplied(id) {
     const ctx = context(), s = settings(), o = s.chat.proactive || {};
     if (!o.on) { since = 0; return; }
+    const sent = await deliver(id);
+    if (sent || !(o.every > 0)) { since = 0; return; }
+    await nudge();
+  }
+  /**
+   * What a story reply sent to the phone (<phone>) arrives, once per version of the reply: private messages (and
+   * photos, money, calls, 朋友圈…) to each sender's chat, <phone group="…"> to that group. Returns how many arrived.
+   */
+  async function deliver(id) {
+    const ctx = context(), s = settings();
+    if (!s.chat.proactive?.on) return 0;
     const index = Number.isInteger(Number(id)) ? Number(id) : (ctx?.chat?.length || 0) - 1, m = ctx?.chat?.[index];
     let sent = 0;
     if (m && !m.is_user && !m.is_system && typeof m.mes === 'string') {
-      const blocks = phoneBlocks(m.mes);
-      const key = [ctx.getCurrentChatId?.() || ctx.chatId || '', index, hash(blocks.join('\n'))].join('|');
-      if (blocks.length && !sentBefore(key)) {
+      const parts = phoneParts(m.mes), blocks = parts.filter(p => !p.group).map(p => p.text), grouped = parts.filter(p => p.group);
+      const key = [ctx.getCurrentChatId?.() || ctx.chatId || '', index, hash(parts.map(p => p.group + '|' + p.text).join('\n'))].join('|');
+      if (parts.length && !sentBefore(key)) {
         const contacts = backend.contacts(), people = contacts.map(c => ({name: c.name, voice: false}));
         // A line from someone who is not in the phone (a passer-by, the user) is left out, not given to the one before.
         const known = new Set(contacts.map(c => c.name)), named = line => line.match(/^\s*(?:\*\*)?[[【]?([^\]】:：\n]{1,40}?)[\]】]?(?:\*\*)?\s*[:：]/)?.[1]?.trim();
-        const kept = b => b.split(/\r?\n/).filter(line => { const who = named(line); return !who || known.has(who); }).join('\n');
+        const kept = (b, only = known) => b.split(/\r?\n/).filter(line => { const who = named(line); return !who || only.has(who); }).join('\n');
+        // A group's part goes to the group (the window in use), from its members.
+        if (grouped.length) {
+          const threads = await backend.threads();
+          for (const part of grouped) {
+            const first = threads.find(t => t.type === 'group' && t.name === part.group), thread = first && currentWindow(threads, first);
+            if (!thread) continue;
+            const members = new Set(thread.members.filter(n => known.has(n)));
+            const items = parseChatReply(kept(part.text, members), {members: [...members].map(name => ({name, voice: false})), user: userName(), voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []});
+            try { const n = items.length ? await arrive(thread.id, items) : 0; if (n) { sent += n; notice(`群「${thread.name}」有 ${n} 条新消息`); } } catch { /* not worth interrupting the story */ }
+          }
+        }
         const items = blocks.flatMap(b => parseChatReply(kept(b), {members: people, user: userName(), voiceFormat: '', voiceNames: [], stickers: s.chat.stickers || []}));
         const byName = new Map();
         for (const item of items) if (contacts.some(c => c.name === item.from)) byName.set(item.from, [...(byName.get(item.from) || []), item]);
@@ -285,7 +329,11 @@ export function createChatHost({context, settings, backend, notice, memory = nul
         }
       }
     }
-    if (sent || !(o.every > 0)) { since = 0; return; }
+    return sent;
+  }
+  /** Every `every` story replies with nothing sent, someone may text first (one phone request, at most dailyMax a day). */
+  async function nudge() {
+    const ctx = context(), o = settings().chat.proactive || {};
     if (++since < o.every) return;
     since = 0;
     let day = {day: new Date().toDateString(), n: 0};
@@ -319,7 +367,7 @@ export function createChatHost({context, settings, backend, notice, memory = nul
   }
 
   return {
-    reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, askFriend,
+    reply, bring, bringPlan, tidyNotes, drawPhoto, storyPlan, storyReplied, deliver, phoneAfter, phoneAfterPlan, askFriend,
     typing: threadId => busy.has(threadId),
     pendingBring: () => pending && {threadId: pending.threadId, name: pending.name, count: pending.count},
     cancelBring: () => { const p = pending; pending = null; keepBring(); return dropNote(p).finally(() => { if (p) backend.emit('chat', {threadId: p.threadId, bring: false}); }); }
