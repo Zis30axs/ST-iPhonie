@@ -1,0 +1,12 @@
+{
+  "_note": "Reference settings for ST-iPhonie 自己的接口; NOT a whole-plugin backup. Enter the bridge key separately.",
+  "url": "http://127.0.0.1:3789/v1/audio/speech",
+  "method": "POST",
+  "answer": "audio",
+  "path": "",
+  "headers": "",
+  "before": "",
+  "listUrl": "http://127.0.0.1:3789/voices",
+  "listPath": "voices",
+  "body": "{\n  \"model\": \"fish-mcp\",\n  \"input\": \"{{text}}\",\n  \"voice\": \"{{voice}}\",\n  \"language\": \"{{lang}}\",\n  \"emotion\": \"{{emotion}}\"\n}"
+}

@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+.state/
+userdata/
+auth.json
+state.json
+*.mp3
+*.wav
+
+*.before-network-unlock.bak
+*.network-unlock.tmp
+
+*.before-fish-mcp.bak

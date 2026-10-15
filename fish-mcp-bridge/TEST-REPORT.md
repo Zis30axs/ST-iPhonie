@@ -1,0 +1,41 @@
+# Fish MCP Bridge v0.1.1 — 网络限制移除版测试报告
+
+## 结果
+
+运行 `npm test`：**55 项通过，0 项失败，0 项取消，0 项跳过**。
+原始输出：`evidence/test-results.txt`。
+
+## 本轮代码变更
+
+| 范围 | 实现 |
+|---|---|
+| 音频下载 | HTTP 与 HTTPS；任意有效端口；回环/内网地址；自定义域名；取消公网 IP/DNS 白名单与 HTTPS-only 限制 |
+| URL 提取 | 结构化结果、显式路径、文字中的 HTTP 音频链接可识别 |
+| 跳转 | 音频与 JSON/MCP 请求允许正常 HTTP 重定向，不强改 HTTPS |
+| 自定义 MCP | `FISH_MCP_ENDPOINT` 可配置 HTTP(S) 地址；取消 OAuth 的 Fish 域名硬编码白名单 |
+| 访问网络 | 删除 Host、Origin、管理端来源 IP 白名单；返回 CORS 头；BRIDGE_HOST 可选具体接口/IPv6 |
+| 上游修补器 | Fish/NovelAI 中转、GPT 中转、音乐自动 HTTPS 改写、两类 HTTPS-only 云端队列 |
+
+## 已实际运行的测试
+
+HTTP/HTTPS 下载测试使用了 Node 本地服务器与真实套接字，不是跳过下载器的替身函数。验证了 HTTP 非标准端口、局域网接口地址、私有 DNS 结果、签名查询保留、HTTP 跳转、HTTPS 自定义端口、本地 HTTP OAuth/PKCE 与 MCP 307 重定向、跨来源请求和带鉴权的局域网管理访问。
+
+HTTPS 测试只在子进程中信任本地测试证书；另一个测试确认不受信任的证书仍然失败。没有设置 NODE_TLS_REJECT_UNAUTHORIZED=0。
+
+上游修补器测试使用从已读取源码提取的函数级样本，验证改后的函数可执行、HTTP 不再提前拒绝、音乐 URL 不改写、云端队列可通过 HTTP 调用；同时验证备份、CRLF、重复运行与不匹配版本不写入。没有启动完整 SillyTavern 浏览器实例，也没有修改用户电脑上的文件。
+
+原有参数映射、中文 ID、JSON/SSE、刷新令牌、请求去重、缓存、任务轮询与避免自动重复付费生成的测试仍通过。
+
+## 保留的约束
+
+桥接密钥、OAuth state/PKCE、issuer/resource 一致性、旧令牌不发往更换后的 MCP、实际音频格式识别、JSON 解析、响应大小及超时仍保留。HTTP(S) 以外的协议没有网络传输实现，不把 `file://` 当 HTTP 服务。
+
+## 未完成或未验证
+
+没有真实 Fish 账号授权、线上语音生成或积分扣费验证；没有创建或推送 GitHub Fork；没有用户手机/Docker/VPS 部署验证。移除应用层校验不代表浏览器的 Mixed Content/CORS 策略被关闭。
+
+旧版网络诊断和 GitHub 状态已移动到 `evidence/archive-v0.1.0/`，不是本轮线上测试记录。
+
+## 启动入口冒烟测试
+
+另外启动真实 `src/main.mjs` 进程：自定义 HTTP MCP 地址无需开关即可保存，别名 Host 与自定义 Origin 可访问；health 为 200，管理无密钥为 401、正确密钥为 200。没有向 Fish 发出请求。记录见 `evidence/main-smoke.json`。
