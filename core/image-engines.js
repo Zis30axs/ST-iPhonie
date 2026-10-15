@@ -23,9 +23,9 @@ export const defaultGpt = () => ({url: '', model: 'gpt-image-1', quality: 'auto'
 export function gptBase(value, pageProtocol = globalThis.location?.protocol) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
-  let url; try { url = new URL(raw); } catch { throw Error('接口地址格式不对，要以 https:// 开头'); }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw Error('接口地址格式不对：以 https:// 开头，不带 ? 和 #');
-  if (url.protocol === 'http:' && pageProtocol === 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw Error('酒馆是用 HTTPS 打开的，浏览器不允许连 http:// 的接口，请换成 HTTPS 地址');
+  let url; try { url = new URL(raw); } catch { throw Error('接口地址格式不对，要以 http:// 或 https:// 开头'); }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw Error('接口地址格式不对：以 http:// 或 https:// 开头，不带 ? 和 #');
+  // Keep the supplied HTTP(S) scheme. Browser Mixed Content restrictions still apply.
   let path = url.pathname.replace(/\/+$/, '').replace(/\/images\/(generations|edits)$/i, '');
   if (!/\/v\d+$/i.test(path)) path += '/v1';
   return url.origin + path;

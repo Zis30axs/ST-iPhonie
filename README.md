@@ -208,3 +208,12 @@ ComfyUI 的方案、LoRA、模型和参数都在绘画 App：先选方案，换 
 ## 想看更详细的
 
 每个功能怎么用、台词和出图块的格式、各家语音的情绪标签、常见报错代码，都在 **[使用说明](使用说明.md)** 里。
+
+## Fish Audio MCP 网页积分实验接入（Fork 功能分支）
+本 Fork 添加了 [Fish MCP 本地桥接器、测试和说明](fish-mcp-bridge/README.md)，并为「自己的接口」新增 Fish MCP 一键配音预设。
+已移除应用层对于 Fish/NovelAI、GPT、云队列的 HTTPS-only 限制，并保留音乐 HTTP URL。不影响浏览器自身的 Mixed Content/CORS 限制。
+
+- 功能仅存在于 `feature/fish-mcp-integration` 分支；不修改 main。
+- 55 项本地模拟测试通过，真实 Fish OAuth、配音与 Plus 积分扣费仍待验证。
+- OAuth 凭据仅应保存于运行桥接器的用户目录，不能提交到仓库。
+- 上游尚未为整个项目明确声明许可证，Fork 不自行添加许可证或声称获得额外的再分发授权。

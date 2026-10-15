@@ -9,6 +9,12 @@ import {pick} from './music.js';
 
 /** One-click formats of well-known self-hosted services: only the user's own address goes in. */
 export const CUSTOM_TEMPLATES = Object.freeze([
+  // Fish MCP adapter: the OAuth session stays on the user's own local server.
+  {id: 'fish-mcp', name: 'Fish MCP（Plus 网页积分）', example: 'http://127.0.0.1:3789',
+    note: '先启动 fish-mcp-bridge，在浏览器登录 Fish。密钥填写桥接密钥而非 Fish API Key；音色可用 default。',
+    fill: rawBase => { const base = rawBase.replace(/\/+$/, ''); return {url: base + '/v1/audio/speech', method: 'POST', answer: 'audio', path: '', headers: '', before: '',
+      listUrl: base + '/voices', listPath: 'voices',
+      body: JSON.stringify({model: 'fish-mcp', input: '{{text}}', voice: '{{voice}}', language: '{{lang}}', emotion: '{{emotion}}'}, null, 2)}; }},
   {id: 'gpt-sovits', name: 'GPT-SoVITS（api_v2）', example: 'http://127.0.0.1:9880',
     note: '在 GPT-SoVITS 文件夹里运行 api_v2.py（默认端口 9880）。音色的「参考音频」填参考音频在那台电脑上的路径，再填参考文本和参考语言。',
     fill: base => ({url: base + '/tts', method: 'POST', answer: 'audio', path: '', headers: '', before: `${base}/set_gpt_weights?weights_path={{model1}}\n${base}/set_sovits_weights?weights_path={{model2}}`,

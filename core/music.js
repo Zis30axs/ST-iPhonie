@@ -96,8 +96,8 @@ export function readLink(source, json) {
 export const isAudio = type => /^(?:audio|video)\/|octet-stream|mpegurl/i.test(String(type || ''));
 /** A server on this computer or this home network (a backend the user runs: its links stay http). */
 export const nearby = link => { try { return /^(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|\[::1\]$|[^.]+$)/i.test(new URL(link).hostname); } catch { return false; } };
-/** An http link on a page opened over https would be blocked: upgraded, unless it is the user's own nearby server. */
-export const playable = (link, pageProtocol = 'http:') => pageProtocol === 'https:' && /^http:\/\//i.test(link) && !nearby(link) ? link.replace(/^http:\/\//i, 'https://') : link;
+/** Use the media URL as provided; the browser enforces its own transport restrictions. */
+export const playable = (link, _pageProtocol = 'http:') => link;
 
 /**
  * Backends the user runs themselves (on their computer, or in Termux on the phone): only the layout of their answers

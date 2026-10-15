@@ -27,7 +27,7 @@ export class CloudQueue {
   }
   matches({url, room}) { return this.url === String(url || '').replace(/\/+$/, '') && this.room === room; }
   async call(body, signal) {
-    if (!/^https:\/\//.test(this.url)) throw Error('云端队列地址需要以 https:// 开头');
+    if (!/^https?:\/\//.test(this.url)) throw Error('云端队列地址需要以 http:// 或 https:// 开头');
     if (!validRoom(this.room)) throw Error('房间码需要 16–64 个字母或数字');
     let response;
     try {
@@ -95,7 +95,7 @@ export class KeyHashQueue {
   }
   matches({url, kind}) { return kind === 'keyhash' && this.url === String(url || '').replace(/\/+$/, ''); }
   async request(path, body, signal) {
-    if (!/^https:\/\//.test(this.url)) throw Error('云端队列地址需要以 https:// 开头');
+    if (!/^https?:\/\//.test(this.url)) throw Error('云端队列地址需要以 http:// 或 https:// 开头');
     let response;
     try {
       response = await this.fetcher(this.url + path, body ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body), signal} : {signal});
