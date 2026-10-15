@@ -1,13 +1,16 @@
 // 画画的笔刷. A brush is a tip stamped along the stroke: its size, how far apart the stamps are (spacing, a share of
 // the size), how much each stamp leaves (flow) and how dark the whole stroke can get (opacity, as on Procreate), how
 // soft the tip's edge is (hardness), how much pressure thins it (pressureSize) and lightens it (pressureOpacity), how
-// much the line is steadied (streamline) and scattered (jitter). The tip is a round one made from the hardness, a
-// grainy one (pencil, chalk), or a picture (an imported brush: dark is paint, or its own transparency).
+// much the line is steadied (streamline) and scattered (jitter), how much both ends narrow (taper).
+// The tip is a round one made from the hardness, a grainy one (pencil, chalk), or a picture (an imported brush: dark
+// is paint, or its own transparency).
 
 export const BRUSHES = [
-  {id: 'pencil', name: '铅笔', group: '素描', size: 6, opacity: .9, flow: .55, spacing: .08, hardness: .85, pressureSize: .55, pressureOpacity: .8, streamline: .2, jitter: .04, tip: 'grain'},
+  {id: 'pencil', name: '铅笔', group: '素描', size: 6, opacity: .9, flow: .55, spacing: .08, hardness: .85, pressureSize: .55, pressureOpacity: .8, streamline: .2, jitter: .04, taper: 0, tip: 'grain'},
   {id: 'ink', name: '墨水笔', group: '描线', size: 10, opacity: 1, flow: 1, spacing: .03, hardness: 1, pressureSize: 1, pressureOpacity: 0, streamline: .55, jitter: 0, tip: 'round'},
   {id: 'mono', name: '单线笔', group: '描线', size: 6, opacity: 1, flow: 1, spacing: .03, hardness: 1, pressureSize: 0, pressureOpacity: 0, streamline: .5, jitter: 0, tip: 'round'},
+  // 柳叶笔: hard and solid, both ends of every stroke narrowing to a point (with a finger too), for filling and erasing.
+  {id: 'willow', name: '柳叶笔', group: '上色', size: 28, opacity: 1, flow: 1, spacing: .03, hardness: .98, pressureSize: .5, pressureOpacity: 0, streamline: .35, jitter: 0, taper: .55, tip: 'round'},
   {id: 'marker', name: '马克笔', group: '上色', size: 24, opacity: .7, flow: .3, spacing: .05, hardness: .8, pressureSize: .15, pressureOpacity: .4, streamline: .25, jitter: 0, tip: 'round'},
   {id: 'round', name: '圆头笔', group: '上色', size: 30, opacity: 1, flow: .9, spacing: .05, hardness: .95, pressureSize: .35, pressureOpacity: .2, streamline: .2, jitter: 0, tip: 'round'},
   {id: 'air', name: '软喷枪', group: '上色', size: 120, opacity: 1, flow: .07, spacing: .06, hardness: 0, pressureSize: .2, pressureOpacity: 1, streamline: .1, jitter: 0, tip: 'round'},
@@ -17,7 +20,7 @@ export const BRUSHES = [
 export const FIELDS = [
   ['size', '最大尺寸', 1, 400, 1], ['opacity', '不透明度', 0, 1, .01], ['flow', '流量', .01, 1, .01], ['spacing', '间距', .01, 1, .01],
   ['hardness', '硬度', 0, 1, .01], ['pressureSize', '压力 → 粗细', 0, 1, .01], ['pressureOpacity', '压力 → 浓淡', 0, 1, .01],
-  ['streamline', '防抖', 0, 1, .01], ['jitter', '散布', 0, 1, .01],
+  ['streamline', '防抖', 0, 1, .01], ['jitter', '散布', 0, 1, .01], ['taper', '两头收尖', 0, 1, .01],
 ];
 const KEY = 'st-iphonie-paint-brushes';
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));

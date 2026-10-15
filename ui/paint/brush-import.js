@@ -237,5 +237,12 @@ export async function importBrushFile(doc, win, file) {
     const img = await win.createImageBitmap(file);
     return [cleanBrush({...defaults, id: id(), name: base, group: '导入', tip: maskOf(doc, img, 'dark')})];
   }
+  // A name without its ending (some phones hand files over so): a zip is a Procreate brush, else maybe a picture.
+  if (!ext) {
+    const head = new Uint8Array(await (file.slice ? file.slice(0, 4) : file).arrayBuffer()).subarray(0, 4);
+    if (head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4) return importBrushFile(doc, win, {name: base + '.brushset', type: file.type, arrayBuffer: () => file.arrayBuffer()});
+    const img = await Promise.resolve(win.createImageBitmap?.(file)).catch(() => null);
+    if (img) return [cleanBrush({...defaults, id: id(), name: base, group: '导入', tip: maskOf(doc, img, 'dark')})];
+  }
   throw Error('这种文件还不认识：能导入 Procreate 的 .brushset / .brush、Photoshop 的 .abr，或者一张图片');
 }

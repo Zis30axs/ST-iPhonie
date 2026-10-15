@@ -1,14 +1,15 @@
 // 画画的画面: shows the picture turned, moved and zoomed, and turns pens, fingers and the mouse into strokes and
 // gestures, as on Procreate:
 // - a pen, a finger or the mouse draws (画笔, 橡皮, 涂抹); once a pen has been seen, fingers no longer draw;
-// - two fingers pinch, turn and move the picture; a quick two-finger tap undoes, three fingers redo;
+// - two fingers pinch, turn and move the picture; a quick pinch in puts the whole picture back on screen; a quick
+//   two-finger tap undoes, three fingers redo;
 // - holding still for a moment picks the colour under the point;
 // - 选区: drag a box, or draw round what to select; 变形: drag to move, the corners to scale, the dot above to turn,
 //   two fingers to scale and turn;
 // - on a computer: the wheel zooms where the pointer is, space or the middle button drags the picture.
 import {beginStroke, extendStroke, endStroke, compose, colorAt, steady, tracePath, floatCorners} from './engine.js';
 
-const HOLD = 480, TAP = 280, HANDLE = 24;
+const HOLD = 480, TAP = 280, HANDLE = 24, SNAP = 320;
 /** The view's turn, place and zoom: picture point → screen point, and back. */
 export function viewMath(t) {
   const cos = Math.cos(t.angle), sin = Math.sin(t.angle);
@@ -37,7 +38,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   const g = canvas.getContext('2d');
   let w = 0, h = 0, ratio = 1, view = null, raf = 0, penSeen = false, spaceDown = false, flipped = false;
   const pointers = new Map();
-  let drawing = null, gesture = null, panning = null, taps = null, outline = null, moving = null;
+  let drawing = null, gesture = null, panning = null, taps = null, outline = null, moving = null, refit = false, glide = 0;
 
   function size() {
     const r = host.getBoundingClientRect();
@@ -45,7 +46,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     w = Math.max(1, r.width); h = Math.max(1, r.height);
     canvas.width = Math.round(w * ratio); canvas.height = Math.round(h * ratio);
     canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
-    if (!view) view = fitView(pic, w, h);
+    if (!view || refit) { view = fitView(pic, w, h); refit = false; }
     render();
   }
   // Picture px ⇄ screen px, with 左右翻转画面.
@@ -178,13 +179,15 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   const two = () => [...pointers.values()].filter(p => p.type === 'touch').slice(0, 2);
   function startGesture() {
     const [a, b] = two();
+    win.cancelAnimationFrame(glide); glide = 0;
     const mid = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
-    gesture = {view: {...view}, mid, dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, angle: Math.atan2(b.y - a.y, b.x - a.x), piece: pic.float && tool().kind === 'transform' ? {...pic.float.t, mid: toPicture(mid.x, mid.y)} : null};
+    gesture = {view: {...view}, mid, at: Date.now(), k: 1, dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, angle: Math.atan2(b.y - a.y, b.x - a.x), piece: pic.float && tool().kind === 'transform' ? {...pic.float.t, mid: toPicture(mid.x, mid.y)} : null};
   }
   function moveGesture() {
     const [a, b] = two();
     if (!a || !b) return;
     const mid = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}, k = Math.hypot(b.x - a.x, b.y - a.y) / gesture.dist, turn = Math.atan2(b.y - a.y, b.x - a.x) - gesture.angle;
+    gesture.k = k;
     if (gesture.piece && pic.float) {
       // The piece follows the fingers: scaled and turned about where they started, moved with them.
       const p = gesture.piece, now = toPicture(mid.x, mid.y), dir = flipped ? -1 : 1, cos = Math.cos(turn * dir), sin = Math.sin(turn * dir);
@@ -201,6 +204,21 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     const p = viewMath(gesture.view).toPicture(gesture.mid.x, gesture.mid.y), cos = Math.cos(angle), sin = Math.sin(angle);
     view = {scale, angle, x: mid.x - (p.x * cos - p.y * sin) * scale, y: mid.y - (p.x * sin + p.y * cos) * scale};
     later();
+  }
+  /** To the view that shows the whole picture, gliding there (about a fifth of a second). */
+  function fitSmooth() {
+    const from = {...view}, to = fitView(pic, w, h), start = win.performance?.now?.() ?? Date.now();
+    let turn = to.angle - from.angle;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    win.cancelAnimationFrame(glide);
+    const step = now => {
+      const t = Math.min(1, (now - start) / 220), e = 1 - (1 - t) ** 3;
+      view = {scale: from.scale + (to.scale - from.scale) * e, angle: from.angle + turn * e, x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e};
+      if (t >= 1) view = to;
+      render();
+      glide = t < 1 && !gesture ? win.requestAnimationFrame(step) : 0;
+    };
+    glide = win.requestAnimationFrame(step);
   }
   function zoomAt(x, y, factor) {
     const p = viewMath(view).toPicture(x, y), scale = Math.min(40, Math.max(.05, view.scale * factor)), cos = Math.cos(view.angle), sin = Math.sin(view.angle);
@@ -248,7 +266,12 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     if (panning && !pointers.size) panning = null;
     if (p?.type === 'touch') {
       const left = [...pointers.values()].filter(x => x.type === 'touch').length;
-      if (left < 2 && gesture) { if (gesture.piece) stroked({quiet: true}); gesture = null; }
+      if (left < 2 && gesture) {
+        if (gesture.piece) stroked({quiet: true});
+        // A quick pinch in, as in the album: the whole picture again.
+        else if (Date.now() - gesture.at < SNAP && gesture.k < .7) fitSmooth();
+        gesture = null;
+      }
       if (!left && taps) {
         // A quick tap with two fingers undoes, with three redoes.
         if (Date.now() - taps.at < TAP + 120 && taps.moved < 14) { if (taps.most === 2) undo(); if (taps.most === 3) redo(); }
@@ -267,6 +290,8 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   return {
     render: later,
     fit() { view = fitView(pic, w, h); later(); },
+    /** The next change of size (全屏 on or off) shows the whole picture again. */
+    fitOnResize() { refit = true; win.setTimeout(() => { refit = false; }, 600); },
     flip() { flipped = !flipped; later(); },
     get flipped() { return flipped; },
     zoomBy(factor) { zoomAt(w / 2, h / 2, factor); },
@@ -276,6 +301,6 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     space(on) { spaceDown = on; canvas.style.cursor = on ? 'grab' : ''; },
     get view() { return {...view}; },
     get busy() { return !!drawing || !!moving; },
-    dispose() { resize?.disconnect(); win.cancelAnimationFrame(raf); if (drawing) endDrawing(true); canvas.remove(); },
+    dispose() { resize?.disconnect(); win.cancelAnimationFrame(raf); win.cancelAnimationFrame(glide); if (drawing) endDrawing(true); canvas.remove(); },
   };
 }

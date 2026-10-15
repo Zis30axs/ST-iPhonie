@@ -963,6 +963,8 @@ export interface BackendAPI extends BackendFacade {
     /** Switches the floating phone to the next size and returns its name (小 / 中 / 大). */
     panelSize(): string;
     panelSizeName(): string;
+    /** 画画 全屏: the floating phone fills the whole window (true), or goes back; returns whether it is opened up. */
+    panelFull(on: boolean): boolean;
     /** The tavern's persona name ('' outside the tavern). */
     userName(): string;
     /** Facts for the self-check report (core/diagnostics.js buildReport). Asks whether keys work; never returns them. */

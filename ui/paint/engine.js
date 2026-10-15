@@ -35,6 +35,17 @@ export function stampOf(brush, size, p) {
   const curve = Math.pow(clamp(p, 0, 1), 1.4);
   return {size: Math.max(.5, size * (1 - brush.pressureSize * (1 - curve))), alpha: brush.flow * (1 - brush.pressureOpacity * (1 - curve))};
 }
+/**
+ * 两头收尖 (taper, 0–1): how much smaller a stamp is near the two ends of a stroke, as a willow leaf. The tapered part
+ * is up to taper × 8 sizes long, at most half the stroke (a short one is a leaf); d is how far along the stroke the
+ * stamp is, total the stroke's length (Infinity while it is still drawn: only its start narrows then).
+ */
+export function taperAt(brush, size, d, total = Infinity) {
+  const taper = brush.taper || 0;
+  if (!taper || total < 1) return 1;
+  const len = Math.min(taper * size * 8, total / 2), ease = t => 1 - (1 - clamp(t, 0, 1)) ** 2;
+  return len > 0 ? Math.max(.06, Math.min(ease(d / len), ease((total - d) / len))) : 1;
+}
 /** The line steadied: the pen point is followed only part of the way (streamline 0–1). */
 export const steady = (last, point, streamline) => !last ? point : {x: last.x + (point.x - last.x) * (1 - streamline * .88), y: last.y + (point.y - last.y) * (1 - streamline * .88), p: point.p};
 
@@ -87,7 +98,8 @@ export function beginStroke(pic, {brush, size, color, erase = false, smudge = fa
     layer.g.save(); clipSelection(layer.g, pic);
   } else {
     pic.buffer.g?.clearRect(0, 0, pic.width, pic.height);
-    pic.stroke = {brush, size, erase, layer, tip: coloredTip(pic.doc, brush, erase ? '#000000' : color), last: point, carry: 0, box: null};
+    // A tapering brush keeps its stamps: the end narrows only once it is known where the stroke ends.
+    pic.stroke = {brush, size, erase, layer, tip: coloredTip(pic.doc, brush, erase ? '#000000' : color), last: point, carry: 0, box: null, dist: 0, stamps: brush.taper ? [] : null};
     pic.buffer.g?.save(); if (pic.buffer.g) clipSelection(pic.buffer.g, pic);
   }
   stamp(pic, point);
@@ -108,7 +120,8 @@ function smudgeStamp(pic, x, y, size, strength) {
   held.globalAlpha = 1;
 }
 function stamp(pic, {x, y, p}) {
-  const s = pic.stroke, {size, alpha} = stampOf(s.brush, s.size, p), g = pic.buffer.g;
+  const s = pic.stroke, {size: full, alpha} = stampOf(s.brush, s.size, p), g = pic.buffer.g;
+  const size = s.stamps ? full * taperAt(s.brush, s.size, s.dist) : full;
   if (s.smudge) {
     smudgeStamp(pic, x, y, size, s.brush.opacity * (alpha / Math.max(.01, s.brush.flow)));
     const r = size / 2 + 2, box = [Math.floor(x - r), Math.floor(y - r), Math.ceil(x + r), Math.ceil(y + r)];
@@ -118,6 +131,7 @@ function stamp(pic, {x, y, p}) {
   const jitter = s.brush.jitter * size;
   const cx = x + (jitter ? (Math.random() - .5) * 2 * jitter : 0), cy = y + (jitter ? (Math.random() - .5) * 2 * jitter : 0);
   if (g) { g.globalAlpha = clamp(alpha, 0, 1); g.drawImage(s.tip, cx - size / 2, cy - size / 2, size, size); }
+  s.stamps?.push({cx, cy, full, alpha, d: s.dist});
   const r = size / 2 + 2, box = [Math.floor(cx - r), Math.floor(cy - r), Math.ceil(cx + r), Math.ceil(cy + r)];
   s.box = s.box ? [Math.min(s.box[0], box[0]), Math.min(s.box[1], box[1]), Math.max(s.box[2], box[2]), Math.max(s.box[3], box[3])] : box;
 }
@@ -127,7 +141,7 @@ export function extendStroke(pic, point) {
   if (!s) return;
   const spacing = Math.max(.5, s.size * s.brush.spacing * Math.max(.2, stampOf(s.brush, 1, (s.last.p + point.p) / 2).size));
   const {stamps, carry} = stampsBetween(s.last, point, spacing, s.carry);
-  for (const st of stamps) stamp(pic, st);
+  for (const st of stamps) { s.dist = (s.dist || 0) + Math.hypot(st.x - (s.at || s.last).x, st.y - (s.at || s.last).y); s.at = st; stamp(pic, st); }
   s.carry = carry; s.last = point;
 }
 const boxIn = (pic, b) => { const x = clamp(b[0], 0, pic.width), y = clamp(b[1], 0, pic.height); return [x, y, clamp(b[2], 0, pic.width) - x, clamp(b[3], 0, pic.height) - y]; };
@@ -144,6 +158,12 @@ export function endStroke(pic, {cancel = false} = {}) {
     if (!box[2] || !box[3]) return false;
     remember(pic, pixelStep(pic, s.layer, box, cropData(pic.doc, s.before, box)));
     return true;
+  }
+  // A tapering stroke is stamped again with both ends narrowed, now that its length is known.
+  if (s?.stamps && !cancel && s.box && pic.buffer.g) {
+    const b = pic.buffer.g, total = s.dist;
+    b.clearRect(s.box[0], s.box[1], s.box[2] - s.box[0], s.box[3] - s.box[1]);
+    for (const st of s.stamps) { const size = st.full * taperAt(s.brush, s.size, st.d, total); b.globalAlpha = clamp(st.alpha, 0, 1); b.drawImage(s.tip, st.cx - size / 2, st.cy - size / 2, size, size); }
   }
   pic.buffer.g?.restore();
   if (!s || cancel || !s.box) { pic.buffer.g?.clearRect(0, 0, pic.width, pic.height); return false; }

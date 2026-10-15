@@ -2395,7 +2395,12 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .paint-stage{position:relative;flex:1;min-height:0;overflow:hidden}
 .paint-view{position:absolute;inset:0;display:block;cursor:crosshair}
 .paint-side{position:absolute;left:6px;top:50%;transform:translateY(-50%);z-index:2;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 4px;border-radius:16px;background:color-mix(in srgb,var(--card) 82%,transparent);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-.paint-slider{writing-mode:vertical-lr;direction:rtl;width:26px;height:min(130px,22vh);margin:0;accent-color:var(--accent);touch-action:none}
+/* The side sliders (ui/paint.js draws them: an upright native range stays sideways in some WebViews). --v is 0–1. */
+.paint-vslider{position:relative;width:26px;height:min(130px,22vh);border-radius:13px;overflow:hidden;background:color-mix(in srgb,var(--ink) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 14%,transparent);touch-action:none;cursor:ns-resize;outline:none}
+.paint-vslider i{position:absolute;left:0;right:0;bottom:0;height:calc(var(--v,0) * 100%);min-height:6px;background:var(--accent);border-radius:0 0 13px 13px}
+.paint-vslider i::after{content:'';position:absolute;left:5px;right:5px;top:3px;height:3px;border-radius:2px;background:rgba(255,255,255,.85)}
+.paint-vslider[data-active],.paint-vslider:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+.paint-vslider[aria-disabled=true]{opacity:.35;cursor:default}
 .paint-side-value{min-height:14px;font-size:10.5px;font-weight:800;color:var(--ink2);font-variant-numeric:tabular-nums}
 .paint-side-btn{display:grid;place-items:center;width:34px;height:34px;border-radius:12px;color:var(--ink)}
 .paint-side-btn svg{width:20px;height:20px}
@@ -2422,13 +2427,12 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .paint-layer .grow{flex:1;min-width:0;display:grid}
 .paint-layer .grow strong{font-size:14px;font-weight:800}
 .paint-layer .grow small{font-size:11.5px;color:var(--ink2)}
-.paint-layer-thumb{width:44px;height:44px;border-radius:8px;flex:none;background-color:#fff;background-image:linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%),linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%);background-size:10px 10px;background-position:0 0,5px 5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+.paint-layer-thumb{width:44px;height:44px;border-radius:8px;flex:none;touch-action:none;cursor:grab;background-color:#fff;background-image:linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%),linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%);background-size:10px 10px;background-position:0 0,5px 5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
 .paint-layer .icon-button svg{width:20px;height:20px}
 .paint-layer-more{padding:4px 12px 10px}
 .paint-bg input[type=color]{width:44px;height:44px;padding:0;border:0;border-radius:8px;background:none;flex:none}
 /* 图层 panel (ui/paint/layers-panel.js) */
-.pl-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.pl-head .hint{flex:1;margin:0;font-size:11.5px}
+.pl-head{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:8px}
 .pl-head .chip-button{min-width:44px;font-size:20px}
 .pl-list{display:flex;flex-direction:column;gap:6px}
 .pl-row{position:relative;border-radius:16px;overflow:hidden;background:var(--danger-soft)}
@@ -2438,7 +2442,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .pl-under button:nth-child(2){background:#3a9cf0}
 .pl-under .pl-del{background:#e0465e}
 .pl-under button:disabled{opacity:.4}
-.pl-main{position:relative;display:flex;align-items:center;gap:10px;min-height:58px;padding:6px 10px;background:var(--card);transition:transform .18s;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.pl-main{position:relative;display:flex;align-items:center;gap:10px;min-height:58px;padding:6px 10px;background:var(--card);transition:transform .22s cubic-bezier(.2,.8,.2,1);touch-action:pan-y;user-select:none;-webkit-user-select:none}
 .pl-row.swiped .pl-main{transform:translateX(-168px)}
 .pl-row.on .pl-main{background:color-mix(in srgb,var(--accent) 22%,var(--card))}
 .pl-row.clip .pl-main{padding-left:26px}
@@ -2469,6 +2473,8 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .paint-top{padding:6px 2px}
 .paint-top .paint-text{min-height:34px;padding:0 5px;font-size:13px}
 .paint-top .paint-tool{width:clamp(24px,calc((100cqw - 76px) / 8),34px);border-radius:10px}
+/* With 全屏 there is one tool more. */
+.paint-top:has([data-action=paint-full]) .paint-tool{width:clamp(22px,calc((100cqw - 92px) / 9),34px)}
 .paint-top .paint-tool svg{width:min(22px,calc(100% - 4px));height:auto}
 .paint-top .paint-swatch{width:26px;height:26px;margin:0 3px}
 }
@@ -2486,3 +2492,9 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .paint-drop{position:absolute;left:0;top:0;z-index:5;width:32px;height:32px;border-radius:50%;pointer-events:none;box-shadow:0 0 0 3px #fff,0 6px 16px rgba(0,0,0,.35)}
 .paint-fill-set{display:flex;flex-direction:column;gap:8px;width:100%;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--ink) 10%,transparent)}
 .paint-fill-set .segmented button{font-size:12.5px}
+/* 画画 全屏 (ui/paint.js): the picture fills the window, without the phone around it. */
+:root[data-paint-full] body{background:var(--page)}
+:root[data-paint-full] .stage{padding:0}
+:root[data-paint-full] .stage-bar,:root[data-paint-full] .power-key,:root[data-paint-full] .statusbar,:root[data-paint-full] .pull-tab,:root[data-paint-full] .island,:root[data-paint-full] .home-indicator,:root[data-paint-full] .app-nav{display:none!important}
+:root[data-paint-full] .device{width:100%;max-width:none;flex:1;aspect-ratio:auto;border-radius:0;padding:0;background:none!important;box-shadow:none!important}
+:root[data-paint-full] .screen{border-radius:0}

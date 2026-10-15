@@ -240,13 +240,16 @@ const DESIGN_H=760,DESIGN_W=Math.round((DESIGN_H-54)*390/844+18);
 // Leave pinch zoom to the browser instead of shrinking the phone to cancel the user's zoom.
 function panelBounds(){const v=globalThis.window?.visualViewport,use=v&&Math.abs((v.scale||1)-1)<.01&&v.width>0&&v.height>0;
  return use?{left:Math.max(0,v.offsetLeft||0),top:Math.max(0,v.offsetTop||0),width:v.width,height:v.height}:{left:0,top:0,width:innerWidth,height:innerHeight};}
-function placePanel(){if(!panel)return;const float=!fullScreen();panel.classList.toggle('floating',float);if(!float){const b=panelBounds();for(const k of ['left','top','width','height'])panel.style[k]=b[k]+'px';if(frame)for(const k of ['width','height','transform'])frame.style.removeProperty(k);return;}
+// 画画 全屏: the floating phone opens up to the whole window (the phone inside drops its frame), until asked back.
+let panelExpanded=false;
+function panelFull(on){panelExpanded=!!on&&!!panel?.classList.contains('floating');placePanel();return panelExpanded;}
+function placePanel(){if(!panel)return;const float=!fullScreen();panel.classList.toggle('floating',float);if(!float)panelExpanded=false;panel.classList.toggle('expanded',panelExpanded);if(!float||panelExpanded){const b=panelBounds();for(const k of ['left','top','width','height'])panel.style[k]=b[k]+'px';if(frame)for(const k of ['width','height','transform'])frame.style.removeProperty(k);return;}
  const [most,share]=PANEL_SIZES[place.size]||PANEL_SIZES.m,h=Math.round(Math.min(most,(innerHeight-16)*share)),scale=h/DESIGN_H,w=Math.round(DESIGN_W*scale);
  if(frame)Object.assign(frame.style,{width:DESIGN_W+'px',height:DESIGN_H+'px',transform:`scale(${scale})`});
  const x=Math.min(Math.max(8,place.x??innerWidth-w-24),Math.max(8,innerWidth-w-8)),y=Math.min(Math.max(8,place.y??(innerHeight-h)/2),Math.max(8,innerHeight-h-8));
  Object.assign(panel.style,{width:w+'px',height:h+'px',left:Math.round(x)+'px',top:Math.round(y)+'px'});}
 /** Dragging from the phone's top bar (inside the frame), in screen coordinates so the moving frame does not matter. */
-function panelDrag(phase,sx,sy){if(!panel?.classList.contains('floating'))return false;const r=panel.getBoundingClientRect();
+function panelDrag(phase,sx,sy){if(!panel?.classList.contains('floating')||panelExpanded)return false;const r=panel.getBoundingClientRect();
  if(phase==='start')drag={sx,sy,x:r.left,y:r.top};
  else if(phase==='move'&&drag){place.x=drag.x+sx-drag.sx;place.y=drag.y+sy-drag.sy;placePanel();}
  else if(phase==='end'){drag=null;place.x=r.left;place.y=r.top;keepPlace();}
@@ -268,7 +271,7 @@ function watchPanelLayout(on){const w=globalThis.window,method=on?'addEventListe
  if(!on){cancelAnimationFrame(panelLayoutRaf);panelLayoutRaf=0;for(const id of panelLayoutTimers)clearTimeout(id);panelLayoutTimers=[];panelViewport=null;}}
 // Older ST-TTS copies publish __stTtsPanelBridge (this one no longer does): both running doubles the waves and prompts.
 let oldCopyNoted=false;
-function openPanel(roleId,preserveView=false){setTimeout(()=>{callIsland?.refresh();msgIsland?.refresh();noteIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();},0);floating?.setMode('docked');if(globalThis.__stTtsPanelBridge&&!oldCopyNoted){oldCopyNoted=true;notice('这个酒馆里还装着旧版「ST-TTS · 角色对白」，会和 ST-iPhonie 互相干扰：请在扩展管理里删除它，然后刷新页面');}if(settings?.sync?.enabled&&!panel?.open)backend?.syncNow().catch(()=>{});if(!panel){panel=document.createElement('dialog');panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;panel.append(frame);panel.addEventListener('close',()=>{frame?.contentWindow?.stTtsPanelVisibility?.(false);callIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();});panel.addEventListener('cancel',()=>{if(['playing','generating'].includes(player.phase))player.toggle();});document.body.append(panel);}if(!panel.open){placePanel();if(panel.classList.contains('floating'))panel.show();else panel.showModal();frame.contentWindow?.stTtsPanelVisibility?.(true,{preserveView});restorePanelLayout();}if(roleId)frame.contentWindow?.stTtsOpenRole?.(roleId);}
+function openPanel(roleId,preserveView=false){setTimeout(()=>{callIsland?.refresh();msgIsland?.refresh();noteIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();},0);floating?.setMode('docked');if(globalThis.__stTtsPanelBridge&&!oldCopyNoted){oldCopyNoted=true;notice('这个酒馆里还装着旧版「ST-TTS · 角色对白」，会和 ST-iPhonie 互相干扰：请在扩展管理里删除它，然后刷新页面');}if(settings?.sync?.enabled&&!panel?.open)backend?.syncNow().catch(()=>{});if(!panel){panel=document.createElement('dialog');panel.id='sttts-panel';panel.setAttribute('aria-label','ST-iPhonie');frame=document.createElement('iframe');frame.title='ST-iPhonie';frame.src=new URL('ui/index.html',base).href;panel.append(frame);panel.addEventListener('close',()=>{frame?.contentWindow?.stTtsPanelVisibility?.(false);if(panelExpanded){panelExpanded=false;placePanel();}callIsland?.refresh();musicIsland?.refresh();voiceIsland?.refresh();});panel.addEventListener('cancel',()=>{if(['playing','generating'].includes(player.phase))player.toggle();});document.body.append(panel);}if(!panel.open){placePanel();if(panel.classList.contains('floating'))panel.show();else panel.showModal();frame.contentWindow?.stTtsPanelVisibility?.(true,{preserveView});restorePanelLayout();}if(roleId)frame.contentWindow?.stTtsOpenRole?.(roleId);}
 function connect(source){
  if(!active||source!==frame?.contentWindow)throw Error('设置页面未连接');
  const owner=backend,api=owner.api();
@@ -367,6 +370,7 @@ function connect(source){
   panelFloating:()=>{check();return !!panel?.classList.contains('floating');},
   panelDrag:(phase,sx,sy)=>{check();return panelDrag(phase,sx,sy);},
   panelSize:()=>{check();return panelSize();},
+  panelFull:on=>{check();return panelFull(on);},
   panelSizeName:()=>{check();return PANEL_NAMES[place.size||'m'];},
   userName:()=>{check();return context()?.name1||'';},
   exportBackup:async(parts,options)=>{check();const manifest=await fetch(new URL('manifest.json',base)).then(r=>r.ok?r.json():null).catch(()=>null);return api.exportBackup(parts,manifest?.version||'',options);},

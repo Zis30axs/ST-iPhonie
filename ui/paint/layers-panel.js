@@ -3,12 +3,12 @@
 // - double-tap a name to rename it;
 // - swipe a layer left for 锁定 / 复制 / 删除;
 // - tap the letter (N, M…) for its opacity and blend mode;
-// - hold a layer, then drag it up or down to move it;
+// - drag a layer by its thumbnail, or hold it and then drag, up or down to move it;
 // - the tick shows or hides it. The last row is the background colour.
 import {esc} from '../common.js';
 import {BLENDS, activeLayer, addLayer, duplicateLayer, removeLayer, moveLayerTo, setLayer, clearLayer, fillLayer, mergeDown} from './engine.js';
 
-const HOLD = 380, DOUBLE = 260, SWIPE = 168;
+const HOLD = 320, DOUBLE = 260, SWIPE = 168;
 const letter = blend => BLENDS.find(b => b[0] === blend)?.[2] || 'N';
 
 /** Opens the panel. changed(): the picture changed (redraw, save). color(): the colour in use, for 填充. */
@@ -38,7 +38,7 @@ export function layersPanel({ctx, pic, changed, color}) {
   }
   function draw() {
     if (!d.live) return;
-    d.body.innerHTML = `<div class="pl-head"><span class="hint">点选图层，再点一下有更多；左滑锁定、复制、删除；按住拖动换位置</span><button type="button" class="chip-button" data-pl="add" aria-label="新图层">＋</button></div>
+    d.body.innerHTML = `<div class="pl-head"><button type="button" class="chip-button" data-pl="add" aria-label="新图层">＋</button></div>
       <div class="pl-list" data-pl-list>${[...pic.layers].reverse().map(row).join('')}
       <div class="pl-row pl-bg"><div class="pl-main"><input type="color" value="${esc(pic.background)}" data-bg-color aria-label="背景颜色"><span class="pl-name"><strong>背景颜色</strong><small>${pic.showBackground ? esc(pic.background) : '透明'}</small></span><input type="checkbox" class="pl-eye" data-bg-eye ${pic.showBackground ? 'checked' : ''} aria-label="背景"></div></div></div>`;
     for (const c of d.body.querySelectorAll('[data-thumb]')) {
@@ -62,39 +62,87 @@ export function layersPanel({ctx, pic, changed, color}) {
   }
 
   // ---------- touching a row: tap, double tap, swipe, hold and drag ----------
+  // The thumbnail is a handle: dragged up or down it moves the layer at once. Elsewhere a row is held first (the list
+  // scrolls under a finger that moves straight away). A swipe follows the finger and a flick is enough to open it.
   let press = null, lastTap = null, tapTimer = 0;
+  const rowsShown = () => [...d.body.querySelectorAll('[data-layer]')];
+  const scroller = () => { for (let el = d.body; el; el = el.parentElement) { const o = ctx.win.getComputedStyle(el).overflowY; if (/(auto|scroll)/.test(o) && el.scrollHeight > el.clientHeight) return el; } return null; };
+  function startDrag(p) {
+    p.mode = 'drag';
+    ctx.win.clearTimeout(p.timer);
+    const rows = rowsShown(), box = p.row.getBoundingClientRect();
+    p.rows = rows; p.from = rows.indexOf(p.row); p.to = p.from; p.step = box.height + 6; p.scroll = scroller(); p.top = p.scroll?.scrollTop || 0;
+    p.row.classList.add('dragging');
+    for (const r of rows) if (r !== p.row) r.style.transition = 'transform .16s';
+    try { p.main.setPointerCapture(p.id); } catch { /* fine */ }
+  }
+  function moveDrag(p, e) {
+    const s = p.scroll;
+    if (s) { const r = s.getBoundingClientRect(); if (e.clientY < r.top + 44) s.scrollTop -= 10; else if (e.clientY > r.bottom - 44) s.scrollTop += 10; }
+    const dy = e.clientY - p.y + ((s?.scrollTop || 0) - p.top);
+    p.row.style.transform = `translateY(${dy}px)`;
+    p.to = Math.max(0, Math.min(p.rows.length - 1, p.from + Math.round(dy / p.step)));
+    // The others make room where it would go.
+    p.rows.forEach((r, i) => { if (r === p.row) return; const shift = p.from < p.to && i > p.from && i <= p.to ? -p.step : p.from > p.to && i < p.from && i >= p.to ? p.step : 0; r.style.transform = shift ? `translateY(${shift}px)` : ''; });
+  }
+  function settleSwipe(p, open) {
+    swiped = open ? p.row.dataset.layer : '';
+    for (const r of rowsShown()) {
+      const on = r === p.row && open;
+      r.classList.toggle('swiped', on);
+      const m = r.querySelector('.pl-main');
+      // From where the finger left it to where it rests, by the stylesheet's transition.
+      if (m) { m.style.transition = ''; m.style.transform = ''; }
+    }
+  }
   d.body.addEventListener('pointerdown', e => {
     const main = e.target.closest('.pl-main');
-    if (!main || e.target.closest('input, button') || main.closest('.pl-bg')) return;
+    if (!main || e.target.closest('input, button') || main.closest('.pl-bg') || press) return;
     const rowEl = main.closest('[data-layer]');
-    press = {id: e.pointerId, x: e.clientX, y: e.clientY, row: rowEl, main, dx: 0, mode: '', start: swiped === rowEl.dataset.layer ? -SWIPE : 0};
-    press.timer = ctx.win.setTimeout(() => { if (press && !press.mode) { press.mode = 'drag'; rowEl.classList.add('dragging'); } }, HOLD);
+    press = {id: e.pointerId, x: e.clientX, y: e.clientY, at: Date.now(), row: rowEl, main, dx: 0, mode: '', handle: !!e.target.closest('.paint-layer-thumb'), start: swiped === rowEl.dataset.layer ? -SWIPE : 0};
+    if (press.handle) { try { main.setPointerCapture(e.pointerId); } catch { /* fine */ } }
+    press.timer = ctx.win.setTimeout(() => { if (press && !press.mode) startDrag(press); }, HOLD);
   });
   d.body.addEventListener('pointermove', e => {
-    if (!press || e.pointerId !== press.id) return;
-    const dx = e.clientX - press.x, dy = e.clientY - press.y;
-    if (!press.mode && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) { press.mode = 'swipe'; ctx.win.clearTimeout(press.timer); try { press.main.setPointerCapture(e.pointerId); } catch { /* fine */ } }
-    if (!press.mode && Math.abs(dy) > 10) { ctx.win.clearTimeout(press.timer); press = null; return; }
-    if (press.mode === 'swipe') { press.dx = Math.max(-SWIPE, Math.min(0, press.start + dx)); press.main.style.transform = `translateX(${press.dx}px)`; }
-    if (press.mode === 'drag') { e.preventDefault(); press.row.style.transform = `translateY(${dy}px)`; press.dy = dy; }
+    const p = press;
+    if (!p || e.pointerId !== p.id) return;
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    if (!p.mode && p.handle && Math.abs(dy) > 4 && Math.abs(dy) >= Math.abs(dx)) startDrag(p);
+    if (!p.mode && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+      p.mode = 'swipe'; ctx.win.clearTimeout(p.timer);
+      p.main.style.transition = 'none';
+      try { p.main.setPointerCapture(e.pointerId); } catch { /* fine */ }
+    }
+    if (!p.mode && !p.handle && Math.abs(dy) > 8) { ctx.win.clearTimeout(p.timer); press = null; return; }
+    if (p.mode === 'swipe') {
+      const raw = p.start + dx;
+      // Past the buttons it pulls back, as a rubber band; it does not go right of where it rests.
+      p.dx = raw < -SWIPE ? -SWIPE + (raw + SWIPE) * .3 : Math.min(0, raw);
+      p.main.style.transform = `translateX(${p.dx}px)`;
+      p.last = {x: e.clientX, at: Date.now(), vx: (e.clientX - (p.last?.x ?? p.x)) / Math.max(1, Date.now() - (p.last?.at ?? p.at))};
+    }
+    if (p.mode === 'drag') { e.preventDefault(); moveDrag(p, e); }
   });
+  // A finger held on a row: the list must not scroll away under the drag (a pointer cannot stop that by itself).
+  d.body.addEventListener('touchmove', e => { if (press?.mode === 'drag' || press?.mode === 'swipe') e.preventDefault(); }, {passive: false});
   const release = e => {
     if (!press || e.pointerId !== press.id) return;
     const p = press;
     press = null;
     ctx.win.clearTimeout(p.timer);
     const l = pic.layers.find(x => x.id === p.row.dataset.layer);
-    if (p.mode === 'swipe') { swiped = p.dx < -SWIPE / 2 ? l.id : ''; return draw(); }
+    if (p.mode === 'swipe') {
+      const flick = p.last && Date.now() - p.last.at < 80 ? p.last.vx : 0;
+      return settleSwipe(p, flick < -.35 ? true : flick > .35 ? false : p.dx < -SWIPE / 2);
+    }
     if (p.mode === 'drag') {
-      // Where it was let go: the row it is over, in the list as shown (top layer first).
-      const rows = [...d.body.querySelectorAll('[data-layer]')], height = p.row.getBoundingClientRect().height || 56;
-      const shownAt = rows.indexOf(p.row), to = Math.max(0, Math.min(rows.length - 1, shownAt + Math.round((p.dy || 0) / height)));
-      moveLayerTo(pic, l.id, pic.layers.length - 1 - to);
+      // Where it was let go, in the list as shown (top layer first).
+      if (p.to !== p.from) moveLayerTo(pic, l.id, pic.layers.length - 1 - p.to);
       return done();
     }
     if (e.type === 'pointercancel') return;
     // A tap: a layer not in use is chosen; the one in use opens its options, unless a second tap renames it.
-    if (swiped) { swiped = ''; return draw(); }
+    if (swiped) { settleSwipe(p, false); return; }
     const now = Date.now(), twice = lastTap && lastTap.id === l.id && now - lastTap.at < DOUBLE;
     lastTap = {id: l.id, at: now};
     ctx.win.clearTimeout(tapTimer);
@@ -106,6 +154,9 @@ export function layersPanel({ctx, pic, changed, color}) {
   d.body.addEventListener('pointercancel', release);
 
   d.body.addEventListener('click', e => {
+    // A row swiped open closes when it is touched (its eye, under the finger, is not switched by that).
+    const open = e.target.closest('.pl-row.swiped .pl-main');
+    if (open) { e.preventDefault(); swiped = ''; open.closest('.pl-row').classList.remove('swiped'); return; }
     const b = e.target.closest('[data-pl], [data-blend], [data-bg-eye]');
     if (!b) return;
     if (b.dataset.pl === 'add') { addLayer(pic); panel = null; return done(); }

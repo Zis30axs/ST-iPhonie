@@ -8,6 +8,8 @@
 #sttts-panel.floating{position:fixed;inset:auto;margin:0;z-index:9000;max-width:none;max-height:none;filter:drop-shadow(0 22px 34px rgba(0,0,0,.38))}
 #sttts-panel.floating::backdrop{display:none}
 #sttts-panel.floating iframe{transform-origin:0 0;max-width:none}
+/* 画画 全屏: the floating phone opened up to the whole window (index.js panelFull) */
+#sttts-panel.floating.expanded{filter:none;z-index:9001}
 /* Follows the system like the phone page's root: with different schemes Chrome paints the frame opaque behind the
    phone, and the page inside reads 跟随系统 from this element's scheme. */
 #sttts-panel iframe{border:0;width:100%;height:100%;display:block;color-scheme:light dark;background:transparent}
