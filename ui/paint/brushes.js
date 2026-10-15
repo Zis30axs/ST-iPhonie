@@ -9,8 +9,8 @@ export const BRUSHES = [
   {id: 'pencil', name: '铅笔', group: '素描', size: 6, opacity: .9, flow: .55, spacing: .08, hardness: .85, pressureSize: .55, pressureOpacity: .8, streamline: .2, jitter: .04, taper: 0, tip: 'grain'},
   {id: 'ink', name: '墨水笔', group: '描线', size: 10, opacity: 1, flow: 1, spacing: .03, hardness: 1, pressureSize: 1, pressureOpacity: 0, streamline: .55, jitter: 0, tip: 'round'},
   {id: 'mono', name: '单线笔', group: '描线', size: 6, opacity: 1, flow: 1, spacing: .03, hardness: 1, pressureSize: 0, pressureOpacity: 0, streamline: .5, jitter: 0, tip: 'round'},
-  // 柳叶笔: hard and solid, both ends of every stroke narrowing to a point (with a finger too), for filling and erasing.
-  {id: 'willow', name: '柳叶笔', group: '上色', size: 28, opacity: 1, flow: 1, spacing: .03, hardness: .98, pressureSize: .5, pressureOpacity: 0, streamline: .35, jitter: 0, taper: .55, tip: 'round'},
+  // 柳叶笔, as on 画世界: no tip at all; the outline drawn is filled (as 橡皮: emptied) when the pen lifts.
+  {id: 'willow', name: '柳叶笔', group: '上色', size: 1, opacity: 1, flow: 1, spacing: .03, hardness: 1, pressureSize: 0, pressureOpacity: 0, streamline: 0, jitter: 0, taper: 0, tip: 'round', lasso: true},
   {id: 'marker', name: '马克笔', group: '上色', size: 24, opacity: .7, flow: .3, spacing: .05, hardness: .8, pressureSize: .15, pressureOpacity: .4, streamline: .25, jitter: 0, tip: 'round'},
   {id: 'round', name: '圆头笔', group: '上色', size: 30, opacity: 1, flow: .9, spacing: .05, hardness: .95, pressureSize: .35, pressureOpacity: .2, streamline: .2, jitter: 0, tip: 'round'},
   {id: 'air', name: '软喷枪', group: '上色', size: 120, opacity: 1, flow: .07, spacing: .06, hardness: 0, pressureSize: .2, pressureOpacity: 1, streamline: .1, jitter: 0, tip: 'round'},
@@ -30,6 +30,7 @@ export function cleanBrush(b) {
   for (const [k, , min, max] of FIELDS) { const base = BRUSHES[0][k]; const n = Number(b?.[k]); out[k] = clamp(Number.isFinite(n) ? n : base, min, max); }
   out.tip = ['round', 'grain'].includes(b?.tip) || /^data:image\/png;base64,/.test(String(b?.tip || '')) ? b.tip : 'round';
   if (b?.source) out.source = String(b.source).slice(0, 60);
+  if (b?.lasso === true) out.lasso = true;
   return out;
 }
 /** The user's brushes (made or imported), and changes to the built-in ones, in this browser. */

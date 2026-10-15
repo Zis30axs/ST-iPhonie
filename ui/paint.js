@@ -6,7 +6,7 @@ import {createView, esc, btn, help, menu, empty} from './common.js';
 import {saveFile} from '../download.js';
 import {allBrushes, userBrushes, saveUserBrushes, cleanBrush, BRUSHES, FIELDS, tipMask, coloredTip} from './paint/brushes.js';
 import {importBrushFile} from './paint/brush-import.js';
-import {createPicture, undo, redo, flatten, stampOf, taperAt, layerInfo, floodFill, setSelection, invertSelection, clearSelected, copySelected, startTransform, commitTransform, cancelTransform} from './paint/engine.js';
+import {createPicture, undo, redo, flatten, stampOf, taperAt, layerInfo, floodFill, lassoFill, setSelection, invertSelection, clearSelected, copySelected, startTransform, commitTransform, cancelTransform} from './paint/engine.js';
 import {layersPanel} from './paint/layers-panel.js';
 import {createStage} from './paint/stage.js';
 import {paintStore} from './paint/store.js';
@@ -23,12 +23,8 @@ const I = {
   undo: svg('<path d="M9 7H4V2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 7A8 8 0 1 1 6 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'),
   redo: svg('<path d="M15 7h5V2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.5 7A8 8 0 1 0 18 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'),
   smudge: svg('<path d="M9 3c1.6 2.6 2.4 4.6 2.4 6a2.4 2.4 0 0 1-4.8 0C6.6 7.6 7.4 5.6 9 3z" fill="currentColor"/><path d="M11 13c2 1 3 3 2.6 5.2M14.5 11.5c2.6 1.4 4 4 3.5 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'),
-  select: svg('<path d="M4 7V4h3M10 4h4M17 4h3v3M20 10v4M20 17v3h-3M14 20h-4M7 20H4v-3M4 14v-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'),
-  transform: svg('<path d="M5 19 19 5M19 5h-6M19 5v6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9V3h6M21 15v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'),
   more: svg('<circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/>'),
   eye: svg('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/>'),
-  full: svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'),
-  unfull: svg('<path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'),
   eyeOff: svg('<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'),
 };
 const stamp = at => new Date(at).toLocaleString('zh-CN', {hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
@@ -128,7 +124,7 @@ export function paintApp(ctx) {
     pic = p; mode = 'edit'; v.root.dataset.mode = 'edit';
     v.draw(`<div class="paint-edit">
       <div class="paint-top">
-        ${btn('paint-gallery', '作品', 'paint-text')}${btn('paint-actions', I.more, 'paint-tool', 'aria-label="更多"')}${canFull() ? btn('paint-full', full ? I.unfull : I.full, 'paint-tool', `aria-label="${full ? '退出全屏' : '全屏'}"`) : ''}${btn('tool-select', I.select, 'paint-tool', 'aria-label="选区"')}${btn('tool-transform', I.transform, 'paint-tool', 'aria-label="变形"')}
+        ${btn('paint-gallery', '作品', 'paint-text')}${btn('paint-actions', I.more, 'paint-tool', 'aria-label="更多：选区、变形、全屏……"')}
         <span class="grow"></span>
         ${btn('tool-brush', I.brush, 'paint-tool', 'aria-label="画笔（再点一下选笔刷）"')}${btn('tool-smudge', I.smudge, 'paint-tool', 'aria-label="涂抹（再点一下选笔刷）"')}${btn('tool-eraser', I.eraser, 'paint-tool', 'aria-label="橡皮（再点一下选笔刷）"')}${btn('paint-layers', I.layers, 'paint-tool', 'aria-label="图层"')}
         <button type="button" class="paint-swatch" data-action="paint-color" aria-label="颜色（拖到画上就是油漆桶）"></button>
@@ -150,13 +146,20 @@ export function paintApp(ctx) {
       stroked: ({quiet = false} = {}) => { if (!quiet) saveSoon(); syncSide(); },
       filled: at => fillAt(at),
       selected: points => { if (!setSelection(pic, points)) ctx.notify('框小了一点，没选上'); stage.render(); syncBar(); },
+      lassoed: (points, {erase}) => {
+        if (activeLayer().locked) { ctx.notify('这个图层锁定了：在图层里左滑解锁'); return; }
+        const t = current();
+        if (lassoFill(pic, points, {color: tools.color, erase, opacity: t.opacity * brushOf(t.id).opacity})) { stage.render(); syncSide(); saveSoon(); }
+      },
       undo: () => doUndo(), redo: () => doRedo(), locked: () => ctx.notify('这个图层锁定了：在图层里左滑解锁')});
     tipMask(ctx.doc, brushOf(tools.brush.id)).onready = () => stage?.render();
     syncTools();
   }
   function closeEditor() { if (stage) { stage.dispose(); stage = null; } }
   function syncTools() {
-    for (const k of ['brush', 'smudge', 'eraser', 'pick', 'select', 'transform']) v.root.querySelector(`[data-action=tool-${k}]`)?.setAttribute('aria-pressed', String(tools.kind === k));
+    for (const k of ['brush', 'smudge', 'eraser', 'pick']) v.root.querySelector(`[data-action=tool-${k}]`)?.setAttribute('aria-pressed', String(tools.kind === k));
+    // 选区 and 变形 live in ⋯: it shows when one of them is in use.
+    v.root.querySelector('[data-action=paint-actions]')?.setAttribute('aria-pressed', String(['select', 'transform'].includes(tools.kind)));
     const pickBtn = v.root.querySelector('.paint-pick');
     if (pickBtn) pickBtn.style.background = tools.color;
     syncBar();
@@ -165,15 +168,16 @@ export function paintApp(ctx) {
     syncSide();
   }
   function syncSide() {
-    const t = current(), off = !['brush', 'eraser', 'smudge'].includes(tools.kind);
+    const t = current(), off = !['brush', 'eraser', 'smudge'].includes(tools.kind), lasso = !off && tools.kind !== 'smudge' && !!brushOf(t.id).lasso;
     for (const el of v.root.querySelectorAll('.paint-vslider')) {
       const size = el.dataset.paint === 'size';
       el.style.setProperty('--v', String(size ? toSlider(t.size) / 1000 : t.opacity));
       el.setAttribute('aria-valuenow', String(size ? t.size : Math.round(t.opacity * 100)));
-      el.setAttribute('aria-disabled', String(off));
+      // 柳叶笔 has no size: what is drawn round is filled.
+      el.setAttribute('aria-disabled', String(off || (size && lasso)));
     }
     const val = v.root.querySelector('[data-paint-size-value]');
-    if (val) val.textContent = off ? '' : String(t.size);
+    if (val) val.textContent = off || lasso ? '' : String(t.size);
     for (const [a, can] of [['paint-undo', pic?.history.length], ['paint-redo', pic?.future.length]]) { const b = v.root.querySelector(`[data-action=${a}]`); if (b) b.disabled = !can; }
   }
   function setColor(color, {keep = true} = {}) {
@@ -198,8 +202,6 @@ export function paintApp(ctx) {
     stage?.fitOnResize();
     try { ctx.api.panelFull?.(full); } catch { /* outside the tavern: this page only */ }
     ctx.doc.documentElement.toggleAttribute('data-paint-full', full);
-    const b = v.root.querySelector('[data-action=paint-full]');
-    if (b) { b.innerHTML = full ? I.unfull : I.full; b.setAttribute('aria-label', full ? '退出全屏' : '全屏'); }
   }
 
   // ---------- 工具 ----------
@@ -225,7 +227,7 @@ export function paintApp(ctx) {
     const sel = !!pic?.selection;
     if (tools.kind === 'select') {
       bar.innerHTML = `<div class="segmented paint-shape">${[['rect', '矩形'], ['lasso', '手绘']].map(([k, l]) => `<button type="button" data-shape="${k}" aria-pressed="${tools.shape === k}">${l}</button>`).join('')}</div>`
-        + btn('sel-invert', '反选', 'chip-button', sel ? '' : 'disabled') + btn('sel-copy', '拷贝成新图层', 'chip-button', sel ? '' : 'disabled') + btn('sel-clear', '清除内容', 'chip-button', sel ? '' : 'disabled') + btn('sel-none', '取消选择', 'chip-button', sel ? '' : 'disabled');
+        + btn('sel-invert', '反选', 'chip-button', sel ? '' : 'disabled') + btn('sel-copy', '拷贝成新图层', 'chip-button', sel ? '' : 'disabled') + btn('sel-clear', '清除内容', 'chip-button', sel ? '' : 'disabled') + btn('sel-none', '取消选择', 'chip-button', sel ? '' : 'disabled') + btn('sel-done', '完成', 'primary');
       bar.hidden = false; return;
     }
     if (tools.kind === 'transform' && pic?.float) {
@@ -237,6 +239,19 @@ export function paintApp(ctx) {
     bar.hidden = true; bar.innerHTML = '';
   }
 
+  /**
+   * 全屏 on: a sheet opens as a small window by the button that opened it, as on Procreate, instead of across the
+   * whole screen. wide: room for two columns (the brush library).
+   */
+  function popover(anchor, wide = false) {
+    if (!full || !anchor?.isConnected) return;
+    const overlay = [...ctx.doc.querySelectorAll('.overlay')].at(-1), sheet = overlay?.querySelector('.sheet');
+    if (!sheet) return;
+    const box = overlay.getBoundingClientRect(), r = anchor.getBoundingClientRect(), width = Math.min(wide ? 460 : 340, box.width - 16), top = Math.round(r.bottom - box.top + 8);
+    overlay.classList.add('pop');
+    Object.assign(sheet.style, {width: width + 'px', left: Math.round(Math.min(Math.max(8, r.left - box.left + r.width / 2 - width / 2), box.width - width - 8)) + 'px', top: top + 'px', maxHeight: Math.max(200, box.height - top - 12) + 'px'});
+  }
+  const toolButton = kind => v.root.querySelector(`[data-action=tool-${kind}]`);
   // ---------- 颜色 ----------
   function colorSheet() {
     const was = tools.color;
@@ -246,6 +261,7 @@ export function paintApp(ctx) {
       <div class="paint-recent" data-recent></div>
       <div class="paint-fill-set"><div class="field"><div class="meter-label"><span>油漆桶的阈值${help('把右上角的颜色圆点拖到画上，就用这个颜色填满那一块（油漆桶）；电脑上也可以按 G 再点。\n\n阈值越大，颜色差得越多也算同一块。\n\n参照：只看正在画的这个图层，或者看整幅画（有「参考」图层时只看参考图层，适合线稿和上色分层）。')}</span><output data-fill-out>${Math.round(tools.fill.threshold * 100)}%</output></div><input class="slider" type="range" min="0" max="60" value="${Math.round(tools.fill.threshold * 100)}" data-fill-threshold></div>
         <div class="segmented" style="margin:0">${[['layer', '参照这个图层'], ['all', '参照整幅画']].map(([k, l]) => `<button type="button" data-fill-sample="${k}" aria-pressed="${tools.fill.sample === k}">${l}</button>`).join('')}</div></div></div>`);
+    popover(v.root.querySelector('.paint-swatch'));
     const c = d.body.querySelector('[data-wheel]'), ratio = Math.min(2, ctx.win.devicePixelRatio || 1);
     c.width = c.height = 240 * ratio; c.style.width = c.style.height = '240px';
     c.getContext('2d')?.scale(ratio, ratio);
@@ -281,7 +297,12 @@ export function paintApp(ctx) {
     if (!g) return;
     const draw = () => {
       g.clearRect(0, 0, w, h);
-      const tip = coloredTip(ctx.doc, brush, getComputedStyle(v.root).getPropertyValue('--ink').trim() || '#222'), size = Math.min(h * .7, Math.max(4, brush.size * .5));
+      if (brush.lasso) {
+        g.fillStyle = ctx.win.getComputedStyle(v.root).getPropertyValue('--ink').trim() || '#222'; g.globalAlpha = brush.opacity;
+        g.beginPath(); g.moveTo(14, h * .62); g.bezierCurveTo(w * .3, -h * .15, w * .7, h * .05, w - 14, h * .38); g.bezierCurveTo(w * .7, h * 1.15, w * .3, h * .95, 14, h * .62); g.fill();
+        g.globalAlpha = 1; return;
+      }
+      const tip = coloredTip(ctx.doc, brush, ctx.win.getComputedStyle(v.root).getPropertyValue('--ink').trim() || '#222'), size = Math.min(h * .7, Math.max(4, brush.size * .5));
       for (let i = 0; i <= 120; i++) {
         const t = i / 120, x = 12 + t * (w - 24), y = h / 2 + Math.sin(t * Math.PI * 2) * h * .22, p = Math.sin(t * Math.PI);
         const st = stampOf(brush, size, p), sz = st.size * taperAt(brush, size, t * (w - 24), w - 24);
@@ -294,19 +315,25 @@ export function paintApp(ctx) {
   }
   function brushSheet(kind) {
     const d = ctx.dialog(kind === 'eraser' ? '橡皮用的笔刷' : kind === 'smudge' ? '涂抹用的笔刷' : '笔刷库', '');
+    // Groups down the left, the chosen group's brushes on the right, as on Procreate. 柳叶笔 fills, so it cannot smudge.
+    let group = brushOf(tools[kindOf(kind)].id).group;
     const paint = () => {
-      const list = allBrushes(ctx.win), mine = tools[kindOf(kind)].id, groups = [...new Set(list.map(b => b.group))];
+      const list = allBrushes(ctx.win).filter(b => kind !== 'smudge' || !b.lasso), mine = tools[kindOf(kind)].id, groups = [...new Set(list.map(b => b.group))];
       const builtGroups = new Set(BRUSHES.map(b => b.group));
-      d.body.innerHTML = `<div class="actions paint-brush-tools"><label class="chip-button file-button">导入笔刷<input type="file" data-brush-file></label>${help('能导入：\n· Procreate 的笔刷（.brushset 一整套，或 .brush 一支）：笔尖形状、名字，还有间距、散布、压力、防抖这些对得上的设置；\n· Photoshop 的笔刷（.abr）：里面的取样笔尖（只有参数、没有图片的笔刷读不出来）；\n· 一张图片：透明 PNG 用它的形状，没有透明的图越黑颜料越多。\n\n纹理（颗粒）、双重笔刷这些还没有，导进来的是笔尖形状。CSP 的 .sut 还读不了。导入后可以在「调整」里改。一组最多 80 支，存在这个浏览器里。')}</div>`
-        + groups.map(gname => `<p class="group-title"><span>${esc(gname)}</span>${builtGroups.has(gname) ? '' : btn('brush-group-delete', '删除这组', 'chip-button', `data-group="${esc(gname)}"`)}</p><div class="pick-list">${list.filter(b => b.group === gname).map(b => `<div class="list-row paint-brush-row${b.id === mine ? ' on' : ''}"><button type="button" class="paint-brush-pick" data-brush="${esc(b.id)}"><strong>${esc(b.name)}</strong><canvas width="220" height="44" data-brush-preview="${esc(b.id)}"></canvas></button>${btn('brush-edit', '调整', 'chip-button', `data-id="${esc(b.id)}"`)}</div>`).join('')}</div>`).join('');
+      if (!groups.includes(group)) group = groups[0];
+      d.body.innerHTML = `<div class="pb-lib"><nav class="pb-groups">${groups.map(gname => `<button type="button" data-brush-group="${esc(gname)}" aria-pressed="${gname === group}">${esc(gname)}</button>`).join('')}
+        <label class="pb-import file-button">＋ 导入<input type="file" data-brush-file aria-label="导入笔刷：Procreate、Photoshop 的笔刷或一张图片"></label></nav>
+        <div class="pb-list">${builtGroups.has(group) ? '' : `<div class="actions">${btn('brush-group-delete', '删除这组', 'chip-button', `data-group="${esc(group)}"`)}</div>`}<div class="pick-list">${list.filter(b => b.group === group).map(b => `<div class="list-row paint-brush-row${b.id === mine ? ' on' : ''}"><button type="button" class="paint-brush-pick" data-brush="${esc(b.id)}"><strong>${esc(b.name)}</strong><canvas width="220" height="44" data-brush-preview="${esc(b.id)}"></canvas></button></div>`).join('')}</div></div></div>`;
       for (const c of d.body.querySelectorAll('[data-brush-preview]')) preview(c, list.find(b => b.id === c.dataset.brushPreview));
     };
+    popover(toolButton(kind), true);
+    d.body.addEventListener('click', e => { const gb = e.target.closest('[data-brush-group]'); if (gb) { group = gb.dataset.brushGroup; paint(); } });
     paint();
     d.body.addEventListener('click', e => {
+      // Tap a brush to use it; tap the one in use again for its settings (as on Procreate).
       const b = e.target.closest('[data-brush]');
+      if (b && b.dataset.brush === tools[kindOf(kind)].id && tools.kind === kind) { d.close(); studio(b.dataset.brush, kind); return; }
       if (b) { const brush = brushOf(b.dataset.brush), t = tools[kindOf(kind)]; t.id = brush.id; t.size = Math.round(brush.size); t.opacity = kind === 'smudge' ? .6 : 1; tools.kind = kind; keepTools(); tipMask(ctx.doc, brush).onready = () => stage?.render(); d.close(); syncTools(); return; }
-      const edit = e.target.closest('[data-action=brush-edit]');
-      if (edit) { d.close(); studio(edit.dataset.id, kind); }
       const group = e.target.closest('[data-action=brush-group-delete]')?.dataset.group;
       if (group) ctx.win.Promise.resolve(ctx.confirm(`删除「${group}」这组笔刷？`, '画好的画不受影响。')).then(ok => {
         if (!ok) return brushSheet(kind);
@@ -325,7 +352,7 @@ export function paintApp(ctx) {
         const brushes = await importBrushFile(ctx.doc, ctx.win, file);
         if (!saveUserBrushes(ctx.win, [...userBrushes(ctx.win), ...brushes])) throw Error('这个浏览器存不下这么多笔刷了，先删掉一些导入的');
         ctx.notify(brushes.length > 1 ? `导入了 ${brushes.length} 支笔刷（「${brushes[0].group}」）` : `导入了笔刷「${brushes[0].name}」`);
-        paint();
+        group = brushes[0].group; paint();
       } catch (error) { ctx.notify('没导入：' + error.message, {error: true}); }
     });
   }
@@ -335,10 +362,11 @@ export function paintApp(ctx) {
     let b = {taper: 0, ...base};
     const d = ctx.dialog(`调整「${base.name}」`, `<canvas class="paint-studio-preview" width="300" height="70" data-studio-preview></canvas>
       <div class="field"><span>名字</span><input data-studio="name" maxlength="30" value="${esc(b.name)}"></div>
-      ${FIELDS.map(([k, label, min, max, step]) => `<div class="field"><div class="meter-label"><span>${label}</span><output data-out="${k}">${k === 'size' ? Math.round(b[k]) : Math.round(b[k] * 100) + '%'}</output></div><input class="slider" type="range" data-studio="${k}" min="${min}" max="${max}" step="${step}" value="${b[k]}"></div>`).join('')}
+      ${FIELDS.filter(([k]) => !base.lasso || k === 'opacity').map(([k, label, min, max, step]) => `<div class="field"><div class="meter-label"><span>${label}</span><output data-out="${k}">${k === 'size' ? Math.round(b[k]) : Math.round(b[k] * 100) + '%'}</output></div><input class="slider" type="range" data-studio="${k}" min="${min}" max="${max}" step="${step}" value="${b[k]}"></div>`).join('')}
       <div class="actions">${built ? btn('studio-reset', '恢复默认', 'secondary') : btn('studio-delete', '删除这个笔刷', 'danger')}${btn('studio-save', '保存', 'primary')}</div>`);
     const show = () => preview(d.body.querySelector('[data-studio-preview]'), b);
     show();
+    popover(toolButton(kind), true);
     d.body.addEventListener('input', e => {
       const k = e.target.dataset.studio;
       if (!k) return;
@@ -359,16 +387,25 @@ export function paintApp(ctx) {
   // ---------- 图层 ----------
   function layerSheet() {
     layersPanel({ctx, pic, color: () => tools.color, changed: ({quiet = false} = {}) => { stage.render(); if (!quiet) { syncSide(); saveSoon(); } }});
+    popover(v.root.querySelector('[data-action=paint-layers]'));
   }
 
   async function actions() {
-    const a = await menu(ctx, work?.name || '作品', [
+    const asked = menu(ctx, work?.name || '作品', [
+      {key: 'select', icon: 'eye', label: tools.kind === 'select' ? '退出选区' : '选区', note: '框选或手绘一块，之后只在里面画'},
+      {key: 'transform', icon: 'swap', label: tools.kind === 'transform' ? '放下（完成变形）' : '变形', note: '移动、缩放、旋转、翻转选区里的东西或整个图层'},
+      canFull() && {key: 'full', icon: 'float', label: full ? '退出全屏' : '全屏', note: full ? '回到小手机里' : '画布铺满整个窗口'},
       {key: 'album', icon: 'image', label: '存到相册', note: '把所有图层合成一张放进相册'},
       {key: 'download', icon: 'download', label: '下载 PNG'},
       {key: 'fit', icon: 'next', label: '适应屏幕', note: '回到整张画都看得见的样子'},
       {key: 'flip', icon: 'swap', label: stage.flipped ? '翻转回来' : '左右翻转画面', note: '只是换个方向看，检查画歪了没有；画本身不变'},
       {key: 'rename', icon: 'edit', label: '重命名'}]);
+    popover(v.root.querySelector('[data-action=paint-actions]'));
+    const a = await asked;
     try {
+      if (a === 'select') useTool(tools.kind === 'select' ? 'brush' : 'select');
+      if (a === 'transform') { if (tools.kind === 'transform') { commitTransform(pic); saveSoon(); useTool('brush'); } else useTool('transform'); }
+      if (a === 'full') setFull(!full);
       if (a === 'album') await toAlbum(pic, work.name);
       if (a === 'download') { const blob = await blobOf(flatten(pic)); if (blob) ctx.notify('已下载 ' + await saveFile(ctx.doc, blob, work.name)); }
       if (a === 'fit') stage.fit();
@@ -387,19 +424,17 @@ export function paintApp(ctx) {
       case 'work-more': await workMenu(el.dataset.id); break;
       case 'paint-gallery': await leaveEditor(); break;
       case 'paint-actions': await actions(); break;
-      case 'paint-full': setFull(!full); break;
       case 'tool-brush': case 'tool-smudge': case 'tool-eraser': {
         const kind = el.dataset.action.slice(5);
         if (tools.kind === kind) brushSheet(kind); else useTool(kind);
         break;
       }
       case 'tool-pick': useTool(tools.kind === 'pick' ? 'brush' : 'pick'); break;
-      case 'tool-select': useTool(tools.kind === 'select' ? 'brush' : 'select'); break;
-      case 'tool-transform': if (tools.kind === 'transform') { commitTransform(pic); saveSoon(); useTool('brush'); } else useTool('transform'); break;
       case 'sel-invert': invertSelection(pic); stage.render(); break;
       case 'sel-copy': if (copySelected(pic)) { stage.render(); syncSide(); saveSoon(); ctx.notify('拷贝成了新图层'); } break;
       case 'sel-clear': if (clearSelected(pic)) { stage.render(); syncSide(); saveSoon(); } else ctx.notify('这个图层锁定了'); break;
       case 'sel-none': setSelection(pic, null); stage.render(); syncBar(); break;
+      case 'sel-done': useTool('brush'); break;
       case 'tf-flip-x': case 'tf-flip-y': { const t = pic.float.t; pic.float.t = el.dataset.action === 'tf-flip-x' ? {...t, sx: -t.sx} : {...t, sy: -t.sy}; stage.render(); break; }
       case 'tf-reset': { const b = pic.float.box; pic.float.t = {cx: b[0] + b[2] / 2, cy: b[1] + b[3] / 2, sx: 1, sy: 1, angle: 0}; stage.render(); break; }
       case 'tf-cancel': cancelTransform(pic); useTool('brush'); break;
@@ -476,16 +511,21 @@ export function paintApp(ctx) {
     if (k === ' ') { e.preventDefault(); stage.space(true); return; }
     const t = current();
     if (k === '[' || k === ']') { t.size = Math.max(1, Math.min(400, Math.round(t.size * (k === ']' ? 1.15 : 1 / 1.15)) + (k === ']' ? 1 : 0))); keepTools(); syncSide(); return; }
-    if (k === 'escape' && pic?.float) { cancelTransform(pic); useTool('brush'); return; }
     if (k === 'enter' && pic?.float) { commitTransform(pic); saveSoon(); useTool('brush'); return; }
-    if (k === 'escape' && pic?.selection) { setSelection(pic, null); stage.render(); syncBar(); return; }
-    if (k === 'escape' && full) { setFull(false); return; }
     const kind = {b: 'brush', s: 'smudge', e: 'eraser', i: 'pick', g: 'fill', l: 'select', v: 'transform'}[k];
     if (kind) useTool(kind);
   }, {signal: keys.signal});
   ctx.doc.addEventListener('keyup', e => { if (e.key === ' ') stage?.space(false); }, {signal: keys.signal});
 
-  v.back = () => { if (mode !== 'edit') return false; leaveEditor(); return true; };
+  // Esc and the phone's back step out of 全屏, 变形 and 选区 first, then out of the picture.
+  v.back = () => {
+    if (mode !== 'edit') return false;
+    if (full) setFull(false);
+    else if (pic?.float) { cancelTransform(pic); useTool('brush'); }
+    else if (pic?.selection) { setSelection(pic, null); stage.render(); syncBar(); }
+    else leaveEditor();
+    return true;
+  };
   v.leave = () => { setFull(false); if (mode === 'edit') { if (pic?.float) { commitTransform(pic); useTool('brush'); } save(); } };
   v.refresh = () => { if (mode === 'gallery') renderGallery(); };
   const dispose = v.dispose;

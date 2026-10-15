@@ -379,6 +379,24 @@ export function setSelection(pic, points, {inverted = false} = {}) {
 }
 export const invertSelection = pic => { if (pic.selection) pic.selection = {...pic.selection, inverted: !pic.selection.inverted}; return pic.selection; };
 export function tracePath(g, points) { g.beginPath(); points.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); }
+/**
+ * 柳叶笔 (as on 画世界): the outline drawn by hand is filled with the colour at once, or, erasing, emptied; inside a
+ * selection only, over paint only with 阿尔法锁定. Undoable. False on a locked layer or an outline with no inside.
+ */
+export function lassoFill(pic, points, {color, erase = false, opacity = 1} = {}) {
+  const layer = activeLayer(pic);
+  if (layer.locked || !layer.g || pic.float || !points || points.length < 3) return false;
+  const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
+  const box = boxIn(pic, [Math.floor(Math.min(...xs)) - 2, Math.floor(Math.min(...ys)) - 2, Math.ceil(Math.max(...xs)) + 2, Math.ceil(Math.max(...ys)) + 2]);
+  if (box[2] < 1 || box[3] < 1) return false;
+  const g = layer.g, before = pixelsOf(pic, layer, box);
+  g.save(); clipSelection(g, pic);
+  g.globalAlpha = clamp(opacity, 0, 1); g.globalCompositeOperation = erase ? 'destination-out' : layer.alphaLock ? 'source-atop' : 'source-over';
+  g.fillStyle = color || '#000000'; tracePath(g, points); g.fill();
+  g.restore();
+  remember(pic, pixelStep(pic, layer, box, before));
+  return true;
+}
 /** Keeps what g draws inside the selection (or outside it, inverted). */
 export function clipSelection(g, pic) {
   const sel = pic.selection;

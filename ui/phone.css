@@ -2414,7 +2414,17 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .paint-recent{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:260px}
 .paint-recent .paint-chip{width:28px;height:28px}
 /* 笔刷 */
-.paint-brush-tools{align-items:center;margin-bottom:6px}
+/* 笔刷库: groups down the left, the group's brushes on the right (as on Procreate). */
+.pb-lib{display:grid;grid-template-columns:minmax(64px,26%) 1fr;gap:10px;align-items:start}
+.pb-groups{position:sticky;top:0;display:flex;flex-direction:column;gap:4px}
+.pb-groups button,.pb-import{min-height:36px;padding:6px 10px;border-radius:11px;text-align:left;font-size:13px;font-weight:800;line-height:1.3;color:var(--ink);background:var(--card2);overflow-wrap:anywhere}
+.pb-groups button[aria-pressed=true]{color:var(--on-accent);background:var(--accent-btn)}
+.pb-import{display:flex;align-items:center;margin-top:6px;color:var(--accent-ink);background:var(--accent-soft)}
+.pb-list{min-width:0}
+.pb-list .paint-brush-row{gap:4px;padding:8px 8px 8px 12px}
+.pb-list .paint-brush-pick canvas{height:38px}
+.pb-list .actions{margin:0 0 6px}
+.pb-list .pick-list{margin:0}
 .paint-brush-row{gap:8px}
 .paint-brush-row.on{box-shadow:inset 0 0 0 2px var(--accent)}
 .paint-brush-pick{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;color:inherit}
@@ -2473,8 +2483,7 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 .paint-top{padding:6px 2px}
 .paint-top .paint-text{min-height:34px;padding:0 5px;font-size:13px}
 .paint-top .paint-tool{width:clamp(24px,calc((100cqw - 76px) / 8),34px);border-radius:10px}
-/* With 全屏 there is one tool more. */
-.paint-top:has([data-action=paint-full]) .paint-tool{width:clamp(22px,calc((100cqw - 92px) / 9),34px)}
+
 .paint-top .paint-tool svg{width:min(22px,calc(100% - 4px));height:auto}
 .paint-top .paint-swatch{width:26px;height:26px;margin:0 3px}
 }
@@ -2498,3 +2507,8 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 :root[data-paint-full] .stage-bar,:root[data-paint-full] .power-key,:root[data-paint-full] .statusbar,:root[data-paint-full] .pull-tab,:root[data-paint-full] .island,:root[data-paint-full] .home-indicator,:root[data-paint-full] .app-nav{display:none!important}
 :root[data-paint-full] .device{width:100%;max-width:none;flex:1;aspect-ratio:auto;border-radius:0;padding:0;background:none!important;box-shadow:none!important}
 :root[data-paint-full] .screen{border-radius:0}
+/* 全屏: sheets open as small windows by their button (ui/paint.js popover), the picture still in sight. */
+:root[data-paint-full] .overlay.pop{display:block;padding:0;background:transparent;animation:none}
+:root[data-paint-full] .overlay.pop .sheet{position:absolute;border-radius:20px;box-shadow:0 14px 40px rgba(0,0,0,.28),0 0 0 1px color-mix(in srgb,var(--ink) 10%,transparent);animation:pop-in .18s ease-out;transform-origin:50% 0}
+@keyframes pop-in{from{opacity:0;transform:scale(.96) translateY(-6px)}}
+.paint-top [data-action=paint-actions][aria-pressed=true]{color:var(--accent-ink);background:var(--accent-soft)}

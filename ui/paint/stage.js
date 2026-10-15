@@ -4,6 +4,7 @@
 // - two fingers pinch, turn and move the picture; a quick pinch in puts the whole picture back on screen; a quick
 //   two-finger tap undoes, three fingers redo;
 // - holding still for a moment picks the colour under the point;
+// - 柳叶笔 (a brush with lasso): draw round a shape and it is filled, or with 橡皮 emptied, when the pen lifts;
 // - 选区: drag a box, or draw round what to select; 变形: drag to move, the corners to scale, the dot above to turn,
 //   two fingers to scale and turn;
 // - on a computer: the wheel zooms where the pointer is, space or the middle button drags the picture.
@@ -28,9 +29,10 @@ export function fitView(pic, w, h) {
  * host: the element the canvas fills. tool(): {kind: 'brush'|'eraser'|'smudge'|'pick'|'fill'|'select'|'transform',
  * brush, size, opacity, color, shape ('rect'|'lasso' for 选区)}. picked(color): the eyedropper found a colour.
  * stroked(): the picture changed. filled(point): 油漆桶 at a point. selected(points): an outline was drawn.
+ * lassoed(points, {erase}): a 柳叶笔 outline to fill (or empty).
  * undo(), redo(), locked(): a stroke on a locked layer.
  */
-export function createStage({doc, win, host, pic, tool, picked, stroked, filled = () => {}, selected = () => {}, undo, redo, locked = () => {}}) {
+export function createStage({doc, win, host, pic, tool, picked, stroked, filled = () => {}, selected = () => {}, lassoed = () => {}, undo, redo, locked = () => {}}) {
   const canvas = doc.createElement('canvas');
   canvas.className = 'paint-view';
   canvas.style.touchAction = 'none';
@@ -85,7 +87,12 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
   }
   function overlays() {
     if (pic.selection && !pic.float) ants(pic.selection.points);
-    if (outline?.points.length > 1) ants(outline.points);
+    if (outline?.fill && outline.points.length > 1) {
+      // 柳叶笔: the shape shows filled as it is drawn (emptying shows light), with its edge.
+      const s = outline.points.map(([x, y]) => toScreen(x, y));
+      g.save(); g.globalAlpha = .55; g.fillStyle = outline.erase ? '#ffffff' : outline.color; tracePath(g, s.map(p => [p.x, p.y])); g.fill(); g.restore();
+      ants(outline.points);
+    } else if (outline?.points.length > 1) ants(outline.points);
     const f = pic.float;
     if (!f) return;
     const c = floatCorners(f).map(([x, y]) => toScreen(x, y)), top = rotateHandle();
@@ -114,6 +121,10 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     if (t.kind === 'pick') { drawing = {id: e.pointerId, pick: true}; pick(at); return; }
     if (t.kind === 'fill') { drawing = {id: e.pointerId, done: true}; filled(at); return; }
     if (t.kind === 'select') { outline = {id: e.pointerId, shape: t.shape, start: at, points: [[at.x, at.y]]}; drawing = {id: e.pointerId, outline: true}; return; }
+    if (t.brush?.lasso && (t.kind === 'brush' || t.kind === 'eraser')) {
+      outline = {id: e.pointerId, shape: 'lasso', fill: true, erase: t.kind === 'eraser', color: t.color, start: at, points: [[at.x, at.y]]};
+      drawing = {id: e.pointerId, outline: true, at: Date.now(), start: at, moved: 0}; return;
+    }
     if (t.kind === 'transform') { startMoving(e, at); return; }
     const brush = {...t.brush, opacity: t.brush.opacity * t.opacity};
     drawing = {id: e.pointerId, start: at, smooth: at, raw: at, moved: 0, at: Date.now(), streamline: brush.streamline};
@@ -127,6 +138,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     if (drawing.done) return;
     if (drawing.outline) {
       const at = point(e), s = outline.start;
+      drawing.moved = Math.max(drawing.moved || 0, Math.hypot(at.sx - (drawing.start?.sx ?? at.sx), at.sy - (drawing.start?.sy ?? at.sy)));
       if (outline.shape === 'rect') outline.points = [[s.x, s.y], [at.x, s.y], [at.x, at.y], [s.x, at.y]];
       else { const last = outline.points.at(-1); if (Math.hypot(at.x - last[0], at.y - last[1]) * view.scale > 2) outline.points.push([at.x, at.y]); }
       later(); return;
@@ -147,7 +159,7 @@ export function createStage({doc, win, host, pic, tool, picked, stroked, filled 
     if (!d) return;
     win.clearTimeout(d.hold);
     if (d.pick || d.done) return;
-    if (d.outline) { const o = outline; outline = null; if (!cancel) selected(o.points); later(); return; }
+    if (d.outline) { const o = outline; outline = null; if (!cancel) { if (o.fill) lassoed(o.points, {erase: o.erase}); else selected(o.points); } later(); return; }
     // The steadied line catches up with where the pen lifted.
     if (!cancel && d.raw && d.raw !== d.smooth) extendStroke(pic, d.raw);
     if (endStroke(pic, {cancel})) stroked();
