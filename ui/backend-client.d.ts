@@ -564,7 +564,9 @@ export interface BackendFacade {
     /** Models offered by the saved GPT image connection. Reads /models without generating an image. */
     gptModels(): Promise<string[]>;
     /** ComfyUI through the tavern: connection check and what it offers. url: an address not saved yet. */
-    comfyCatalog(url?: string): Promise<{ models: Array<{ value: string; text: string }>; samplers: string[]; schedulers: string[] }>;
+    comfyCatalog(url?: string): Promise<{ models: Array<{ value: string; text: string; loader: 'checkpoint' | 'unet' | 'gguf' }>; samplers: string[]; schedulers: string[]; vaes: string[] }>;
+    /** CLIPLoader's files and types (for a model loaded on its own), read like the LoRA list. */
+    comfyClips(options?: {transport?: 'tavern' | 'direct'; signal?: AbortSignal}): Promise<{ clips: string[]; types: string[] }>;
     /** Workflows saved in the tavern's own image generation (file names), and one of them as text. */
     comfyWorkflows(): Promise<string[]>;
     comfyWorkflow(name: string): Promise<string>;

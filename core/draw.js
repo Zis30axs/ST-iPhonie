@@ -454,6 +454,19 @@ export function castList(settings, only = null) {
   if (!roles.length) return wanted ? '（这段剧情里还没有登记的角色）' : '（还没有登记的角色）';
   return roles.map(r => !r.appearance?.trim() ? `${r.name}（还没有外貌）` : genderOf(r.appearance) ? `${r.name}（${genderOf(r.appearance)}）` : r.name).join('；');
 }
+/**
+ * Who the picture rules name: the open card's own people (its characters, the roles met in its story) and who speaks
+ * now. Every registered role across all cards made a long list to pick from. null (everyone) when there is no card
+ * and nobody speaks. space: the card open now ({key, members}); speakers: names from the recent story.
+ */
+export function drawCast(settings, space, speakers = []) {
+  const names = new Set((speakers || []).map(n => String(n).trim()).filter(Boolean));
+  if (space?.key) {
+    for (const n of space.members || []) names.add(String(n));
+    for (const r of settings.routes || []) if (Array.isArray(r.cards) && r.cards.includes(space.key)) names.add(r.name);
+  }
+  return names.size || space?.key ? [...names] : null;
+}
 function ruleText(settings, p, format, contract, only = null) {
   const count = countOf(p), list = castList(settings, only);
   const fill = t => t.replaceAll('{{出图格式}}', format).replaceAll('{{角色列表}}', list).replaceAll('{{出图数量}}', String(count));
@@ -598,22 +611,24 @@ export function paragraphs(message) {
   return (story.length ? story : out).map(({aside, ...p}) => p);
 }
 /** Chat-style request asking for the picture blocks of one reply. before: [{name, text}] earlier messages. */
-export function planRequest(settings, {message, before = [], preset} = {}) {
+export function planRequest(settings, {message, before = [], preset, only = null, lore = ''} = {}) {
   const p = activePreset(settings.draw, preset);
-  const {entries, fill, tail} = ruleText(settings, p, PLAN_TAG_FORMAT, planContract);
+  const {entries, fill, tail} = ruleText(settings, p, PLAN_TAG_FORMAT, planContract, only);
   const system = entries.map(e => fill(e.text)).join('\n\n') + '\n\n' + tail;
-  const context = before.length ? `【前情】\n${before.map(m => `${m.name}：${m.text}`).join('\n')}\n\n` : '';
+  // 世界书: the entries the tavern would turn on for this story (the phone's choice of books), for era, places and looks.
+  const context = (lore.trim() ? `【世界书】（这个世界和人物的设定，定时代、地点、服装和长相时参考）\n${lore.trim()}\n\n` : '')
+    + (before.length ? `【前情】\n${before.map(m => `${m.name}：${m.text}`).join('\n')}\n\n` : '');
   const body = paragraphs(message).map((x, i) => `[P${i + 1}] ${x.text}`).join('\n');
   return [{role: 'system', content: system}, {role: 'user', content: `${context}【这段正文】\n${body}\n\n（请输出 ${countOf(p)} 个出图块。）`}];
 }
 /** 「从剧情生成」 in the drawing app: a request of its own (no story preset, no chain of thought), worded for the engine. */
-export function suggestRequest(settings, {before = []} = {}) {
+export function suggestRequest(settings, {before = [], only = null} = {}) {
   const gpt = settings.draw?.engine === 'gpt';
   const system = [
     '你是绘图提示词助手。根据给出的剧情，写出最有画面感的一幕的绘图提示词。',
     gpt ? '用英文写，逗号分隔，danbooru tag 和简短的英文短语都可以：人数、动作、表情、服装、场景、光线、构图。不写露骨内容。'
       : '用英文 danbooru tag，逗号分隔：人数（1girl、2girls 等）、动作、表情、服装、场景、光线、构图。',
-    ...peopleRules(settings),
+    ...peopleRules(settings, [], only),
     ...sentenceRule(settings),
     '不写画师名和质量词。只输出提示词，不要思考过程、解释、标题或任何标签。',
     ...(n => n ? [`现在用 NovelAI ${n.name}，上限约 ${n.limit} token，画风已占约 ${n.head}，这一行还能写约 ${n.left} token（大约 ${n.tags} 个 tag）。这是上限，不是目标：写准、写具体，画面里有的都写清楚（动作、姿势、表情、视线、服装和配饰、光线、镜头、背景），但不为了凑长度重复、堆近义词或加画面里没有的东西；不要超过。`] : [])(gpt ? null : budgetNumbers(settings))
@@ -647,8 +662,8 @@ function sentenceRule(settings) {
     '描述句的规矩：tag 是主体，句子只补充不代替；不写人名，用 the girl、the boy、the woman、the man 这类；不写比喻（不用 like、as if、resembling 这类词）；不写画不出来的抽象词（孤独、温柔、命运这类），每句只写看得见的东西。',
     seen, ...(n === 1 ? [concrete] : [])];
 }
-function peopleRules(settings, cast = []) {
-  const known = drawable(settings).map(r => r.name).filter(n => !cast.some(c => sameName(c, n)));
+function peopleRules(settings, cast = [], only = null) {
+  const known = drawable(settings).map(r => r.name).filter(n => (!only || only.includes(n)) && !cast.some(c => sameName(c, n)));
   return [
     cast.length ? `画面里的人：${cast.join('、')}。插件会另外加上他们各自的固定外貌，你不用写外貌，写人数 tag 和他们在做什么。` : '',
     known.length ? `登记好外貌的人物：${known.join('、')}。画面里有他们时，提示词里不写外貌，在最后单独写一行「人物：名字、名字」（名字一字不差），插件会按名字补上外貌；没有就不写这一行。` : '',
@@ -660,14 +675,14 @@ function peopleRules(settings, cast = []) {
  * filled out to the NovelAI budget like the story's pictures. cast: the names of the people added in the 角色 tab
  * (their looks are added by the plugin; the model only writes what they do).
  */
-export function writeRequest(settings, {idea = '', cast = []} = {}) {
+export function writeRequest(settings, {idea = '', cast = [], only = null} = {}) {
   const gpt = settings.draw?.engine === 'gpt', n = gpt ? null : budgetNumbers(settings);
   const system = [
     '你是绘图提示词助手。把用户想画的画面写成一行绘图提示词。',
     gpt ? '用英文写，逗号分隔，danbooru tag 和简短的英文短语都可以。不写露骨内容。'
       : '用英文 danbooru tag，逗号分隔：人数（1girl、2girls、1boy 1girl 等）、动作、姿势、表情、视线、服装和配饰、场景和背景、光线、镜头和构图、氛围。',
     '用户写的可能是中文、可能很短：按这个意思补成一幅完整、有画面感的图，没说的细节你来定，但不要改掉想要的东西。',
-    ...peopleRules(settings, cast),
+    ...peopleRules(settings, cast, only),
     ...sentenceRule(settings),
     '不写画师名和质量词。只输出提示词，不要思考过程、解释、标题或任何标签。',
     n ? `现在用 NovelAI ${n.name}，上限约 ${n.limit} token，画风已占约 ${n.head}，这一行还能写约 ${n.left} token（大约 ${n.tags} 个 tag）。这是上限，不是目标：写准、写具体，画面里有的都写清楚（动作、姿势、表情、视线、服装和配饰、光线、镜头、背景），但不为了凑长度重复、堆近义词或加画面里没有的东西；不要超过。` : ''

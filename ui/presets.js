@@ -3,6 +3,7 @@ import {icon, glyph} from './icons.js';
 import {APPS} from './apps.js';
 import {MARK_CHOICES} from '../core/voice-fx.js';
 import {CONTRACT_PROMPT, READING_PROMPT} from '../core/protocol.js';
+import {saveFile} from '../download.js';
 // The voice preset's rule entries that can go back to what ships.
 const RULE_DEFAULTS = {contract: CONTRACT_PROMPT, reading: READING_PROMPT};
 
@@ -14,6 +15,26 @@ const KINDS = [['tts', '配音', 'listen'], ['chat', '聊天', 'chat'], ['draw',
 const USES = [['dm', '私聊'], ['group', '群聊'], ['moments', '朋友圈'], ['call', '电话'], ['forum', '论坛'], ['peek', '查手机'], ['story', '正文']];
 // Drawing rules: which engines an entry is sent with (none ticked or all ticked: every engine).
 const ENGINE_USES = [['nai', 'NovelAI'], ['gpt', 'GPT 生图'], ['comfy', 'ComfyUI']];
+// One preset as a file (导出 / 导入): to keep, to share, or to hand to an AI to rewrite and bring back.
+export const PRESET_FILE = 'st-iphonie-preset';
+/**
+ * A preset file read back: {kind, preset} (no id: it is saved as a new preset). A bare preset (an AI may hand back
+ * just that) counts as the kind being shown. Entries are checked here; the rest is checked when it is saved.
+ */
+export function readPresetFile(text, shownKind) {
+  let data; try { data = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { throw Error('这个文件不是预设（不是有效的 JSON）'); }
+  const wrapped = data?.format === PRESET_FILE, preset = wrapped ? data.preset : data, kind = wrapped ? data.kind : shownKind;
+  if (!KINDS.some(k => k[0] === kind)) throw Error('认不出这是哪一类预设');
+  if (!preset || typeof preset !== 'object' || Array.isArray(preset) || !Array.isArray(preset.entries)) throw Error('文件里没有预设的条目');
+  const ids = new Set(), entries = preset.entries.filter(e => e && typeof e === 'object' && typeof e.text === 'string').map(e => {
+    let id = typeof e.id === 'string' && /^[\w-]{1,64}$/.test(e.id) && !ids.has(e.id) ? e.id : crypto.randomUUID();
+    ids.add(id);
+    return {...e, id, title: String(e.title ?? '').slice(0, 80), enabled: e.enabled !== false};
+  });
+  if (!entries.length) throw Error('文件里没有预设的条目');
+  const {id, ...rest} = preset;
+  return {kind, preset: {...rest, name: String(rest.name || '').trim().slice(0, 60) || '导入的预设', entries}};
+}
 
 export function presetsApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'presets'), drafts = new Map();
@@ -59,7 +80,7 @@ export function presetsApp(ctx) {
           ? '聊天预设决定手机里的联系人怎么回消息、朋友圈怎么发、能看到多少剧情，以及“带进剧情”时怎么写进下一次正文。每条规则可以选用在私聊、群聊还是朋友圈。手机聊天和朋友圈单独生成，不会写进正文。'
           : '配音预设让模型把台词写成带 TTS 标签的格式。角色配音不在预设里，切换预设不会改动角色。')}</div>`;
     }
-    v.draw(heading('预设', btn('add-preset', icon('add'), 'round-button', `aria-label="新增${label}预设"`), 'Preset · 3 类') + tabs + body);
+    v.draw(heading('预设', btn('add-menu', icon('add'), 'round-button', `aria-label="新增${label}预设"`), 'Preset · 3 类') + tabs + body);
   }
 
   /** The 世界书 line: how much is left out (picked in a sheet), and the tags cleaned away (status bars). */
@@ -312,12 +333,21 @@ export function presetsApp(ctx) {
     const index = Number(el.dataset.index);
     switch (el.dataset.action) {
       case 'kind': kind = el.dataset.kind; render(); break;
-      case 'add-preset':
-        currentKind = kind;
-        current = drafts.get(kind + ':new') || {...shipped(kind), name: kind === 'chat' ? '新聊天预设' : kind === 'draw' ? '新出图规则' : '新预设'};
-        drafts.set(kind + ':new', current);
-        render();
+      // ＋: a new preset, or one from a file (a label holds the file input, so phones open the picker on the tap).
+      case 'add-menu': {
+        const label = KINDS.find(k => k[0] === kind)[1];
+        const d = ctx.dialog('新增' + label + '预设', `<div class="pick-list">
+          <button type="button" class="list-row" data-pick="new">${icon('add')}<span><strong>新建</strong><small>从默认内容开始改</small></span></button>
+          <label class="list-row file-button">${icon('import')}<span><strong>从文件导入</strong><small>导出过的预设文件，或 AI 改好的</small></span><input type="file" accept=".json,application/json,text/plain" aria-label="选择预设文件"></label></div>`);
+        d.body.querySelector('[data-pick=new]').addEventListener('click', () => { d.close(); newPreset(); });
+        d.body.querySelector('input[type=file]').addEventListener('change', async e => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          d.close();
+          try { await importPreset(file); } catch (error) { ctx.notify(error.message, {error: true}); }
+        });
         break;
+      }
       case 'edit-preset': edit(el.dataset.kind || 'tts', el.dataset.id); break;
       // Adds the shipped preset again, for when it was deleted or edited beyond repair. Nothing else changes.
       case 'restore-default': {
@@ -343,9 +373,11 @@ export function presetsApp(ctx) {
         const picked = await menu(ctx, current.name || '预设', [
           {key: 'preview', icon: 'eye', label: '发送预览', note: '看看发给模型的是什么'},
           {key: 'reset', icon: 'refresh', label: '恢复成默认内容', note: '条目、格式和插入位置换成默认的，名字不变'},
+          {key: 'export', icon: 'download', label: '导出成文件', note: '整份存成一个文件，可以交给 AI 改，改好从「＋」导入'},
           current.id && {key: 'delete', icon: 'trash', label: '删除预设', danger: true}]);
         if (picked === 'preview') preview();
         if (picked === 'reset') await resetContent();
+        if (picked === 'export') await exportPreset();
         if (picked === 'delete' && await ctx.confirm('删除这个预设？', '角色配音和画风不会被删除。')) { ops(currentKind).remove(current.id); drafts.delete(currentKind + ':' + current.id); current = null; render(); }
         break;
       }
@@ -356,6 +388,31 @@ export function presetsApp(ctx) {
       }
     }
   });
+  function newPreset() {
+    currentKind = kind;
+    current = drafts.get(kind + ':new') || {...shipped(kind), name: kind === 'chat' ? '新聊天预设' : kind === 'draw' ? '新出图规则' : '新预设'};
+    drafts.set(kind + ':new', current);
+    render();
+  }
+  /** The preset as it is now (unsaved edits too), without its id: one file. */
+  async function exportPreset() {
+    const {id, ...preset} = structuredClone(current), label = KINDS.find(k => k[0] === currentKind)[1];
+    const text = JSON.stringify({format: PRESET_FILE, version: 1, kind: currentKind, preset}, null, 2);
+    try { ctx.notify('已导出 ' + await saveFile(ctx.doc, new Blob([text], {type: 'application/json'}), `${label}预设 ${current.name || ''}`.trim())); }
+    catch (error) { ctx.notify(error.message, {error: true}); }
+  }
+  /** A preset file saved as a new preset of its kind (a name already used gets a number), then opened. */
+  async function importPreset(file) {
+    if (file.size > 2000000) throw Error('文件太大了，不像是一个预设');
+    const {kind: k, preset} = readPresetFile(await file.text(), kind);
+    const names = ops(k).list().map(p => p.name);
+    let name = preset.name, n = 2;
+    while (names.includes(name)) name = `${preset.name}（${n++}）`;
+    const saved = ops(k).save({...shipped(k), ...preset, name});
+    kind = k;
+    edit(k, saved.id);
+    ctx.notify(`已导入「${saved.name}」${saved.id === ops(k).active() ? '' : '，要用它就点下面的「使用」'}`);
+  }
   // Puts the shipped rules, format and insertion back into this preset; its name stays. Saving makes it stick.
   async function resetContent() {
     if (!await ctx.confirm('恢复成默认内容？', '这个预设的条目、格式和插入位置会换成默认的，名字不变。保存之后才生效，不保存就不会改动。')) return;

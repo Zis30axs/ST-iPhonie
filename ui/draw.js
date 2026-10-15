@@ -193,12 +193,14 @@ export function drawApp(ctx) {
       <div class="row-heading"><strong>出图参数 ${help('这里只显示工作流留给插件填写的参数。工作流写死的值由工作流决定，需要在 ComfyUI 修改后重新导入。改动马上保存进正在用的方案。')}</strong>${btn('comfy-read', icon('refresh'), 'round-button', 'aria-label="刷新模型和采样器"')}</div>
       ${info?.error ? `<div class="comfy-note error-copy">列表读取失败，可手填 ${help(info.error)}</div>` : ''}
       ${has('model') ? field('模型', choose('comfy-model', c.model, info?.models, '刷新列表，或填模型文件名')) : `<div class="comfy-note">模型由工作流指定 ${help('当前工作流没有模型占位符，模型选择保留在工作流内。')}</div>`}
+      ${has('clip') ? `${info?.clipError ? `<div class="comfy-note error-copy">CLIP 列表读不到，可手填 ${help(info.clipError)}</div>` : ''}${field('CLIP', choose('comfy-clip', c.clip, info?.clips, 'CLIP 文件名，如 qwen_3_06b_base.safetensors'), '这个模型的文本编码器单独放在 ComfyUI 的 text_encoders（或 clip）文件夹里，选它对应的那个。')}`
+        + field('CLIP 类型', choose('comfy-clipType', c.clipType, info?.clipTypes, 'stable_diffusion'), '按模型说明选，和 ComfyUI 里「加载 CLIP」节点的类型一样。') : ''}
+      ${has('vae') ? field('VAE', choose('comfy-vae', c.vae, info?.vaes, 'VAE 文件名'), '将潜在图像解码成图片的模型，文件要先安装在 ComfyUI。') : ''}
       ${has('width') && has('height') ? `<div class="field"><span>画幅</span><div class="size-chips">${SIZES.map(([k, label, w, h]) => `<button data-action="comfy-size" data-size="${k}" aria-pressed="${size === k}"><i style="width:${w / 100}px;height:${h / 100}px"></i>${label}<small>${w}×${h}</small></button>`).join('')}</div></div>` : ''}
       <div class="comfy-strengths">${has('width') ? field('宽度', input('comfy-width', c.width, 'number', 'min="64" max="4096" step="8"')) : ''}${has('height') ? field('高度', input('comfy-height', c.height, 'number', 'min="64" max="4096" step="8"')) : ''}</div>
       ${slider('steps', '步数', 1, 150)}${slider('scale', '提示词相关性 CFG', 0, 30, .1)}
       ${has('sampler') ? field('采样器', choose('comfy-sampler', c.sampler, info?.samplers, 'euler_ancestral')) : ''}
       ${has('scheduler') ? field('噪声调度', choose('comfy-scheduler', c.scheduler, info?.schedulers, 'normal')) : ''}
-      ${has('vae') ? field('VAE', input('comfy-vae', c.vae, 'text', 'placeholder="VAE 文件名"'), '将潜在图像解码成图片的模型，文件要先安装在 ComfyUI。') : ''}
       ${slider('clipSkip', 'CLIP Skip', 1, 12)}
       ${has('seed') ? `<div class="field"><span>种子${help('填 -1 或留空表示每次随机。种子属于本次出图，不写进方案。')}</span><div class="inline-row">${input('seed', seed >= 0 ? seed : '', 'number', 'min="-1" placeholder="随机"')}${btn('dice', icon('dice'), 'round-button', 'aria-label="随机一个种子"')}</div></div>` : ''}
     </div>`;
@@ -208,6 +210,11 @@ export function drawApp(ctx) {
     let info;
     try { info = await api.comfyCatalog(url); }
     catch (error) { info = {error: error.message, models: [], samplers: [], schedulers: []}; }
+    // CLIP files and types (for a model loaded on its own): read like the LoRA list; without them they are typed.
+    if (!info.error) {
+      try { const clip = await api.comfyClips(); info = {...info, clips: clip.clips, clipTypes: clip.types}; }
+      catch (error) { info = {...info, clipError: error.message}; }
+    }
     if (!v.disposed && token === comfyRequest && url === state().comfy.url) { comfyInfo = info; render(); }
   }
 
@@ -255,7 +262,12 @@ export function drawApp(ctx) {
   // ComfyUI fields: a select from 读取, or a typed name when nothing was read.
   v.on('change', '[data-field=comfy-preset]', el => plans.choose(el.value));
   // ComfyUI parameters are saved into the scheme in use as soon as they change.
-  v.on('change', '[data-field^=comfy-]:not([data-field=comfy-preset])', el => { try { api.saveDraw({comfy: {[el.dataset.field.slice(6)]: el.value.trim()}}); } catch (error) { ctx.notify(error.message, {error: true}); } render(); });
+  // A model picked from the list brings its kind: a UNet or GGUF model is loaded with its own CLIP and VAE.
+  v.on('change', '[data-field^=comfy-]:not([data-field=comfy-preset])', el => {
+    const key = el.dataset.field.slice(6), patch = {[key]: el.value.trim()};
+    if (key === 'model') { const m = comfyInfo?.models?.find(x => x.value === el.value); if (m?.loader) patch.loader = m.loader; }
+    try { api.saveDraw({comfy: patch}); } catch (error) { ctx.notify(error.message, {error: true}); } render();
+  });
   v.on('input', '[data-comfy]', el => { el.previousElementSibling.querySelector('output').textContent = el.dataset.comfy === 'scale' ? Number(el.value).toFixed(1) : el.value; });
   v.on('change', '[data-comfy]', el => { api.saveDraw({comfy: {[el.dataset.comfy]: Number(el.value)}}); render(); });
   v.on('input', '[data-lora-strength]', el => loras.slide(el));

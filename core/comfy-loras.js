@@ -1,6 +1,6 @@
 // Native ComfyUI LoRA editing. All operations copy the API graph; custom nodes stay untouched.
 const TYPES = new Set(['LoraLoader', 'LoraLoaderModelOnly']);
-const SOURCES = {CheckpointLoaderSimple: 2, CheckpointLoader: 2, LoraLoader: 2, LoraLoaderModelOnly: 1, UNETLoader: 1};
+const SOURCES = {CheckpointLoaderSimple: 2, CheckpointLoader: 2, LoraLoader: 2, LoraLoaderModelOnly: 1, UNETLoader: 1, UnetLoaderGGUF: 1};
 const portsFor = node => Object.hasOwn(SOURCES, node?.class_type) ? SOURCES[node.class_type] : 0;
 const link = v => Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && Number.isInteger(v[1]) && v[1] >= 0;
 const same = (a, b) => link(a) && a[0] === b[0] && a[1] === b[1];

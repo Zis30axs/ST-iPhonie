@@ -224,8 +224,29 @@ export const DEFAULT_COMFY_WORKFLOW = JSON.stringify({
   8: {class_type: 'VAEDecode', inputs: {samples: ['3', 0], vae: ['4', 2]}},
   9: {class_type: 'SaveImage', inputs: {filename_prefix: 'ST-iPhonie', images: ['8', 0]}}
 }, null, 2);
+/**
+ * The same for a model kept on its own (ComfyUI's diffusion_models: anima, Flux and the like), whose text encoder
+ * and VAE are separate files: UNETLoader (or the GGUF loader) + CLIPLoader + VAELoader. The tavern's model list says
+ * which kind a model is ("UNet: …", "GGUF: …"); a checkpoint in the plain loader, or a UNet in it, fails.
+ */
+const unetWorkflow = loader => JSON.stringify({
+  3: {class_type: 'KSampler', inputs: {cfg: '%scale%', denoise: 1, latent_image: ['5', 0], model: ['4', 0], negative: ['7', 0], positive: ['6', 0], sampler_name: '%sampler%', scheduler: '%scheduler%', seed: '%seed%', steps: '%steps%'}},
+  4: loader === 'gguf' ? {class_type: 'UnetLoaderGGUF', inputs: {unet_name: '%model%'}} : {class_type: 'UNETLoader', inputs: {unet_name: '%model%', weight_dtype: 'default'}},
+  5: {class_type: 'EmptyLatentImage', inputs: {batch_size: 1, height: '%height%', width: '%width%'}},
+  6: {class_type: 'CLIPTextEncode', inputs: {clip: ['10', 0], text: '%prompt%'}},
+  7: {class_type: 'CLIPTextEncode', inputs: {clip: ['10', 0], text: '%negative_prompt%'}},
+  8: {class_type: 'VAEDecode', inputs: {samples: ['3', 0], vae: ['11', 0]}},
+  9: {class_type: 'SaveImage', inputs: {filename_prefix: 'ST-iPhonie', images: ['8', 0]}},
+  10: {class_type: 'CLIPLoader', inputs: {clip_name: '%clip%', type: '%clip_type%'}},
+  11: {class_type: 'VAELoader', inputs: {vae_name: '%vae%'}}
+}, null, 2);
+export const COMFY_LOADERS = ['checkpoint', 'unet', 'gguf'];
+/** The built-in workflow for a scheme: the one that loads the kind of model chosen. */
+export const defaultWorkflow = c => c?.loader === 'unet' || c?.loader === 'gguf' ? unetWorkflow(c.loader) : DEFAULT_COMFY_WORKFLOW;
+/** The kind of a model in the tavern's list, from how it names it. */
+export const loaderOf = text => /^UNet:/i.test(String(text || '')) ? 'unet' : /^GGUF:/i.test(String(text || '')) ? 'gguf' : 'checkpoint';
 export const COMFY_LIMITS = {workflow: 300000, presets: 20};
-const COMFY_DEFAULT_PARAMS = {model: '', vae: '', sampler: 'euler_ancestral', scheduler: 'normal', steps: 28, scale: 6, width: 832, height: 1216, clipSkip: 2};
+const COMFY_DEFAULT_PARAMS = {model: '', loader: 'checkpoint', clip: '', clipType: 'stable_diffusion', vae: '', sampler: 'euler_ancestral', scheduler: 'normal', steps: 28, scale: 6, width: 832, height: 1216, clipSkip: 2};
 export const COMFY_PARAM_KEYS = Object.keys(COMFY_DEFAULT_PARAMS);
 export const defaultComfy = () => ({url: 'http://127.0.0.1:8188', loraTransport: 'tavern', workflow: '', disabledLoras: [], ...COMFY_DEFAULT_PARAMS, style: '', activeWorkflow: 'default', workflows: [{id: 'default', name: '默认工作流', workflow: '', disabledLoras: [], ...COMFY_DEFAULT_PARAMS}]});
 
@@ -255,7 +276,7 @@ export function comfyParams(c) {
   const n = (v, min, max, fallback, step = 1) => { const x = Number(v); return Number.isFinite(x) ? Math.min(max, Math.max(min, Math.round(x / step) * step)) : fallback; };
   const word = (v, fallback) => { const s = String(v ?? '').trim(); return s.length <= 300 ? s : fallback; };
   return {
-    model: word(c.model, ''), vae: word(c.vae, ''), sampler: word(c.sampler, base.sampler) || base.sampler, scheduler: word(c.scheduler, base.scheduler) || base.scheduler,
+    model: word(c.model, ''), loader: COMFY_LOADERS.includes(c.loader) ? c.loader : base.loader, clip: word(c.clip, ''), clipType: word(c.clipType, base.clipType) || base.clipType, vae: word(c.vae, ''), sampler: word(c.sampler, base.sampler) || base.sampler, scheduler: word(c.scheduler, base.scheduler) || base.scheduler,
     steps: n(c.steps, 1, 150, base.steps), scale: n(c.scale, 0, 30, base.scale, .1),
     width: n(c.width, 64, 4096, base.width, 8), height: n(c.height, 64, 4096, base.height, 8), clipSkip: n(c.clipSkip, 1, 12, base.clipSkip)
   };
@@ -336,15 +357,18 @@ export function comfyPrompt({prompt = '', negative = '', characters = []} = {}) 
 
 /** The workflow with every placeholder filled; a placeholder left over is named so the user can fix the workflow. */
 export function fillWorkflow(text, values) {
-  let out = String(text || DEFAULT_COMFY_WORKFLOW);
+  let out = String(text || defaultWorkflow(values));
   for (const [name, value] of Object.entries(values)) out = out.replaceAll(`"%${name}%"`, JSON.stringify(value));
   const left = workflowPlaceholders(out);
   if (left.length) throw Error('工作流里有插件不认识的占位符：' + left.map(x => `%${x}%`).join('、') + '。请在 ComfyUI 里把它们换成具体的值');
   return out;
 }
 export function comfyValues(c, {prompt, negative, width, height, seed}) {
-  if (!c.model && (!c.workflow || workflowPlaceholders(c.workflow).includes('model'))) throw Error('还没有选 ComfyUI 的模型，请在绘画 App 的参数里选择');
-  return {prompt, negative_prompt: negative, seed, steps: c.steps, scale: c.scale, width, height, sampler: c.sampler, scheduler: c.scheduler, model: c.model, vae: c.vae, denoise: 1, clip_skip: -c.clipSkip};
+  const used = workflowPlaceholders(c.workflow || defaultWorkflow(c));
+  if (!c.model && used.includes('model')) throw Error('还没有选 ComfyUI 的模型，请在绘画 App 的参数里选择');
+  if (!c.clip && used.includes('clip')) throw Error('这个模型要单独加载 CLIP（文本编码器），请在绘画 App 的参数里选择');
+  if (!c.vae && used.includes('vae')) throw Error('这个模型要单独加载 VAE，请在绘画 App 的参数里选择');
+  return {prompt, negative_prompt: negative, seed, steps: c.steps, scale: c.scale, width, height, sampler: c.sampler, scheduler: c.scheduler, model: c.model, loader: c.loader, clip: c.clip, clip_type: c.clipType, vae: c.vae, denoise: 1, clip_skip: -c.clipSkip};
 }
 
 /** Calls the tavern's ComfyUI proxy. headers: the tavern's request headers (CSRF token). */
@@ -374,15 +398,29 @@ export async function comfyCatalog({fetch = globalThis.fetch, headers = {}, url}
   if (ping.status === 404) throw Error('这个酒馆没有 ComfyUI 转发接口（/api/sd/comfy），请更新酒馆');
   if (!ping.ok) throw Error(comfyDown(url));
   const read = async path => { const r = await tavern(fetch, headers, path, {url}); if (!r.ok) return []; try { return await r.json(); } catch { return []; } };
-  const [models, samplers, schedulers] = await Promise.all([read('models'), read('samplers'), read('schedulers')]);
-  return {models: (Array.isArray(models) ? models : []).map(m => typeof m === 'string' ? {value: m, text: m} : {value: String(m.value), text: String(m.text || m.value)}),
-    samplers: (Array.isArray(samplers) ? samplers : []).map(String), schedulers: (Array.isArray(schedulers) ? schedulers : []).map(String)};
+  const [models, samplers, schedulers, vaes] = await Promise.all([read('models'), read('samplers'), read('schedulers'), read('vaes')]);
+  return {models: (Array.isArray(models) ? models : []).map(m => typeof m === 'string' ? {value: m, text: m, loader: 'checkpoint'} : {value: String(m.value), text: String(m.text || m.value), loader: loaderOf(m.text)}),
+    samplers: (Array.isArray(samplers) ? samplers : []).map(String), schedulers: (Array.isArray(schedulers) ? schedulers : []).map(String), vaes: (Array.isArray(vaes) ? vaes : []).map(String)};
 }
 /** Native node metadata; no third-party manager. Direct mode never sends tavern headers or cookies. */
 export async function comfyLoras({fetch = globalThis.fetch, url, transport = 'tavern', signal}) {
-  const endpoint = comfyUrl(url) + '/object_info/LoraLoader';
+  const data = await comfyNode({fetch, url, transport, signal, node: 'LoraLoader', what: 'LoRA 列表'});
+  const spec = data?.LoraLoader?.input?.required?.lora_name;
+  const names = Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options;
+  if (!Array.isArray(names) || names.some(n => typeof n !== 'string')) throw Error('ComfyUI 没有返回原生 LoraLoader 文件列表，请检查版本和节点是否正常');
+  return [...new Set(names.filter(n => n && n.length <= 1000))].sort((a, b) => a.localeCompare(b));
+}
+/** CLIPLoader's files and types, for a model loaded on its own ({clips, types}). The tavern has no endpoint for it. */
+export async function comfyClips({fetch = globalThis.fetch, url, transport = 'tavern', signal}) {
+  const data = await comfyNode({fetch, url, transport, signal, node: 'CLIPLoader', what: 'CLIP 列表'});
+  const req = data?.CLIPLoader?.input?.required || {};
+  const list = spec => (Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options || []).filter(n => typeof n === 'string' && n && n.length <= 1000);
+  return {clips: [...new Set(list(req.clip_name))].sort((a, b) => a.localeCompare(b)), types: [...new Set(list(req.type))]};
+}
+async function comfyNode({fetch, url, transport, signal, node, what}) {
+  const endpoint = comfyUrl(url) + '/object_info/' + node;
   const direct = transport === 'direct';
-  if (!['tavern', 'direct'].includes(transport)) throw Error('LoRA 列表读取方式无效');
+  if (!['tavern', 'direct'].includes(transport)) throw Error(what + '读取方式无效');
   // AbortSignal.any / .timeout are missing on older iPhones (Safari before 17.4): one controller does both.
   const control = new AbortController(), timer = setTimeout(() => control.abort(), 15000);
   if (signal) { if (signal.aborted) control.abort(); else signal.addEventListener('abort', () => control.abort(), {once: true}); }
@@ -392,19 +430,15 @@ export async function comfyLoras({fetch = globalThis.fetch, url, transport = 'ta
   catch (error) {
     clearTimeout(timer);
     if (signal?.aborted) throw error;
-    throw Error(direct ? '浏览器读不到 ComfyUI 的 LoRA 列表：请检查地址和跨域设置。手机不能用电脑的 127.0.0.1，可改用酒馆代理；也可手填文件名。' : '酒馆代理读不到 LoRA 列表：请检查 ComfyUI 地址和连接；也可手填文件名。');
+    throw Error(direct ? `浏览器读不到 ComfyUI 的${what}：请检查地址和跨域设置。手机不能用电脑的 127.0.0.1，可改用酒馆代理；也可手填文件名。` : `酒馆代理读不到${what}：请检查 ComfyUI 地址和连接；也可手填文件名。`);
   }
   clearTimeout(timer);
   const text = await response.text();
   if (!response.ok) {
-    if (!direct && /CORS proxy is disabled/i.test(text)) throw Error('酒馆代理尚未开启：在酒馆 config.yaml 设置 enableCorsProxy: true 后重启，或选择浏览器直连。也可以先手填已安装的 LoRA 文件名。');
-    throw Error(`LoRA 列表读取失败（HTTP ${response.status}），请检查连接方式和 ComfyUI 地址；也可手填文件名。`);
+    if (!direct && /CORS proxy is disabled/i.test(text)) throw Error('酒馆代理尚未开启：在酒馆 config.yaml 设置 enableCorsProxy: true 后重启，或选择浏览器直连。也可以先手填文件名。');
+    throw Error(`${what}读取失败（HTTP ${response.status}），请检查连接方式和 ComfyUI 地址；也可手填文件名。`);
   }
-  let data; try { data = JSON.parse(text); } catch { throw Error('LoRA 接口返回的不是 JSON，请检查地址是否指向 ComfyUI'); }
-  const spec = data?.LoraLoader?.input?.required?.lora_name;
-  const names = Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options;
-  if (!Array.isArray(names) || names.some(n => typeof n !== 'string')) throw Error('ComfyUI 没有返回原生 LoraLoader 文件列表，请检查版本和节点是否正常');
-  return [...new Set(names.filter(n => n && n.length <= 1000))].sort((a, b) => a.localeCompare(b));
+  try { return JSON.parse(text); } catch { throw Error(what + '接口返回的不是 JSON，请检查地址是否指向 ComfyUI'); }
 }
 /** The workflows saved in the tavern (its image generation settings): names, and one's text. */
 export async function tavernWorkflows({fetch = globalThis.fetch, headers = {}}) {

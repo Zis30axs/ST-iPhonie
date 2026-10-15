@@ -18,7 +18,7 @@ import { normalizeSounds, soundRow, readPack, missingKey, soundName, packRows, P
 import { decodeMono, encodeWav } from './audio-join.js';
 import { BACKUP_PARTS, PART_STORES, writeBackup, readBackup, sealKeys, openKeys } from './backup.js';
 import { WALLET_LIMITS, PREMIUM, DECOR_KINDS, SHOP_GIFTS, LEDGER_KINDS, premiumOf, decorKey, cents, yuan, shopGifts, normalizeGift, validateGift } from './wallet.js';
-import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
+import { gptModels, DRAW_ENGINES, DRAW_ENGINE_NAMES, GPT_IMAGE_MODELS, GPT_QUALITIES, normalizeGpt, gptBase, gptSize, gptPrompt, gptGenerate, normalizeComfy, comfyUrl, checkWorkflow, workflowPlaceholders, COMFY_LIMITS, comfySize, comfyPrompt, comfyValues, fillWorkflow, comfyGenerate, comfyCatalog, comfyLoras, comfyClips, defaultWorkflow, tavernWorkflows, tavernWorkflow, orientationOf, DEFAULT_COMFY_WORKFLOW, COMFY_PARAM_KEYS, applyComfyWorkflow } from './image-engines.js';
 import {activeLoraWorkflow, normalizeDisabledLoras, inspectLoras, editLoras, pickLoraSource} from './comfy-loras.js';
 import { normalizeSettings, validateSettings, modelRules, freshState } from './state.js';
 import { normalizeRoute, switchRouteEngine, removeRoute, withRoles, findRoute, cleanAliases } from './routes.js';
@@ -31,7 +31,7 @@ import { AudioCache } from './cache.js';
 import { DialoguePlayer } from './player.js';
 import { LocalLibrary, PHONE_APPS, PHONE_WALLPAPERS, PHONE_GLYPHS, PHONE_SKINS } from './library.js';
 import { NovelAIClient, relayUrl, FISH_PATHS, NAI_MODELS, NAI_MODEL_NAMES, NAI_SAMPLERS, NAI_SCHEDULES, buildImageRequest, guardParams, isFree, isV5, normalizeDrawParams } from './novelai.js';
-import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
+import { PIC_TAG_FORMAT, DEFAULT_DRAW_RULE, DRAW_COUNT_MAX, PRESET_REV as DRAW_PRESET_REV, drawPromptPlan, planRequest, drawCast, validateDrawPreset, normalizeDraw, defaultDraw, normalizeVibeSettings, applyImageConnection } from './draw.js';
 import { normalizeStickers, defaultChat, normalizeChatPreset, normalizeContact, validateChatPreset, validateContact, chatContacts, inSpace, activeSpace, buildChatRequest, activeChatPreset, normalizeVoiceText, normalizeProfile , normalizeAvatars, normalizeNames, normalizeProactive } from './chat.js';
 import { ChatStore, money, currentDm } from './chats.js';
 import { DrawQueue } from './draw-queue.js';
@@ -908,10 +908,10 @@ export class TTSBackend {
      * and whether the original workflow can be put back.
      */
     comfyLoraInfo() {
-        const c = this.settings.draw.comfy, row = c.workflows.find(p => p.id === c.activeWorkflow), workflow = row.workflow || DEFAULT_COMFY_WORKFLOW;
+        const c = this.settings.draw.comfy, row = c.workflows.find(p => p.id === c.activeWorkflow), workflow = row.workflow || defaultWorkflow(row);
         const info = inspectLoras(workflow);
         // controls: the parameters the workflow leaves to the plugin (only these are shown); missing: what stops a picture.
-        const controls = workflowPlaceholders(workflow).map(k => k === 'clip_skip' ? 'clipSkip' : k);
+        const controls = workflowPlaceholders(workflow).map(k => k === 'clip_skip' ? 'clipSkip' : k === 'clip_type' ? 'clipType' : k);
         return clone({ ...info, disabled: row.disabledLoras || [], auto: pickLoraSource(workflow), builtIn: row.id === 'default', restorable: !!row.sourceWorkflow && row.sourceWorkflow !== row.workflow,
             controls, missing: controls.includes('model') && !c.model ? '还没有选模型：在「参数」里读取模型列表再选一个' : '' });
     }
@@ -928,7 +928,8 @@ export class TTSBackend {
             if (c.workflows.length >= COMFY_LIMITS.presets) throw Error(`最多保存 ${COMFY_LIMITS.presets} 套 ComfyUI 方案，请先删掉一套`);
             const stem = '默认工作流 · LoRA'; let name = stem, n = 2;
             while (c.workflows.some(p => p.name === name)) name = `${stem} (${n++})`;
-            row = { ...clone(row), id: crypto.randomUUID(), name, workflow: DEFAULT_COMFY_WORKFLOW, sourceWorkflow: DEFAULT_COMFY_WORKFLOW, disabledLoras: [] };
+            const workflow = defaultWorkflow(row);
+            row = { ...clone(row), id: crypto.randomUUID(), name, workflow, sourceWorkflow: workflow, disabledLoras: [] };
             c.workflows.push(row); copied = true;
         }
         const add = change.add ? { ...change.add, source: change.add.source || pickLoraSource(row.workflow) } : undefined;
@@ -1064,9 +1065,14 @@ export class TTSBackend {
         if (draft) validateDrawPreset(draft);
         const draw = this.settings.draw, used = draft || draw.presets.find(p => p.id === draw.activePreset) || draw.presets[0];
         // 'separate' mode: the request made after a reply, with a stand-in for the reply.
-        if (draw.mode === 'separate') return planRequest(this.settings, { message: '（这里是刚写好的正文，第一段）\n（第二段……每一段前面会标上 [P1]、[P2]）', preset: used })
-            .map(m => `【${m.role}】\n${m.content}`).join('\n\n');
-        return drawPromptPlan(this.settings, used).map(entry => entry.text).join('\n\n');
+        // The 名单 of the card open now (who speaks next is not known here: they are added when the request is made).
+        const only = this.drawCast();
+        if (draw.mode === 'separate') {
+            const lore = activeChatPreset(this.settings.chat).lore === false ? '' : '（这里是酒馆这次会触发的世界书条目，按手机「读哪些世界书」的选择）';
+            return planRequest(this.settings, { message: '（这里是刚写好的正文，第一段）\n（第二段……每一段前面会标上 [P1]、[P2]）', preset: used, only, lore })
+                .map(m => `【${m.role}】\n${m.content}`).join('\n\n');
+        }
+        return drawPromptPlan(this.settings, used, only).map(entry => entry.text).join('\n\n');
     }
     async naiSubscription(refresh = false) {
         this.assertOpen();
@@ -1288,6 +1294,7 @@ export class TTSBackend {
     async gptModels() { this.assertOpen(); return gptModels({ fetch: this.imageFetch, settings: this.settings.draw.gpt, key: this.gptKey }); }
     /** ComfyUI: connection check and what it offers (models, samplers, schedulers). url: an address not saved yet. */
     async comfyCatalog(url) { this.assertOpen(); return comfyCatalog({ fetch: this.imageFetch, headers: this.tavernHeaders(), url: comfyUrl(url ?? this.settings.draw.comfy.url) }); }
+    async comfyClips({transport, signal} = {}) { this.assertOpen(); const c = this.settings.draw.comfy; return comfyClips({fetch: this.imageFetch, url: c.url, transport: transport ?? c.loraTransport, signal}); }
     async comfyLoras({transport, signal} = {}) { this.assertOpen(); const c = this.settings.draw.comfy; return comfyLoras({fetch: this.imageFetch, url: c.url, transport: transport ?? c.loraTransport, signal}); }
     async comfyWorkflows() { this.assertOpen(); return tavernWorkflows({ fetch: this.imageFetch, headers: this.tavernHeaders() }); }
     async comfyWorkflow(name) { this.assertOpen(); return tavernWorkflow({ fetch: this.imageFetch, headers: this.tavernHeaders(), name: String(name || '') }); }
@@ -1301,7 +1308,7 @@ export class TTSBackend {
         }
         const c = comfy || draw.comfy, seed = p.seed >= 0 ? p.seed : Math.floor(Math.random() * 4294967295);
         const text = comfyPrompt({ prompt, negative, characters });
-        const workflow = fillWorkflow(activeLoraWorkflow(c.workflow || DEFAULT_COMFY_WORKFLOW, c.disabledLoras), comfyValues(c, { prompt: text.prompt, negative: text.negative, width: p.width, height: p.height, seed }));
+        const workflow = fillWorkflow(activeLoraWorkflow(c.workflow || defaultWorkflow(c), c.disabledLoras), comfyValues(c, { prompt: text.prompt, negative: text.negative, width: p.width, height: p.height, seed }));
         const blob = await comfyGenerate({ fetch: this.imageFetch, headers: this.tavernHeaders(), url: c.url, workflow, signal });
         return { blob, seed, params: { model: c.model || '工作流', width: p.width, height: p.height, steps: c.steps, scale: c.scale, sampler: c.sampler }, prompt: text.prompt };
     }
@@ -1899,6 +1906,8 @@ export class TTSBackend {
     /** The card open now, whether 分区 is on or not: new things remember the card they were made in, so turning 分区 on
      *  later sorts them. ('' when no card is open: shared.) */
     cardKey() { return this.space.key || ''; }
+    /** Who the picture rules name: the open card's people and the given speakers (null: everyone). */
+    drawCast(speakers = []) { return drawCast(this.settings, this.space, speakers); }
     /** The roles that speak in a card's story belong to that card's contacts. Saved only when something changed. */
     tagRoles(names, key = this.space.key) {
         if (!key || !names?.length) return false;
@@ -2279,7 +2288,7 @@ export class TTSBackend {
             voiceBalance: (engine, refresh) => this.voiceBalance(engine, refresh), keyStatus: engine => this.keyStatus(engine), keyHint: engine => this.keyHint(engine), keyPool: engine => this.keyPool(engine), keyList: engine => this.keyList(engine), addKeys: (engine, value) => this.addKeys(engine, value), removeKey: (engine, index) => this.removeKey(engine, index), useKey: (engine, index) => this.useKey(engine, index), setKey: (engine, key) => this.setKey(engine, key), clearKey: engine => this.clearKey(engine),
             saveDraw: patch => this.saveDraw(patch), saveStyle: style => this.saveStyle(style), deleteStyle: id => this.deleteStyle(id),
             imageConnectionList: engine => this.imageConnectionList(engine), saveImageConnection: (engine, patch) => this.saveImageConnection(engine, patch), selectImageConnection: (engine, id) => this.selectImageConnection(engine, id), deleteImageConnection: (engine, id) => this.deleteImageConnection(engine, id),
-            drawReady: () => this.drawReady(), drawMissing: () => this.drawMissing(), paidPrompt: () => this.paidPrompt(), comfyCatalog: url => this.comfyCatalog(url), comfyWorkflows: () => this.comfyWorkflows(), comfyWorkflow: name => this.comfyWorkflow(name),
+            drawReady: () => this.drawReady(), drawMissing: () => this.drawMissing(), paidPrompt: () => this.paidPrompt(), comfyCatalog: url => this.comfyCatalog(url), comfyClips: options => this.comfyClips(options), comfyWorkflows: () => this.comfyWorkflows(), comfyWorkflow: name => this.comfyWorkflow(name),
             saveComfyWorkflow: patch => this.saveComfyWorkflow(patch), selectComfyWorkflow: id => this.selectComfyWorkflow(id), deleteComfyWorkflow: id => this.deleteComfyWorkflow(id),
             comfyLoraInfo: () => this.comfyLoraInfo(), editComfyLoras: change => this.editComfyLoras(clone(change || {})), restoreComfyWorkflow: () => this.restoreComfyWorkflow(),
             comfyLoras: options => this.comfyLoras(options),

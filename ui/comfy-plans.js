@@ -2,6 +2,7 @@
 // Like everything else in the phone, a change is saved at once; "另存为新方案" keeps a copy before trying things out.
 import {esc, btn, field, input, select, help, groupTitle} from './common.js';
 import {icon} from './icons.js';
+import {defaultWorkflow} from '../core/image-engines.js';
 
 export function comfyPlans(ctx, render) {
   const {api} = ctx;
@@ -57,7 +58,7 @@ export function comfyPlans(ctx, render) {
           case 'plan-rename': { const saved = api.saveComfyWorkflow({id: row.id, name: d.body.querySelector('[data-field=comfy-name]').value}); done('改名为「' + saved.name + '」'); break; }
           case 'plan-copy': {
             const name = (builtIn ? '我的方案' : (d.body.querySelector('[data-field=comfy-name]')?.value.trim() || row.name) + ' 副本').slice(0, 60);
-            const workflow = row.workflow || api.drawCatalog.comfyWorkflow;
+            const workflow = row.workflow || defaultWorkflow(row);
             const saved = api.saveComfyWorkflow({name, workflow, sourceWorkflow: row.sourceWorkflow || workflow, disabledLoras: row.disabledLoras, params: row});
             done('另存为「' + saved.name + '」并换成它'); break;
           }

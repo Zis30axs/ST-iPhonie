@@ -14,7 +14,8 @@ import {parsePictures, pictureInputs, planRequest, insertPlanned, withoutPicture
 import {tokenBudget, loadCounter, countField, tagCost, estimateTokens} from './core/tokens.js';
 import {openImageViewer} from './image-viewer.js';
 import {downloadAction} from './download.js';
-import {plainStory} from './core/chat.js';
+import {plainStory, activeChatPreset} from './core/chat.js';
+import {worldInfoFor, loreOptions} from './host-lore.js';
 import {voicePlanRequest, combinedRequest, insertVoiced} from './core/voice-plan.js';
 import {withPhone, phoneSection} from './core/chat.js';
 import {TIER_NAMES, NAI_MODEL_NAMES} from './core/novelai.js';
@@ -26,7 +27,7 @@ const versionsOf = record => !record ? [] : Array.isArray(record.versions) ? rec
  * voice: 回复后单独配音 ({wanted(), has(text), rules(), format()}): whether it is on, whether a reply already has its
  * lines voiced, the voice preset's prompt for the speakers and its 台词格式. Without it replies are never voiced here.
  */
-export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null, phone = null}) {
+export function createPictureHost({context, redrawMessage = (id, message) => context().updateMessageBlock?.(id, message), settings, backend, marker, scheduleRender, openDraw, notice, voice = null, phone = null, speakers = () => []}) {
   const jobs = new Map(); // queue key -> {state: 'generating'|'error', message}
   const folds = new Map(); // `${id}:${hash}` -> true/false, this session's fold choice per picture
   // The latest single tap on a picture: {key, id, message, tag, was, at, rect, timer, done}. It folds or unfolds the
@@ -112,6 +113,20 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   }
 
   const planning = new Set();
+  /** Who the rules may name: the open card's people and who speaks now (core/draw.js drawCast). */
+  const castNow = () => backend.drawCast?.(speakers()) ?? null;
+  /** 世界书 for planning pictures: what the tavern would turn on for this story, through the phone's choice of books. */
+  async function storyLore(prior, source) {
+    const preset = activeChatPreset(settings().chat);
+    if (preset.lore === false) return '';
+    return worldInfoFor(context, {...loreOptions(preset), persona: String(context()?.powerUserSettings?.persona_description || '').slice(0, 1500),
+      texts: [...prior.map(m => `${m.name}: ${m.text}`), plainStory(withoutPictures(source))]});
+  }
+  /** The picture planner's request for one reply, with the story's 世界书 and the card's 名单. */
+  async function pictureRequest(id, source) {
+    const prior = before(id);
+    return planRequest(settings(), {message: source, before: prior, only: castNow(), lore: await storyLore(prior, source)});
+  }
   /** Earlier messages for the planner: names and plain text, oldest first. */
   function before(id, limit = 2) {
     const chat = context().chat, out = [];
@@ -136,7 +151,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     try {
       const source = force ? withoutPictures(message.mes) : message.mes;
       const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
-      const reply = await backend.generateText(ctx, {prompt: planRequest(s, {message: source, before: before(id)}), trimNames: false, responseLength: Math.min(4000, 500 + preset.count * 400)});
+      const reply = await backend.generateText(ctx, {prompt: await pictureRequest(id, source), trimNames: false, responseLength: Math.min(4000, 500 + preset.count * 400)});
       if (context().chat[id] !== message) return false;
       const {text, count} = insertPlanned(source, reply);
       if (!count) throw Error('这次没有挑出画面，可以在小手机的「设置 → 正文」里点「给最新回复配图」再试一次');
@@ -160,7 +175,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     try {
       const source = force && wantPictures ? withoutPictures(message.mes) : message.mes, format = voice?.format();
       const preset = s.draw.presets.find(p => p.id === s.draw.activePreset) || s.draw.presets[0];
-      const pictures = wantPictures ? planRequest(s, {message: source, before: before(id)}) : null;
+      const pictures = wantPictures ? await pictureRequest(id, source) : null;
       const asked = wantVoice && wantPictures ? combinedRequest({rules: voice.rules(), format, pictures})
         : wantVoice ? voicePlanRequest({rules: voice.rules(), format, message: source, before: before(id)}) : pictures;
       // 正文联动手机: what happens on the phone is asked for at the end of the same request (【手机】).
@@ -442,7 +457,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
     // preset, or the custom API. The tavern's quiet generation would carry the whole story preset, and with it a
     // chain of thought or XML template the model then writes out.
     const ctx = context(), chat = ctx.chat || [];
-    const prompt = suggestRequest(settings(), {before: before(chat.length, 6)});
+    const prompt = suggestRequest(settings(), {before: before(chat.length, 6), only: castNow()});
     const reply = await backend.generateText(ctx, {prompt, trimNames: false, responseLength: promptLength(settings())});
     const result = readSuggestion(settings(), reply);
     if (!result.prompt) throw Error('模型没有写出提示词，再试一次');
@@ -480,7 +495,7 @@ export function createPictureHost({context, redrawMessage = (id, message) => con
   /** 帮我写: a prompt line for what the user describes (a few words, Chinese is fine). */
   async function writePrompt(idea, cast = []) {
     if (!String(idea || '').trim()) throw Error('先说说想画什么');
-    const names = (Array.isArray(cast) ? cast : []).map(String).slice(0, 8), prompt = writeRequest(settings(), {idea, cast: names});
+    const names = (Array.isArray(cast) ? cast : []).map(String).slice(0, 8), prompt = writeRequest(settings(), {idea, cast: names, only: castNow()});
     const reply = await backend.generateText(context(), {prompt, trimNames: false, responseLength: promptLength(settings())});
     const result = readSuggestion(settings(), reply);
     if (!result.prompt) throw Error('模型没有写出提示词，再试一次');
