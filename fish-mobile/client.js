@@ -1,3 +1,4 @@
+import {mcpHttpError} from './mcp-errors.js';
 /** Phone-only Fish OAuth + MCP experiment. No Node, cookies, popup callbacks or intermediary server. */
 export const DEFAULTS = Object.freeze({endpoint: 'https://api.fish.audio/mcp', redirectURI: 'http://127.0.0.1:3789/oauth/callback', clientId: '', scope: ''});
 export class MobileError extends Error {
@@ -301,7 +302,7 @@ export class MobileFishClient {
     if (this.protocol) headers['MCP-Protocol-Version'] = this.protocol;
     const {response: r, done} = await this.request(this.config.endpoint, {method: 'POST', headers, body: JSON.stringify({jsonrpc: '2.0', ...(notification ? {} : {id}), method, params})}, 'MCP ' + method, 120000);
     try {
-      if (!r.ok) fail('MCP ' + method, `服务返回 HTTP ${r.status}；未自动重发。`, `http_${r.status}`);
+      if (!r.ok) fail('MCP ' + method, (r.status === 401 || r.status === 403) ? await mcpHttpError(r) : `服务返回 HTTP ${r.status}；未自动重发。`, `http_${r.status}`);
       if (r.headers.get('Mcp-Session-Id')) this.sessionId = r.headers.get('Mcp-Session-Id');
       if (notification) { await r.body?.cancel(); return null; }
       const answer = await readRpc(r, id);

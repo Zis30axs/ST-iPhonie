@@ -61,3 +61,10 @@ node --test fish-mobile/test/client.test.mjs
 如果校验通过，但 Safari 仍提示缺少这两个参数，建议用「复制登录链接」，把整个 URL 粘贴 Safari 地址栏；如果仍失败，可能是授权端点的重定向链丢失参数，或 Fish 对动态客户端的注册要求。请只提供页面错误文字或「复制脱敏诊断」，不要发原始授权链接、回调 URL、Token。
 
 本次只是客户端前置诊断和链接恢复改进，尚未证明 Fish iOS OAuth 真机登录成功。
+## MCP initialize 403 诊断
+
+新增 iPhone 原生 MCP 只读对照检查。它仅获取工具清单，不提交语音生成。需要明确确认后才会创建临时连接；无论成功失败都尝试移除。若提示清理失败，请手动到 MCP Manager 移除临时连接。
+
+请把 WebView 和原生 MCP 两种测试结果作对比：只有浏览器被拒时优先调查 Origin；两者都被拒时检查 Fish 账号权限与授权范围。不会自动重试。
+
+新增本地测试：`node --test fish-mobile/test/native-probe.test.mjs`。
