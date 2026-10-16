@@ -31,7 +31,20 @@ test('native cleanup failure requires manual removal',async()=>{
   const x=host({removeError:true});await assert.rejects(probeNativeMcp(x.host,'https://api.fish.audio/mcp','test'),/立即.*删除/);
 });
 test('native does not write token without MCP host',async()=>{
-  await assert.rejects(probeNativeMcp({},'https://api.fish.audio/mcp','test'),/原生 MCP API/);
+  await assert.rejects(probeNativeMcp({},'https://api.fish.audio/mcp','test'),e=>e.code==='native_mcp_unavailable');
+});
+test('native waits for TauriTavern bootstrap before checking the MCP API',async()=>{
+  const x=host(), pending={};
+  pending.ready=Promise.resolve().then(()=>{pending.api=x.host.api;});
+  const r=await probeNativeMcp(pending,'https://api.fish.audio/mcp','test-secret');
+  assert.equal(r.count,1);
+});
+test('native refresh errors retain operation and HTTP category without raw Bearer text',async()=>{
+  const x=host();x.host.api.mcp.servers.refresh=async()=>{throw Error('upstream HTTP 403 Bearer test-secret');};
+  await assert.rejects(probeNativeMcp(x.host,'https://api.fish.audio/mcp','test-secret'),e=>{
+    assert.equal(e.code,'http_403');assert.equal(e.operation,'refresh');assert.ok(!e.message.includes('test-secret'));return true;
+  });
+  assert.equal(x.calls.at(-1)[0],'remove');
 });
 const resp=(status,body,auth='')=>new Response(body,{status,headers:auth?{'www-authenticate':auth}:{}});
 test('403 invalid Origin classification redacts raw body',async()=>{

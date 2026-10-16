@@ -1,12 +1,14 @@
-# Fish MCP · iPhone 直连实验 v0.1.1
+# Fish MCP · Windows / iOS 直连实验 v0.1.2
 
-入口：TauriTavern 的扩展设置 → ST-iPhonie → **Fish iPhone 直连实验**。
+入口：扩展设置 → ST-iPhonie → **Fish MCP 直连实验**。
+
+Windows 普通浏览器和 iOS Safari 都没有 TauriTavern 原生宿主；只有支持 MCP API 的 TauriTavern App 才能执行原生 MCP 对照检查。`webCrypto=true` 仅说明 PKCE 可用，`authorized=true` 仅说明本机保存了令牌，两者均不证明 MCP 已连接。
 
 这个入口不运行 Node、不连接自建桥接器，不需要电脑常驻或修改 IPA。它在扩展前端发出标准 OAuth/MCP HTTP 请求。**实现完成不等于真实 Fish 授权已经通过**：服务端回调注册策略、WebView CORS、Safari 失败跳转后的地址复制行为仍待真机验证。
 
 ## 手机测试
 
-1. 更新 `feature/fish-mcp-integration` 分支并完整重启 TauriTavern，打开上面的入口。
+1. 更新本 Fork 的 `main` 分支并完整重启 App，打开上面的入口；扩展版本应为 `0.7.83-fish-mobile.4`，诊断版本为 `fish-mobile/0.1.2`。
 2. 点击“生成登录链接”；复制到 Safari 或点击“在浏览器打开”。在 Fish 官方页面登录并选择有 Plus 的团队。
 3. 授权后复制包含 `code` 和 `state` 的完整回调 URL，回到实验入口粘贴，点击“交换令牌”。默认回调是 `http://127.0.0.1:3789/oauth/callback`，**手机上没有监听服务器**；这是手动接收流程，不是让你启动 localhost 服务。若地址栏没有 code/state，或 Fish 拒绝该 redirect_uri，就尚未完成此步。
 4. 点击“读取工具”，选择真实的语音合成工具；音色先用 `default`、语言 `zh`、模型留空，点击“生成试听”。仅此按钮会调用所选工具，可能消耗套餐积分。工具名和参数来自真实 tools/list，不硬编码假工具名。
@@ -32,7 +34,7 @@
 
 默认 Fish 端点使用 HTTPS。高级参数只有在你信任对应服务时才修改；HTTP 是明文。修改连接参数会丢弃之前保存的授权，避免把旧令牌发送到新服务。
 
-## 验证
+## 历史验证（0.1.0 / 0.1.1）
 
 在开发环境运行：
 
@@ -68,3 +70,27 @@ node --test fish-mobile/test/client.test.mjs
 请把 WebView 和原生 MCP 两种测试结果作对比：只有浏览器被拒时优先调查 Origin；两者都被拒时检查 Fish 账号权限与授权范围。不会自动重试。
 
 新增本地测试：`node --test fish-mobile/test/native-probe.test.mjs`。
+
+## 0.1.2：Windows / Tauri 原生 MCP 检测修复
+
+- 从当前窗口及可访问的同源父窗口寻找宿主，等待 `host.ready` / `__TAURITAVERN_MAIN_READY__`；Tauri IPC 先于宿主注入时有界等待。不会把通用 `__TAURI__` 当成 MCP 插件，也不会跨源读取父页面。
+- 区分普通浏览器、Tauri 但无宿主、MCP 方法缺失、初始化超时/失败、注册/启用/发现阶段，以及原生 HTTP 401/403。支持宿主 `Error` 和原始 Tauri `CommandError` 错误形状，只输出固定分类文字，不输出 Bearer、原始错误体或请求头。
+- 原生检查按 `create → setState(active) → refresh → remove` 执行；成功或失败均清理临时注册，清理失败保留显著的手动删除提示。旧 iOS OAuth 入口使用同一实现。
+- 只有完整 `tools/list` 成功才显示 `connected=true`。初始化、通知、分页或网络失败均清除旧会话和工具目录，界面同时清空旧选择并禁用试听；付费请求的结果未知标记仍保留，不自动重试。
+- 原生发现成功只表示对照检查成功。TauriTavern 当前公开契约没有供第三方扩展通用使用的原生工具调用 API；`tools.testCall` 属于第一方 Manager 测试，不用它自动代替 HTTP 语音调用。
+
+2026-10-16 本地验证：
+
+```sh
+node --test fish-mobile/test/*.test.mjs
+cd fish-mcp-bridge
+npm test
+```
+
+直连客户端/宿主回归 **53 项通过**，含真实 loopback HTTP OAuth 测试；本地桥接器回归 **55 项通过**；Windows 本地 Edge/Chromium UI **6 个场景通过**，含同源 iframe、延迟宿主、403 清理、单次模拟生成和 WAV 实际解码。原生宿主、OAuth 令牌和语音服务使用测试替身，没有使用真实账号生成或验证 iOS 真机。
+
+另对真实 Fish endpoint 发出不带凭据的只读 initialize，分别不带 Origin、带 `http://tauri.localhost`、`tauri://localhost`、`http://127.0.0.1:8000`，四种均返回 HTTP 401 / Bearer challenge。此结果只能证明该网络路径可达，不能证明用户已授权请求的 403 已解决，也不能凭此断言原因是 Origin。
+
+新脱敏诊断提供 `environment`（宿主位置、Tauri marker、MCP 方法完整性）和 `nativeProbe.status/operation`。如果仍为 403，可据此区分宿主失败与实际服务端拒绝，再核对 Fish 登录时所选团队和令牌权限。无需分享 Token 或回调 URL。
+
+契约依据：[TauriTavern MCP API](https://github.com/Darkatse/TauriTavern/blob/main/docs/API/MCP.md)、[宿主初始化](https://github.com/Darkatse/TauriTavern/blob/main/src/tauri/main/bootstrap.js)、[Fish MCP 官方说明](https://docs.fish.audio/overview/mcp)。

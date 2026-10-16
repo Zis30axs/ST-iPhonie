@@ -174,7 +174,7 @@ export class MobileFishClient {
     try { this.storage.setItem(this.storageKey, JSON.stringify(this.state)); }
     catch { fail('本机存储', '无法保存登录状态，请检查 App 网站存储。'); }
   }
-  resetMcp() { this.sessionId = ''; this.protocol = ''; this.ready = false; this.catalog = null; this.lastAudio = null; }
+  resetMcp() { this.sessionId = ''; this.protocol = ''; this.initialized = false; this.ready = false; this.catalog = null; this.lastAudio = null; }
   configure(value) {
     if (this.busy || this.refreshing) fail('配置', '请求仍在执行。');
     const next = {...DEFAULTS, ...value};
@@ -296,12 +296,14 @@ export class MobileFishClient {
     return this.refreshing;
   }
   async rpc(method, params = {}, notification = false) {
-    const token = await this.accessToken(), id = ++this.sequence;
-    const headers = {Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json', Authorization: 'Bearer ' + token};
-    if (this.sessionId) headers['Mcp-Session-Id'] = this.sessionId;
-    if (this.protocol) headers['MCP-Protocol-Version'] = this.protocol;
-    const {response: r, done} = await this.request(this.config.endpoint, {method: 'POST', headers, body: JSON.stringify({jsonrpc: '2.0', ...(notification ? {} : {id}), method, params})}, 'MCP ' + method, 120000);
+    let done = () => {};
     try {
+      const token = await this.accessToken(), id = ++this.sequence;
+      const headers = {Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json', Authorization: 'Bearer ' + token};
+      if (this.sessionId) headers['Mcp-Session-Id'] = this.sessionId;
+      if (this.protocol) headers['MCP-Protocol-Version'] = this.protocol;
+      const pending = await this.request(this.config.endpoint, {method: 'POST', headers, body: JSON.stringify({jsonrpc: '2.0', ...(notification ? {} : {id}), method, params})}, 'MCP ' + method, 120000);
+      const r = pending.response; done = pending.done;
       if (!r.ok) fail('MCP ' + method, (r.status === 401 || r.status === 403) ? await mcpHttpError(r) : `服务返回 HTTP ${r.status}；未自动重发。`, `http_${r.status}`);
       if (r.headers.get('Mcp-Session-Id')) this.sessionId = r.headers.get('Mcp-Session-Id');
       if (notification) { await r.body?.cancel(); return null; }
@@ -309,27 +311,31 @@ export class MobileFishClient {
       if (answer.error) fail('MCP ' + method, `服务器返回 JSON-RPC 错误 ${answer.error.code}。`, 'rpc_error');
       if (!Object.hasOwn(answer, 'result')) fail('MCP', '响应缺少 result。');
       return answer.result;
-    } catch (e) { if (e instanceof MobileError) throw e; fail('MCP ' + method, '读取结果失败或超时，执行结果可能未知；没有自动重发。', 'outcome_unknown'); }
+    } catch (e) { this.resetMcp(); if (e instanceof MobileError) throw e; fail('MCP ' + method, '读取结果失败或超时，执行结果可能未知；没有自动重发。', 'outcome_unknown'); }
     finally { done(); }
   }
   async connect() {
-    if (this.ready) return;
-    const r = await this.rpc('initialize', {protocolVersion: '2025-06-18', capabilities: {}, clientInfo: {name: 'st-iphonie-fish-mobile', version: '0.1.0'}});
-    if (typeof r.protocolVersion !== 'string') fail('MCP 握手', '缺少协议版本。');
-    this.protocol = r.protocolVersion; await this.rpc('notifications/initialized', {}, true); this.ready = true;
+    if (this.initialized) return;
+    try {
+      const r = await this.rpc('initialize', {protocolVersion: '2025-06-18', capabilities: {}, clientInfo: {name: 'st-iphonie-fish-mobile', version: '0.1.2'}});
+      if (typeof r?.protocolVersion !== 'string' || !r.protocolVersion) fail('MCP 握手', '缺少协议版本。');
+      this.protocol = r.protocolVersion; await this.rpc('notifications/initialized', {}, true); this.initialized = true;
+    } catch (e) { this.resetMcp(); throw e; }
   }
   async listTools() {
     return this.exclusive(async () => {
-      await this.connect(); const all = [], seen = new Set(); let cursor;
-      do {
-        const r = await this.rpc('tools/list', cursor ? {cursor} : {});
-        if (!Array.isArray(r.tools)) fail('工具列表', 'tools 不是数组。');
-        all.push(...r.tools); cursor = r.nextCursor;
-        if (cursor && seen.has(cursor)) fail('工具列表', '分页 cursor 循环。');
-        if (cursor) seen.add(cursor);
-        if (all.length > 10000) fail('工具列表', '工具数超过上限。');
-      } while (cursor);
-      this.catalog = all; return all;
+      try {
+        await this.connect(); const all = [], seen = new Set(); let cursor;
+        do {
+          const r = await this.rpc('tools/list', cursor ? {cursor} : {});
+          if (!Array.isArray(r?.tools)) fail('工具列表', 'tools 不是数组。');
+          all.push(...r.tools); cursor = r.nextCursor;
+          if (cursor && seen.has(cursor)) fail('工具列表', '分页 cursor 循环。');
+          if (cursor) seen.add(cursor);
+          if (all.length > 10000) fail('工具列表', '工具数超过上限。');
+        } while (cursor);
+        this.catalog = all; this.ready = true; return all;
+      } catch (e) { this.resetMcp(); throw e; }
     });
   }
   async generate(toolName, args) {

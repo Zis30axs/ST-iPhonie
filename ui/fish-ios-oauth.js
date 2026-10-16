@@ -2,6 +2,8 @@
  * No Node server, no cookie extraction, no blind paid speech requests.
  */
 import {copyText} from './common.js';
+import {probeNativeMcp} from '../fish-mobile/native-probe.js';
+import {resolveNativeHost} from '../fish-mobile/native-host.js';
 const ENDPOINT = 'https://api.fish.audio/mcp';
 const CALLBACK = 'http://127.0.0.1:49152/oauth/callback';
 const STORE = 'st-iphonie-fish-ios-pkce-v1';
@@ -77,24 +79,8 @@ export function readManualCallback(raw,pending,now=Date.now()) {
   return u.searchParams.get('code');
 }
 export async function temporaryNativeDiscovery(host,bearer) {
-  const m=host?.api?.mcp;
-  if(!m?.servers?.create||!m?.servers?.setState||!m?.servers?.refresh||!m?.servers?.remove)
-    throw Error('TauriTavern 原生 MCP Host 不可用（可能版本不支持）');
-  let r,err,result;
-  try {
-    r=await m.servers.create({displayName:'Fish MCP iOS 单次检查',endpoint:ENDPOINT,
-      headers:{Authorization:'Bearer '+bearer},protocolVersion:'auto'});
-    await m.servers.setState({registrationId:r.id,state:'active'});
-    result=await m.servers.refresh({registrationId:r.id});
-  }catch(e){err=e;}
-  finally{
-    if(r?.id) {
-      try{await m.servers.remove({registrationId:r.id});}
-      catch{throw Error('删除临时 MCP 注册失败！请到 MCP Manager 手动删除 Fish MCP iOS 单次检查（包含 Bearer 令牌）');}
-    }
-  }
-  if(err)throw err;
-  return result;
+  const result=await probeNativeMcp(host,ENDPOINT,bearer);
+  return {tools:result.toolNames.map(nativeName=>({nativeName})),protocolVersion:result.protocolVersion};
 }
 export function openFishIosOAuth(ctx) {
   const w=ctx.win,s=w.sessionStorage;
@@ -200,7 +186,8 @@ export function openFishIosOAuth(ctx) {
       }else if(op==='mcp'){
         if(!accessToken)throw Error('请先完成 Token 交换');
         status('在 TauriTavern MCP Manager 中创建一次性注册并发现工具…');
-        const got=await temporaryNativeDiscovery(w.__TAURITAVERN__,accessToken);
+        const host=await resolveNativeHost(w);
+        const got=await temporaryNativeDiscovery(host,accessToken);
         show(JSON.stringify({count:got.tools?.length||0,tools:(got.tools||[]).map(t=>t.nativeName),
           diagnostics:got.diagnostics||[]},null,2));
         status('原生 MCP 发现完成，临时注册已清理。这一步不生成语音。');

@@ -25,9 +25,18 @@ function harness({storage = mem(), behavior = {}, now} = {}) {
     if (u.pathname === '/mcp' && init.method !== 'POST') return new Response('', {status: 401});
     const request = JSON.parse(init.body); const {id, method} = request;
     assert.equal(init.headers.Authorization, 'Bearer test_access');
-    if (method === 'initialize') return reply({jsonrpc: '2.0', id, result: {protocolVersion: '2025-06-18', serverInfo: {name: 'fake-fish', version: 'test'}}});
-    if (method === 'notifications/initialized') return new Response(null, {status: 202});
-    if (method === 'tools/list') return reply({jsonrpc: '2.0', id, result: {tools: catalog, ...(behavior.cursor ? {nextCursor: 'repeated'} : {})}});
+    if (method === 'initialize') {
+      if (behavior.initializeHttp) return new Response('', {status: behavior.initializeHttp});
+      const response = reply({jsonrpc: '2.0', id, result: {protocolVersion: '2025-06-18', serverInfo: {name: 'fake-fish', version: 'test'}}});
+      if (behavior.sessionId) response.headers.set('Mcp-Session-Id', behavior.sessionId);
+      return response;
+    }
+    if (method === 'notifications/initialized') return new Response(null, {status: behavior.initializedHttp || 202});
+    if (method === 'tools/list') {
+      if (behavior.listNetwork) throw new TypeError('fake disconnect with test_secret in raw error');
+      if (behavior.listHttp) return new Response('', {status: behavior.listHttp});
+      return reply({jsonrpc: '2.0', id, result: {tools: catalog, ...(behavior.cursor ? {nextCursor: 'repeated'} : {})}});
+    }
     if (method === 'tools/call') {
       generated++;
       if (behavior.generationNetwork) throw new TypeError('unknown outcome');
@@ -98,8 +107,52 @@ test('MCP handshake then tools/list perform no speech generation', async () => {
   const h = harness(); await h.login(); assert.equal((await h.c.listTools())[0].name, tool.name);
   assert.equal(h.generated(), 0); assert.equal(h.c.status().connected, true);
 });
+test('MCP handshake alone is not reported as a connected tool catalogue', async () => {
+  const h = harness(); await h.login(); await h.c.connect();
+  assert.equal(h.c.status().connected, false); assert.equal(h.c.catalog, null);
+  await h.c.listTools(); assert.equal(h.c.status().connected, true);
+  assert.equal(h.requests.filter(r => r.target.endsWith('/mcp') && r.init.body && JSON.parse(r.init.body).method === 'initialize').length, 1);
+});
+
+test('initialize HTTP 403 stops before tools/list and waits for explicit retry', async () => {
+  const h = harness({behavior: {initializeHttp: 403}}); await h.login();
+  const before = h.requests.length;
+  await assert.rejects(h.c.listTools(), e => e.stage === 'MCP initialize' && e.code === 'http_403');
+  assert.deepEqual(h.requests.slice(before).map(r => JSON.parse(r.init.body).method), ['initialize']);
+  assert.equal(h.c.status().authorized, true); assert.equal(h.c.status().connected, false);
+  assert.equal(h.c.sessionId, ''); assert.equal(h.c.protocol, ''); assert.equal(h.c.catalog, null);
+  h.behavior.initializeHttp = 0;
+  await h.c.listTools(); assert.equal(h.c.status().connected, true); assert.equal(h.generated(), 0);
+});
+
+test('failed initialized notification clears its session before an explicit new handshake', async () => {
+  const h = harness({behavior: {sessionId: 'test-session', initializedHttp: 403}}); await h.login();
+  await assert.rejects(h.c.listTools(), e => e.code === 'http_403');
+  assert.equal(h.c.status().connected, false); assert.equal(h.c.sessionId, ''); assert.equal(h.c.protocol, '');
+  h.behavior.initializedHttp = 0;
+  await h.c.listTools();
+  const handshakes = h.requests.filter(r => r.target.endsWith('/mcp') && r.init.body && JSON.parse(r.init.body).method === 'initialize');
+  assert.equal(handshakes.length, 2);
+  assert.equal(handshakes[1].init.headers['Mcp-Session-Id'], undefined);
+  assert.equal(handshakes[1].init.headers['MCP-Protocol-Version'], undefined);
+  assert.equal(h.generated(), 0);
+});
+
+for (const [name, failure, code] of [['HTTP 403', {listHttp: 403}, 'http_403'], ['disconnect', {listNetwork: true}, 'network_error']]) {
+  test('tools/list ' + name + ' invalidates a previously connected session and stale tools', async () => {
+    const h = harness({behavior: {sessionId: 'test-session'}}); await h.login(); await h.c.listTools();
+    Object.assign(h.behavior, failure);
+    await assert.rejects(h.c.listTools(), e => e.code === code && !errorText(e).includes('test_secret'));
+    assert.equal(h.c.status().connected, false); assert.equal(h.c.catalog, null);
+    assert.equal(h.c.sessionId, ''); assert.equal(h.c.protocol, '');
+    await assert.rejects(h.c.generate(tool.name, {text: 'x'}), /先读取真实工具/);
+    assert.equal(h.generated(), 0);
+  });
+}
+
 test('MCP pagination loops fail rather than returning incomplete catalogue', async () => {
   const h = harness({behavior: {cursor: true}}); await h.login(); await assert.rejects(h.c.listTools(), /cursor/);
+  assert.equal(h.c.status().connected, false); assert.equal(h.c.catalog, null);
 });
 test('SSE fragmented chunks, progress messages and final response without stream close', async () => {
   let cancelled = false;
@@ -142,6 +195,16 @@ test('HTTP 429 is not automatically retried', async () => {
   const h = harness({behavior: {http429: true}}); await h.login(); await h.c.listTools();
   await assert.rejects(h.c.generate(tool.name, {text: 'x'}), /429/); assert.equal(h.generated(), 1);
 });
+test('failed paid RPC disconnects but preserves the pending marker across reconnect', async () => {
+  const h = harness({behavior: {http429: true, sessionId: 'test-session'}}); await h.login(); await h.c.listTools();
+  await assert.rejects(h.c.generate(tool.name, {text: 'x'}), e => e.code === 'http_429');
+  assert.equal(h.c.status().connected, false); assert.equal(h.c.status().lastGeneration, 'pending');
+  assert.equal(h.c.sessionId, '');
+  await h.c.listTools();
+  await assert.rejects(h.c.generate(tool.name, {text: 'x'}), e => e.code === 'pending_generation');
+  assert.equal(h.generated(), 1);
+});
+
 test('async task without audio is not reported as audio success', async () => {
   const h = harness({behavior: {noAudio: true}}); await h.login(); await h.c.listTools();
   await assert.rejects(h.c.generate(tool.name, {text: 'x'}), /尚无音频/); assert.equal(h.c.status().lastGeneration, 'pending');

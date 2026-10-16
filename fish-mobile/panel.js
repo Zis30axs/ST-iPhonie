@@ -1,5 +1,6 @@
 import {MobileFishClient, MobileError, inspectAuthorizationLink, mapFields, buildArguments, errorText} from './client.js';
 import {probeNativeMcp} from './native-probe.js';
+import {inspectNativeHost, resolveNativeHost, nativeMcpFailure} from './native-host.js';
 
 let client, dialog, observer, button, stopTimer, lastError = '', blobURL = '';
 const STYLE = `
@@ -20,9 +21,10 @@ export function openMobilePanel(doc = document) {
   if (dialog?.isConnected) { dialog.focus(); return; }
   let c; try { c = getClient(); } catch (e) { globalThis.toastr?.error(errorText(e)); return; }
   if (!doc.getElementById('sttts-fish-mobile-style')) { const style = doc.createElement('style'); style.id = 'sttts-fish-mobile-style'; style.textContent = STYLE; doc.head.append(style); }
-  const d = doc.createElement('dialog'); dialog = d; d.id = 'sttts-fish-mobile'; d.setAttribute('aria-label', 'Fish MCP iPhone 直连实验');
-  d.innerHTML = `<header><h2>Fish · iPhone 直连实验</h2><button data-fm="close" aria-label="关闭">关闭</button></header>
-<p class="fm-note">手机端 OAuth + MCP 实验 v0.1.1。不运行 Node、不需要电脑或自建中转。是否能连接，取决于实际 Fish 授权策略和 WebView 网络能力。</p>
+  const d = doc.createElement('dialog'); dialog = d; d.id = 'sttts-fish-mobile'; d.setAttribute('aria-label', 'Fish MCP 直连实验');
+  d.innerHTML = `<header><h2>Fish · MCP 直连实验</h2><button data-fm="close" aria-label="关闭">关闭</button></header>
+<p class="fm-note">Windows / iOS OAuth + MCP 实验 v0.1.2。不运行 Node、不需要电脑或自建中转。是否能连接，取决于实际 Fish 授权策略和 WebView 网络能力。</p>
+<p data-fm="environment" class="fm-note"></p>
 <p data-fm="status" role="status" aria-live="polite"></p>
 <h3>1. 生成登录链接</h3><details><summary>连接参数（一般不用改）</summary>
 <label>MCP 地址<input data-fm="endpoint" type="url" autocomplete="off"></label><label>注册的回调地址<input data-fm="redirect" type="url" autocomplete="off"></label>
@@ -43,13 +45,22 @@ export function openMobilePanel(doc = document) {
 <h3>4. 单句试听</h3><label>音色 ID<input data-fm="voice" value="default"></label><label>语言<input data-fm="language" value="zh"></label>
 <label>模型（留空让服务决定）<input data-fm="model" placeholder="不是 Plus 套餐名"></label><label>情绪（可留空）<input data-fm="emotion"></label>
 <label>文字<textarea data-fm="text" rows="3">你好，这是 iPhone 上的 Fish 语音测试。</textarea></label>
-<button data-fm="generate">生成试听（消耗套餐积分）</button><audio data-fm="audio" controls hidden></audio>
+<button data-fm="generate" disabled>生成试听（消耗套餐积分）</button><audio data-fm="audio" controls hidden></audio>
 <p class="fm-note">本页用于先验证登录、MCP 和音频。不会自动替换角色配音设置；原来的 Node 桥接预设仍保留。</p>
 <details><summary>诊断与本机授权</summary><button data-fm="diagnostics">复制脱敏诊断</button><button data-fm="unlock">清除未完成生成标记</button><button data-fm="logout">清除本机授权</button>
 <p class="fm-note">登录状态保存在这个 App 的网站存储中，不是系统钥匙串；同源扩展脚本可能读到。不会复制进本插件常规设置，也不导出令牌。完整 App 数据备份仍可能包含它。清除本机授权不等于在 Fish 撤销授权。</p></details>`;
   doc.body.append(d);
   const $ = name => d.querySelector(`[data-fm="${name}"]`);
-  const message = (text, error = false) => { $('status').textContent = text; if (error) lastError = text; };
+  const message = (text, error = false) => { $('status').textContent = text; lastError = error ? text : ''; };
+  const environment = () => {
+    const info = inspectNativeHost(doc.defaultView);
+    $('environment').textContent = info.nativeMcpAvailable ? '已检测到 TauriTavern 原生 MCP API。'
+      : info.tauriHost || info.hostReadySignal ? '已检测到 TauriTavern 宿主，原生检查时会等待初始化并核对 MCP API。'
+      : info.tauriRuntime ? '检测到 Tauri 运行环境，尚未检测到 TauriTavern MCP 宿主。'
+      : '当前页面没有 TauriTavern 宿主；普通浏览器可测试 HTTP 直连，原生 MCP 需要在 TauriTavern App 内打开。';
+    return info;
+  };
+  environment();
   const verifyLink = () => inspectAuthorizationLink($('link').value, {clientId: c.state.pending?.client?.client_id || '', redirectURI: c.config.redirectURI});
   const linkStatus = checked => '授权 URL 已检查：' + checked.authorizationOrigin + checked.authorizationPath + '；client_id ✓ · redirect_uri ✓ · PKCE ✓。如 Safari 仍报缺参，使用「复制登录链接」粘贴完整地址，不要只打开 Fish 首页。';
   const status = () => { const s = c.status(); message(s.authorized ? '已保存授权。读取工具成功后再试听；登录成功不等于配音成功。' : s.pending ? '已有待完成登录，可继续粘贴这次的回调。' : '尚未授权。先生成登录链接。'); };
@@ -61,13 +72,14 @@ export function openMobilePanel(doc = document) {
     if (lock && busy) return;
     if (lock) { busy = true; $(name).disabled = true; }
     try { await handler(); } catch (e) { message(errorText(e), true); }
-    finally { if (lock) { busy = false; $(name).disabled = false; } }
+    finally { if (lock) { busy = false; $(name).disabled = false; $('generate').disabled = !tools.some(t => t.name === $('tool').value); } }
   });
   function close() { if (blobURL) { URL.revokeObjectURL(blobURL); blobURL = ''; } $('audio').pause(); d.remove(); dialog = null; }
   on('close', close, false); d.addEventListener('cancel', e => { e.preventDefault(); close(); });
   on('login', async () => {
     if ((c.status().pending || c.status().authorized) && !doc.defaultView.confirm('重新开始登录会替换待完成回调；修改连接参数还会清除旧授权。继续？')) return;
     c.configure({endpoint: $('endpoint').value.trim(), redirectURI: $('redirect').value.trim(), clientId: $('client').value.trim(), scope: $('scope').value.trim()});
+    clearTools(); nativeReport = null;
     $('link').value = ''; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = true;
     message('正在读取授权元数据并注册客户端，没有提交语音生成。');
     const link = await c.startLogin(); $('link').value = link; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = false;
@@ -77,15 +89,17 @@ export function openMobilePanel(doc = document) {
   on('check-link', () => message(linkStatus(verifyLink())));
   // A separate user gesture avoids iOS blocking a window opened after await.
   on('open-link', () => { const checked = verifyLink(); doc.defaultView.open($('link').value, '_blank', 'noopener,noreferrer'); message(linkStatus(checked) + ' 已请求系统浏览器打开；若它报缺参，请复制完整链接到 Safari。'); }, false);
-  on('finish', async () => { const callback = $('callback').value; $('callback').value = ''; message('正在交换令牌；未自动重试。'); await c.finishLogin(callback); $('link').value = ''; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = true; status(); });
+  on('finish', async () => { const callback = $('callback').value; $('callback').value = ''; clearTools(); message('正在交换令牌；未自动重试。'); await c.finishLogin(callback); $('link').value = ''; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = true; status(); });
   function selected() {
     const t = tools.find(t => t.name === $('tool').value);
     $('schema').textContent = t ? JSON.stringify(t.inputSchema || {}, null, 2) : '请选择真实语音合成工具。';
     $('mapping').value = JSON.stringify(t ? mapFields(t) : {}, null, 2);
+    $('generate').disabled = !t;
   }
+  function clearTools() { tools = []; $('tool').replaceChildren(new Option('先读取工具', '')); selected(); }
   $('tool').addEventListener('change', selected);
   on('tools', async () => {
-    message('正在读取真实 tools/list，没有调用生成工具。'); tools = await c.listTools();
+    clearTools(); message('正在读取真实 tools/list，没有调用生成工具。'); tools = await c.listTools();
     $('tool').replaceChildren(new Option('选择语音合成工具', ''));
     for (const t of tools) { if (typeof t.name === 'string') $('tool').append(new Option(t.name, t.name)); }
     const candidates = tools.filter(t => /tts|text.to.speech|generate.speech|synthesize.speech/i.test(t.name || '') && !/list|search|delete|clone|history|status|estimate/i.test(t.name));
@@ -93,27 +107,21 @@ export function openMobilePanel(doc = document) {
     selected(); message(`MCP 已连接，读到 ${tools.length} 个真实工具。请选择语音合成工具后试听。`);
   });
   on('native', async () => {
-    if (!c.status().authorized) throw new MobileError('原生 MCP', '尚未取得授权，请先完成 Fish 登录。');
-    if (!doc.defaultView.confirm('原生 MCP 对照检查不会生成语音。它将短暂把 Fish Bearer Token 写入 TauriTavern 本机 MCP Manager 注册文件，读取工具后自动删除。若清理失败需要手动删除；继续？')) return;
-    message('原生 MCP 正在读取 Fish 工具列表；不会生成语音或扣积分。');
-    nativeReport = {status:'running'};
     try {
+      nativeReport = {status:'checking_host'};
+      const host = await resolveNativeHost(doc.defaultView); environment();
+      if (!c.status().authorized) throw new MobileError('原生 MCP', '尚未取得授权，请先完成 Fish 登录。', 'native_unauthorized');
+      if (!doc.defaultView.confirm('原生 MCP 对照检查不会生成语音。它将短暂把 Fish Bearer Token 写入 TauriTavern 本机 MCP Manager 注册文件，读取工具后自动删除。若清理失败需要手动删除；继续？')) { nativeReport = {status:'cancelled'}; return; }
+      message('原生 MCP 正在读取 Fish 工具列表；不会生成语音或扣积分。');
+      nativeReport = {status:'running'};
       const token = await c.accessToken();
-      const result = await probeNativeMcp(globalThis.__TAURITAVERN__, c.config.endpoint, token);
+      const result = await probeNativeMcp(host, c.config.endpoint, token);
       nativeReport = {status:'ok',toolCount:result.count,protocolVersion:result.protocolVersion,toolNames:result.toolNames};
       message('原生 MCP 成功读取 ' + result.count + ' 个工具。若 WebView 仍为 HTTP 403，说明两种传输行为不同，应优先调查 Origin/请求头差异。此时仅完成工具发现，尚未生成语音。');
     } catch (e) {
-      const raw = String(e?.message || '');
-      if (raw.includes('删除临时 Fish MCP 注册失败')) {
-        nativeReport = {status:'cleanup_failed'};
-        throw new MobileError('原生 MCP 清理', raw, 'cleanup_failed');
-      }
-      const code = /\b403\b/.test(raw) ? 'http_403' : /\b401\b/.test(raw) ? 'http_401' : 'failed';
-      nativeReport = {status:code};
-      const detail = code === 'http_403' ? '原生 MCP 也返回 403。应进一步检查 Token 的 Scope、团队权限或服务器策略。'
-        : code === 'http_401' ? '原生 MCP 返回 401。MCP 未认可 Access Token。'
-        : '原生 MCP 读取失败（不是配音失败）；请核对当前 TauriTavern 版本、MCP Manager、网络和服务端兼容性。';
-      throw new MobileError('原生 MCP', detail, code);
+      const failure = e instanceof MobileError ? e : nativeMcpFailure(e);
+      environment(); nativeReport = {status:failure.code, operation:failure.operation || ''};
+      throw new MobileError(failure.code === 'cleanup_failed' ? '原生 MCP 清理' : '原生 MCP', failure.message, failure.code);
     }
   });
   on('generate', async () => {
@@ -121,7 +129,9 @@ export function openMobilePanel(doc = document) {
     let mapping, extra; try { mapping = JSON.parse($('mapping').value); extra = JSON.parse($('extra').value); } catch { message('字段映射或固定参数不是有效 JSON。', true); return; }
     const args = buildArguments({text: $('text').value, voice: $('voice').value, language: $('language').value, model: $('model').value, emotion: $('emotion').value}, mapping, extra);
     message('正在请求语音；失败或超时不会自动重复生成。');
-    const audio = await c.generate(name, args); if (!d.isConnected) return; const player = $('audio');
+    let audio;
+    try { audio = await c.generate(name, args); } catch (error) { if (!c.status().connected) clearTools(); throw error; }
+    if (!d.isConnected) return; const player = $('audio');
     if (blobURL) { URL.revokeObjectURL(blobURL); blobURL = ''; }
     if (audio.url) player.src = audio.url;
     else {
@@ -133,8 +143,8 @@ export function openMobilePanel(doc = document) {
   });
   $('audio').addEventListener('error', () => message('音频播放：浏览器无法获取或解码音频；没有把拿到链接当作已经播出。', true));
   on('unlock', () => { if (doc.defaultView.confirm('上一笔请求可能已执行并扣费。先核对 Fish 历史；清除标记后再次生成可能重复扣费。继续？')) { c.forgetPendingGeneration(); message('已清除标记；没有自动生成。'); } });
-  on('logout', () => { if (doc.defaultView.confirm('清除这台设备里的 Fish 登录状态？不删除角色和聊天记录。')) { c.logout(); tools = []; $('tool').replaceChildren(new Option('先读取工具', '')); selected(); status(); } });
-  on('diagnostics', async () => { const report = {version: 'fish-mobile/0.1.1', tauriHost: !!globalThis.__TAURITAVERN__, webCrypto: !!globalThis.crypto?.subtle, state: c.status(), authorizationLink: $('link').value ? verifyLink() : null, stageError: lastError, nativeProbe: nativeReport, toolNames: tools.map(t => t.name)}; await copy(JSON.stringify(report, null, 2), doc); message('已复制脱敏诊断，不含令牌、回调、登录链接和试听文字。'); });
+  on('logout', () => { if (doc.defaultView.confirm('清除这台设备里的 Fish 登录状态？不删除角色和聊天记录。')) { c.logout(); clearTools(); nativeReport = null; status(); } });
+  on('diagnostics', async () => { const info = environment(); const report = {version: 'fish-mobile/0.1.2', tauriHost: info.tauriHost, environment: info, webCrypto: !!doc.defaultView.crypto?.subtle, state: c.status(), authorizationLink: $('link').value ? verifyLink() : null, stageError: lastError, nativeProbe: nativeReport, toolNames: tools.map(t => t.name)}; await copy(JSON.stringify(report, null, 2), doc); message('已复制脱敏诊断，不含令牌、回调、登录链接和试听文字。'); });
   status();
   try { d.showModal(); } catch { d.setAttribute('open', ''); }
 }
@@ -143,7 +153,7 @@ export function installMobilePanel(doc = document) {
   const mount = () => {
     const target = doc.querySelector('#sttts-extension-entry .inline-drawer-content');
     if (!target || button?.isConnected) return false;
-    button = doc.createElement('button'); button.id = 'sttts-fish-mobile-open'; button.className = 'menu_button'; button.type = 'button'; button.textContent = 'Fish iPhone 直连实验';
+    button = doc.createElement('button'); button.id = 'sttts-fish-mobile-open'; button.className = 'menu_button'; button.type = 'button'; button.textContent = 'Fish MCP 直连实验';
     button.addEventListener('click', () => openMobilePanel(doc)); target.append(button);
     observer?.disconnect(); observer = null; clearTimeout(stopTimer); return true;
   };
