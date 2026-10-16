@@ -1,8 +1,8 @@
 {
   "display_name": "ST-iPhonie",
-  "version": "0.7.83",
+  "version": "0.7.83-fish-mobile.1",
   "author": "ST-iPhonie contributors",
-  "js": "index.js",
+  "js": "mobile-entry.js",
   "css": "style.css",
   "loading_order": 50,
   "minimum_client_version": "1.13.2",
@@ -12,6 +12,6 @@
     "disable": "disable",
     "delete": "dispose"
   },
-  "homePage": "https://github.com/hey8v0/ST-iPhonie",
+  "homePage": "https://github.com/Zis30axs/ST-iPhonie",
   "generate_interceptor": "stIphonieInterceptor"
 }
