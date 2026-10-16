@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {createServer} from 'node:http';
-import {MobileFishClient, pkce, parseCallback, readRpc, findAudio, mapFields, buildArguments, errorText} from '../client.js';
+import {MobileFishClient, inspectAuthorizationLink, pkce, parseCallback, readRpc, findAudio, mapFields, buildArguments, errorText} from '../client.js';
 const mem = () => { const m = new Map(); return {getItem: k => m.get(k) || null, setItem: (k, v) => m.set(k, v)}; };
 const reply = value => new Response(JSON.stringify(value), {headers: {'Content-Type': 'application/json'}});
 const config = {endpoint: 'http://127.0.0.1:8989/mcp', redirectURI: 'http://127.0.0.1:3789/oauth/callback', clientId: '', scope: ''};
@@ -183,4 +183,35 @@ test('real loopback HTTP OAuth server verifies PKCE, form content type and resou
   const link = new URL(await c.startLogin()); challenge = link.searchParams.get('code_challenge');
   await c.finishLogin(config.redirectURI + '?code=test-real-http&state=' + link.searchParams.get('state'));
   assert.equal(c.status().authorized, true); assert.equal(requests.filter(x => x === '/token').length, 1);
+});
+
+
+test('OAuth URL contains one client_id, redirect_uri and PKCE challenge before opening Safari', async () => {
+  const h = harness(), link = new URL(await h.c.startLogin());
+  assert.equal(link.searchParams.get('client_id'), 'test-client');
+  assert.equal(link.searchParams.get('redirect_uri'), config.redirectURI);
+  assert.equal(link.searchParams.get('code_challenge_method'), 'S256');
+  assert.equal(link.searchParams.getAll('client_id').length, 1);
+  assert.equal(link.searchParams.getAll('redirect_uri').length, 1);
+  assert.equal(inspectAuthorizationLink(link.href).clientIdPresent, true);
+});
+test('OAuth link validation rejects omitted/duplicated fields and produces redacted diagnostics', async () => {
+  const h = harness(), link = new URL(await h.c.startLogin());
+  const summary = JSON.stringify(inspectAuthorizationLink(link.href));
+  for (const field of ['client_id', 'redirect_uri']) {
+    const missing = new URL(link.href); missing.searchParams.delete(field);
+    assert.throws(() => inspectAuthorizationLink(missing.href), /缺失或重复/);
+    const duplicate = new URL(link.href); duplicate.searchParams.append(field, 'evil');
+    assert.throws(() => inspectAuthorizationLink(duplicate.href), /缺失或重复/);
+  }
+  assert.ok(!summary.includes('test-client'));
+  assert.ok(!summary.includes(link.searchParams.get('state')));
+  assert.throws(() => inspectAuthorizationLink(link.href, {redirectURI: 'https://wrong.example/callback'}), /不一致/);
+});
+test('complete OAuth URL can be recovered after Safari switch and discarded after exchange', async () => {
+  const h = harness(), link = await h.c.startLogin();
+  const restored = new MobileFishClient({storage: h.storage, fetcher: h.fetcher});
+  assert.equal(restored.pendingAuthorizationUrl(), link);
+  await restored.finishLogin(config.redirectURI + '?code=test&state=' + new URL(link).searchParams.get('state'));
+  assert.equal(restored.pendingAuthorizationUrl(), '');
 });

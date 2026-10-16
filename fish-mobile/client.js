@@ -33,6 +33,35 @@ export function parseCallback(raw, pending, now = Date.now()) {
   if (callback.searchParams.getAll('code').length !== 1 || !callback.searchParams.get('code')) fail('回调', '没有收到有效的授权 code。');
   return callback.searchParams.get('code');
 }
+
+/** Inspect generated OAuth URL locally; never reveal IDs or authorization state in diagnostics. */
+export function inspectAuthorizationLink(raw, {clientId = '', redirectURI = ''} = {}) {
+  const u = url(raw, 'OAuth 登录链接');
+  for (const name of ['response_type', 'client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method']) {
+    if (u.searchParams.getAll(name).length !== 1 || !u.searchParams.get(name)?.trim())
+      fail('OAuth 登录链接', name + ' 缺失或重复。请重新生成并复制完整链接，而不是 Fish 登录首页。', 'invalid_authorization_url');
+  }
+  if (u.searchParams.get('response_type') !== 'code' || u.searchParams.get('code_challenge_method') !== 'S256')
+    fail('OAuth 登录链接', 'PKCE 或授权码参数不正确。', 'invalid_authorization_url');
+  if (clientId && u.searchParams.get('client_id') !== clientId)
+    fail('OAuth 登录链接', 'client_id 与注册客户端不一致。', 'invalid_authorization_url');
+  if (redirectURI && u.searchParams.get('redirect_uri') !== redirectURI)
+    fail('OAuth 登录链接', 'redirect_uri 与注册回调不一致。', 'invalid_authorization_url');
+  const redirect = url(u.searchParams.get('redirect_uri'), 'OAuth 回调地址');
+  return {authorizationOrigin: u.origin, authorizationPath: u.pathname, clientIdPresent: true, redirectUriPresent: true,
+    pkceS256Present: true, redirectOrigin: redirect.origin, redirectPath: redirect.pathname};
+}
+function makeAuthorizationLink(discovery, clientId, redirectURI, state, challenge, scope = '') {
+  if (!discovery?.metadata?.authorization_endpoint) fail('OAuth 登录链接', '尚未发现合法的授权端点。');
+  const u = url(discovery.metadata.authorization_endpoint, 'OAuth 授权端点');
+  const params = {response_type: 'code', client_id: clientId, redirect_uri: redirectURI, state, code_challenge: challenge,
+    code_challenge_method: 'S256', resource: discovery.resource};
+  if (scope) params.scope = scope;
+  for (const [key, value] of Object.entries(params)) u.searchParams.set(key, value);
+  inspectAuthorizationLink(u.href, {clientId, redirectURI});
+  return u.href;
+}
+
 /** Await the response with the matching RPC id; stop reading SSE as soon as it arrives. */
 export async function readRpc(response, id) {
   let total = 0; const limit = 4 * 1024 * 1024;
@@ -159,6 +188,12 @@ export class MobileFishClient {
       pending: !!p && p.expiresAt > this.now() && !p.attempted, connected: this.ready,
       lastGeneration: this.state.generation?.status || ''};
   }
+  pendingAuthorizationUrl() {
+    const p = this.state.pending;
+    if (!p || p.attempted || p.expiresAt <= this.now()) return '';
+    try { return makeAuthorizationLink(p.discovery, p.client.client_id, p.redirectURI, p.state, p.challenge, p.scope || ''); }
+    catch { return ''; }
+  }
   async exclusive(work) {
     if (this.busy) fail('操作', '已有请求正在执行，请勿重复提交。');
     this.busy = true; try { return await work(); } finally { this.busy = false; }
@@ -227,13 +262,10 @@ export class MobileFishClient {
         client = {client_id: client.client_id, issuer: discovery.issuer, redirectURI: this.config.redirectURI};
       }
       const p = await pkce(this.cryptoAPI);
-      const u = url(discovery.metadata.authorization_endpoint);
-      const params = {response_type: 'code', client_id: client.client_id, redirect_uri: this.config.redirectURI, state: p.state, code_challenge: p.challenge, code_challenge_method: 'S256', resource: discovery.resource};
-      if (this.config.scope) params.scope = this.config.scope;
-      for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+      const loginUrl = makeAuthorizationLink(discovery, client.client_id, this.config.redirectURI, p.state, p.challenge, this.config.scope);
       this.state.client = client;
-      this.state.pending = {...p, discovery, client, redirectURI: this.config.redirectURI, expiresAt: this.now() + 10 * 60 * 1000, attempted: false};
-      this.persist(); return u.href; // Persist verifier/state BEFORE Safari opens or the WebView suspends.
+      this.state.pending = {...p, discovery, client, redirectURI: this.config.redirectURI, scope: this.config.scope, expiresAt: this.now() + 10 * 60 * 1000, attempted: false};
+      this.persist(); return loginUrl; // Persist verifier/state BEFORE Safari opens or the WebView suspends.
     });
   }
   async tokenRequest(discovery, fields) {

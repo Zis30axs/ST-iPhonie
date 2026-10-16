@@ -114,7 +114,7 @@ export function openFishIosOAuth(ctx) {
     '<div class="actions">',button('discover','① 发现 OAuth'),button('authorize','② 生成 Fish 登录链接'),'</div>',
     '<p data-fish-status class="hint">尚未开始。</p>',
     '<a data-fish-link target="_blank" rel="noopener noreferrer" hidden>在 Safari 登录 Fish</a>',
-    button('copy','复制登录链接'),
+    button('copy','复制登录链接'), button('verify','检查 client_id / redirect_uri'),
     '<p class="hint">Safari 回跳到无监听的 localhost 可能失败；只有地址栏仍保留完整 code/state URL 时才可手动复制。不要将回调 URL 发给别人。</p>',
     '<textarea data-fish-field="callback" rows="3" placeholder="③ 粘贴 Safari 的完整回调 URL"></textarea>',
     button('exchange','④ WebView 交换 Access Token'),
@@ -126,6 +126,18 @@ export function openFishIosOAuth(ctx) {
   const query=id=>sheet.body.querySelector('[data-fish-field="'+id+'"]');
   const value=id=>query(id)?.value.trim()||'';
   const status=(text,bad=false)=>{const el=sheet.body.querySelector('[data-fish-status]');if(el){el.textContent=text;el.style.color=bad?'#c55':'';}};
+  const verifyLoginLink=()=>{
+    if(!loginLink)throw Error('尚未生成登录链接。');
+    const u=new URL(loginLink);
+    for(const key of ['response_type','client_id','redirect_uri','state','code_challenge','code_challenge_method']){
+      if(u.searchParams.getAll(key).length!==1||!u.searchParams.get(key)?.trim())throw Error('OAuth URL 缺少或重复 '+key+'；请重新生成。');
+    }
+    if(u.searchParams.get('response_type')!=='code'||u.searchParams.get('code_challenge_method')!=='S256')
+      throw Error('OAuth URL 的授权码或 PKCE 格式无效。');
+    if(pending && (u.searchParams.get('client_id')!==pending.client||u.searchParams.get('redirect_uri')!==pending.redirect))
+      throw Error('OAuth URL 的 client_id / redirect_uri 与注册结果不一致。');
+    return u.origin+u.pathname;
+  };
   const show=text=>{const el=sheet.body.querySelector('[data-fish-result]');if(el)el.textContent=text;};
   const manual=()=>Object.fromEntries(['issuer','auth','token','registration'].map(x=>[x,value(x)]));
   if(pending?.state&&Date.now()-pending.started<600000)status('恢复了待完成的 PKCE 会话，可直接粘贴 Safari 回调。');
@@ -162,12 +174,16 @@ export function openFishIosOAuth(ctx) {
           state:c.state,code_challenge:c.challenge,code_challenge_method:'S256',resource:ENDPOINT}))
           u.searchParams.set(k,v);
         loginLink=u.href;
+        const checkedHost=verifyLoginLink();
         const a=sheet.body.querySelector('[data-fish-link]');a.href=loginLink;a.hidden=false;
-        status('已生成登录链接。点击在 Safari 打开，授权后复制回调 URL。');
+        status('登录 URL 参数齐全（client_id ✓ · redirect_uri ✓ · PKCE ✓）：'+checkedHost+'。如 Safari 报缺参，请复制完整 URL 直接粘贴地址栏。');
       }else if(op==='copy'){
-        if(!loginLink)throw Error('先生成登录链接');
+        verifyLoginLink();
         if(!await copyText(w,loginLink))throw Error('复制失败，请点击上面的登录链接');
-        status('登录 URL 已复制。');
+        status('已复制包含 client_id 和 redirect_uri 的完整登录 URL，请直接粘贴 Safari 地址栏。');
+      }else if(op==='verify'){
+        const host=verifyLoginLink();
+        status('登录 URL 已校验：'+host+'；client_id ✓ · redirect_uri ✓ · PKCE ✓。仍报错则检查 Safari 跳转链，不要发原始 URL。');
       }else if(op==='exchange'){
         if(!pending){try{pending=JSON.parse(s.getItem(STORE)||'null');}catch{}}
         const code=readManualCallback(value('callback'),pending);

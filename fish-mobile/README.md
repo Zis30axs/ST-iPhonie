@@ -1,4 +1,4 @@
-# Fish MCP · iPhone 直连实验 v0.1.0
+# Fish MCP · iPhone 直连实验 v0.1.1
 
 入口：TauriTavern 的扩展设置 → ST-iPhonie → **Fish iPhone 直连实验**。
 

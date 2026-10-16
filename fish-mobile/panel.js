@@ -21,7 +21,7 @@ export function openMobilePanel(doc = document) {
   if (!doc.getElementById('sttts-fish-mobile-style')) { const style = doc.createElement('style'); style.id = 'sttts-fish-mobile-style'; style.textContent = STYLE; doc.head.append(style); }
   const d = doc.createElement('dialog'); dialog = d; d.id = 'sttts-fish-mobile'; d.setAttribute('aria-label', 'Fish MCP iPhone 直连实验');
   d.innerHTML = `<header><h2>Fish · iPhone 直连实验</h2><button data-fm="close" aria-label="关闭">关闭</button></header>
-<p class="fm-note">手机端 OAuth + MCP 实验 v0.1.0。不运行 Node、不需要电脑或自建中转。是否能连接，取决于实际 Fish 授权策略和 WebView 网络能力。</p>
+<p class="fm-note">手机端 OAuth + MCP 实验 v0.1.1。不运行 Node、不需要电脑或自建中转。是否能连接，取决于实际 Fish 授权策略和 WebView 网络能力。</p>
 <p data-fm="status" role="status" aria-live="polite"></p>
 <h3>1. 生成登录链接</h3><details><summary>连接参数（一般不用改）</summary>
 <label>MCP 地址<input data-fm="endpoint" type="url" autocomplete="off"></label><label>注册的回调地址<input data-fm="redirect" type="url" autocomplete="off"></label>
