@@ -60,7 +60,7 @@ export async function safeDownloadAudio(rawURL, {signal, maxBytes = MAX_AUDIO, r
     const result = await new Promise((resolve, reject) => {
       const transport = url.protocol === 'http:' ? http : https;
       const req = transport.get(url, {signal: deadline,
-        headers: {Accept: 'audio/*, application/octet-stream', 'User-Agent': 'ST-iPhonie-Fish-MCP/0.1.1'},
+        headers: {Accept: 'audio/*, application/octet-stream', 'User-Agent': 'ST-iPhonie-Fish-MCP/0.1.2'},
         ...(lookup ? {lookup} : {})
       }, res => {
         if ([301, 302, 303, 307, 308].includes(res.statusCode)) {

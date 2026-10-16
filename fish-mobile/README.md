@@ -8,7 +8,7 @@ Windows 普通浏览器和 iOS Safari 都没有 TauriTavern 原生宿主；只�
 
 ## 手机测试
 
-1. 更新本 Fork 的 `main` 分支并完整重启 App，打开上面的入口；扩展版本应为 `0.7.83-fish-mobile.4`，诊断版本为 `fish-mobile/0.1.2`。
+1. 更新本 Fork 的 `main` 分支并完整重启 App，打开上面的入口；扩展版本应为 `0.7.83-fish-mobile.5`，诊断版本为 `fish-mobile/0.1.2`。
 2. 点击“生成登录链接”；复制到 Safari 或点击“在浏览器打开”。在 Fish 官方页面登录并选择有 Plus 的团队。
 3. 授权后复制包含 `code` 和 `state` 的完整回调 URL，回到实验入口粘贴，点击“交换令牌”。默认回调是 `http://127.0.0.1:3789/oauth/callback`，**手机上没有监听服务器**；这是手动接收流程，不是让你启动 localhost 服务。若地址栏没有 code/state，或 Fish 拒绝该 redirect_uri，就尚未完成此步。
 4. 点击“读取工具”，选择真实的语音合成工具；音色先用 `default`、语言 `zh`、模型留空，点击“生成试听”。仅此按钮会调用所选工具，可能消耗套餐积分。工具名和参数来自真实 tools/list，不硬编码假工具名。
@@ -94,3 +94,9 @@ npm test
 新脱敏诊断提供 `environment`（宿主位置、Tauri marker、MCP 方法完整性）和 `nativeProbe.status/operation`。如果仍为 403，可据此区分宿主失败与实际服务端拒绝，再核对 Fish 登录时所选团队和令牌权限。无需分享 Token 或回调 URL。
 
 契约依据：[TauriTavern MCP API](https://github.com/Darkatse/TauriTavern/blob/main/docs/API/MCP.md)、[宿主初始化](https://github.com/Darkatse/TauriTavern/blob/main/src/tauri/main/bootstrap.js)、[Fish MCP 官方说明](https://docs.fish.audio/overview/mcp)。
+
+## Windows 后续实测与桥接 0.1.2
+
+在实际加载的 Windows 酒馆中完成真实 OAuth 授权后，WebView initialize 返回 HTTP 403，响应分类为浏览器 Origin 拒绝，尚未读到真实工具。当前普通浏览器没有 TauriTavern 原生宿主，正通过本 Fork 已有 Node 桥接做对照；桥接授权仍受人工验证/失效回调阻塞，未提交真实语音生成。
+
+桥接 0.1.2 修复待完成授权只在内存、重启后丢失 state 的问题，配置一致且未过期时复用同一请求，并保留一次性消费与十分钟有效期。它减少客户端反复重新登录的原因，不能关闭 Fish 的二次验证。详见 [桥接说明](../fish-mcp-bridge/README.md)；桥接 77 项和直连 53 项本地测试通过。

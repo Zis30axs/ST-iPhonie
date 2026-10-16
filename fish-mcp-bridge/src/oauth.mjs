@@ -3,13 +3,16 @@ import {BridgeError, randomSecret, safeEqual} from './util.mjs';
 import {fetchJSON} from './net.mjs';
 
 export const FISH_MCP = 'https://api.fish.audio/mcp';
+const LOGIN_TTL = 10 * 60 * 1000;
 export class FishOAuth {
   constructor(store, {redirectURI = 'http://127.0.0.1:3789/oauth/callback', fetcher = fetch,
     endpoint = FISH_MCP, clientID = '', scope = ''} = {}) {
     this.store = store; this.redirectURI = redirectURI; this.fetcher = fetcher;
     this.endpoint = endpoint; this.clientID = clientID; this.scope = scope;
-    this.pending = new Map(); this.refreshing = null;
+    this.pending = new Map(); this.refreshing = null; this.starting = null;
     this.trustedURL(endpoint);
+    for (const pending of Array.isArray(store.data.oauth.pending) ? store.data.oauth.pending.slice(0, 5) : [])
+      if (this.validPending(pending) && !pending.consumed) this.pending.set(pending.state, structuredClone(pending));
   }
   trustedURL(raw) {
     let u;
@@ -63,7 +66,10 @@ export class FishOAuth {
     if (metadata.code_challenge_methods_supported && !metadata.code_challenge_methods_supported.includes('S256'))
       throw new BridgeError('授权服务器没有声明支持 S256 PKCE；不会降级为不安全登录。', 502, 'pkce_unsupported');
     const discovered = {endpoint: this.endpoint, resource, issuer, metadata};
-    await this.store.update(s => { s.oauth.discovery = discovered; });
+    await this.store.update(s => {
+      if ((s.oauth.discovery?.endpoint || FISH_MCP) !== discovered.endpoint) delete s.oauth.tokens;
+      s.oauth.discovery = discovered;
+    });
     return discovered;
   }
   async client(discovery) {
@@ -90,31 +96,68 @@ export class FishOAuth {
     await this.store.update(s => { s.oauth.client = client; });
     return client;
   }
-  async start() {
-    const discovery = await this.discover(); const client = await this.client(discovery);
-    for (const [state, pending] of this.pending) if (pending.expires < Date.now()) this.pending.delete(state);
-    if (this.pending.size >= 5) throw new BridgeError('已有多个授权窗口，请完成其中一个或重启适配器。', 429, 'too_many_logins');
-    const state = randomSecret(), verifier = randomSecret();
+  validPending(pending) {
+    if (!pending || !/^[A-Za-z0-9_-]{43}$/.test(pending.state || '') || !/^[A-Za-z0-9_-]{43}$/.test(pending.verifier || '') ||
+      !Number.isFinite(pending.expires) || pending.expires <= Date.now() || pending.expires > Date.now() + LOGIN_TTL ||
+      typeof pending.redirectURI !== 'string' || typeof pending.scope !== 'string' || typeof pending.clientID !== 'string' ||
+      typeof pending.consumed !== 'boolean' || typeof pending.client?.client_id !== 'string' || !pending.client.client_id ||
+      pending.client.redirectURI !== pending.redirectURI || pending.client.issuer !== pending.discovery?.issuer ||
+      typeof pending.discovery?.metadata?.authorization_endpoint !== 'string' || typeof pending.discovery?.metadata?.token_endpoint !== 'string') return false;
+    try {
+      for (const value of [pending.redirectURI, pending.discovery.endpoint, pending.discovery.resource, pending.discovery.issuer,
+        pending.discovery.metadata.authorization_endpoint, pending.discovery.metadata.token_endpoint]) this.trustedURL(value);
+      return pending.discovery.metadata.issuer?.replace(/\/$/, '') === pending.discovery.issuer;
+    } catch { return false; }
+  }
+  matchingPending(pending) {
+    const {discovery, client} = this.store.data.oauth;
+    return this.validPending(pending) && !pending.consumed && pending.discovery.endpoint === this.endpoint &&
+      pending.redirectURI === this.redirectURI && pending.scope === this.scope && pending.clientID === this.clientID &&
+      (!this.clientID || pending.client.client_id === this.clientID) && pending.client.client_id === client?.client_id &&
+      pending.discovery.issuer === discovery?.issuer && pending.discovery.resource === discovery?.resource;
+  }
+  async persistPending() {
+    await this.store.update(s => { s.oauth.pending = structuredClone([...this.pending.values()]); });
+  }
+  authorizationURL(pending) {
+    const {discovery, client, state, verifier, redirectURI, scope} = pending;
     const challenge = createHash('sha256').update(verifier).digest('base64url');
-    this.pending.set(state, {state, verifier, client, discovery, expires: Date.now() + 10 * 60 * 1000});
     const url = this.trustedURL(discovery.metadata.authorization_endpoint);
-    const args = {response_type: 'code', client_id: client.client_id, redirect_uri: this.redirectURI,
+    const args = {response_type: 'code', client_id: client.client_id, redirect_uri: redirectURI,
       state, code_challenge: challenge, code_challenge_method: 'S256', resource: discovery.resource};
-    if (this.scope) args.scope = this.scope;
+    if (scope) args.scope = scope;
     for (const [k, v] of Object.entries(args)) url.searchParams.set(k, v);
     return url.href;
   }
+  async start() {
+    if (!this.starting) this.starting = this.startLogin().finally(() => { this.starting = null; });
+    return this.starting;
+  }
+  async startLogin() {
+    for (const [state, pending] of this.pending) if (!this.matchingPending(pending)) this.pending.delete(state);
+    const existing = [...this.pending.values()].find(pending => this.matchingPending(pending));
+    if (existing) return this.authorizationURL(existing);
+    const discovery = await this.discover(); const client = await this.client(discovery);
+    if (this.pending.size >= 5) throw new BridgeError('已有多个授权窗口，请完成其中一个或重启适配器。', 429, 'too_many_logins');
+    const state = randomSecret(), verifier = randomSecret();
+    const pending = {state, verifier, client: structuredClone(client), discovery: structuredClone(discovery),
+      redirectURI: this.redirectURI, clientID: this.clientID, scope: this.scope, expires: Date.now() + LOGIN_TTL, consumed: false};
+    this.pending.set(state, pending);
+    try { await this.persistPending(); } catch (error) { this.pending.delete(state); throw error; }
+    return this.authorizationURL(pending);
+  }
   async finish(code, state, remoteError = '') {
     const pending = this.pending.get(state);
-    if (!pending || !safeEqual(pending.state, state) || pending.expires < Date.now())
+    if (!pending || !safeEqual(pending.state, state) || !this.matchingPending(pending))
       throw new BridgeError('授权 state 无效、已使用或已过期，请在控制台重新开始登录。', 400, 'invalid_oauth_state');
-    this.pending.delete(state); // consume before exchanging: authorization callbacks cannot be replayed
+    pending.consumed = true; // Consume synchronously, then persist before any token request.
+    await this.persistPending();
     if (remoteError) throw new BridgeError('Fish 授权被取消或拒绝。', 401, 'oauth_denied');
     if (typeof code !== 'string' || !code || code.length > 8192)
       throw new BridgeError('授权回调没有有效的 code。', 400, 'missing_oauth_code');
     const tokens = await this.tokenRequest(pending.discovery, {
       grant_type: 'authorization_code', client_id: pending.client.client_id,
-      code, code_verifier: pending.verifier, redirect_uri: this.redirectURI, resource: pending.discovery.resource
+      code, code_verifier: pending.verifier, redirect_uri: pending.redirectURI, resource: pending.discovery.resource
     });
     await this.store.update(s => { s.oauth.tokens = tokens; });
   }
@@ -157,6 +200,9 @@ export class FishOAuth {
     }
     return this.refreshing;
   }
-  async clear() { this.pending.clear(); await this.store.update(s => { delete s.oauth.tokens; }); }
+  async clear() {
+    await this.starting?.catch(() => {});
+    this.pending.clear(); await this.store.update(s => { delete s.oauth.tokens; delete s.oauth.pending; });
+  }
   status() { const t = this.store.data.oauth.tokens; return {authorized: !!t?.access_token, expiresAt: t?.expires_at || null, refreshAvailable: !!t?.refresh_token}; }
 }

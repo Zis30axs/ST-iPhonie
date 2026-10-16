@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fish MCP · iPhonie Bridge</title><link rel="stylesheet" href="/app.css"><script src="/app.js" defer></script></head>
 <body><main>
-<header><p class="eyebrow">ST-iPhonie / Local OAuth Bridge</p><h1>把 Fish 网页额度<br>接到角色的声音。</h1><p class="intro">实验版 0.1.1 · 不使用 Developer API · 不经过作者服务器</p></header>
+<header><p class="eyebrow">ST-iPhonie / Local OAuth Bridge</p><h1>把 Fish 网页额度<br>接到角色的声音。</h1><p class="intro">实验版 0.1.2 · 不使用 Developer API · 不经过作者服务器</p></header>
 <div id="message" role="status" aria-live="polite">正在读取本机状态…</div>
 <section><div class="section-title"><h2>01 / 连接 Fish</h2><span id="status">未连接</span></div><p>在 Fish 官方页面登录，选择赠送 Plus 所在的团队。OAuth 令牌只保存在这台机器；“清除”只清本机记录，不等于在 Fish 撤销授权。</p><div class="actions"><button id="login">登录 Fish 官方账号</button><button class="secondary" id="refresh">刷新状态</button><button class="secondary" id="logout">清除本机授权</button></div><p class="small" id="stats"></p></section>
 <section><h2>02 / 读取真实工具</h2><p>先读取服务器给出的工具名与输入 Schema。自动匹配不唯一或缺少必填字段时，不提交生成请求。</p><button class="secondary" id="tools">读取 MCP 工具与参数</button><pre id="detected">尚未读取。</pre><details><summary>查看完整 tools/list 结果</summary><pre id="catalog">没有数据。</pre></details><details><summary>高级映射：仅在自动识别失败时修改</summary><p class="small">字段值是实际参数路径，例如 text 或 request.text。extra 填固定参数。异步任务可配置 pollTool、pollIdField、pollIdPath。中文模型名和音色名不会被过滤。</p><textarea id="config" rows="16" spellcheck="false"></textarea><button class="secondary" id="save">保存映射</button></details></section>

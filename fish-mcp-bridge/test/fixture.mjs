@@ -122,7 +122,15 @@ export async function fixture(t, options = {}) {
     const authURL = new URL((await loginResponse.json()).url); state.expectedChallenge = authURL.searchParams.get('code_challenge');
     assert.equal(authURL.searchParams.get('code_challenge_method'), 'S256');
     const callback = new URL(oauth.redirectURI); callback.searchParams.set('state', authURL.searchParams.get('state')); callback.searchParams.set('code', 'fixture-authorization-code');
-    const r = await fetch(callback); assert.equal(r.status, 200, await r.clone().text()); return callback;
+    const r = await fetch(callback, {redirect: 'manual'});
+    assert.equal(r.status, 303, 'successful callback must clear code/state from the browser address');
+    assert.equal(r.headers.get('location'), '/');
+    assert.equal(r.headers.get('cache-control'), 'no-store');
+    assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(await r.text(), '');
+    const landing = await fetch(new URL(r.headers.get('location'), origin));
+    assert.equal(landing.status, 200); assert.equal(new URL(landing.url).search, '');
+    return callback;
   }
   t.after(async () => {
     bridge.closeAllConnections(); remote.closeAllConnections();

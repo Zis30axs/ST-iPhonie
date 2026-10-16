@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {speechPlan, buildSpeechArgs, validateArgs, extractAudio, fieldsOf} from '../src/speech.mjs';
+import {speechPlan, buildSpeechArgs, validateArgs, extractAudio, fieldsOf, SpeechService} from '../src/speech.mjs';
 import {audioMime} from '../src/net.mjs';
 import {readRPC} from '../src/mcp.mjs';
-import {setPath} from '../src/util.mjs';
+import {setPath, BridgeError} from '../src/util.mjs';
 import {TOOL, wavFixture} from './fixture.mjs';
 
 test('Ambiguous synthesis tool selection fails closed', () => {
@@ -63,4 +63,41 @@ test('Unsupported remote schema references fail without a fetch', () => {
 test('Schema numeric and array bounds', () => {
   assert.throws(() => validateArgs(5, {type:'number',maximum:4}), e => e.code === 'invalid_tool_arguments');
   assert.throws(() => validateArgs([], {type:'array',minItems:1}), e => e.code === 'invalid_tool_arguments');
+});
+
+for (const [name, failure] of [
+  ['network disconnect', new TypeError('fixture network disconnect')],
+  ['timeout', new DOMException('fixture timeout', 'TimeoutError')],
+  ['incomplete MCP response', new BridgeError('fixture incomplete response', 502, 'incomplete_mcp_response')],
+  ['invalid MCP response', new BridgeError('fixture invalid response', 502, 'invalid_mcp_response')],
+  ['upstream HTTP 500', new BridgeError('fixture server failure', 502, 'mcp_http_500')],
+]) test('Unknown paid outcome blocks a later identical submission after ' + name, async () => {
+  let calls = 0;
+  const service = new SpeechService({tools: async () => [TOOL], call: async () => {
+    calls++; if (calls === 1) throw failure;
+    return {content: [{type: 'audio', data: wavFixture().toString('base64')}]};
+  }}, {data: {config: {speech: {}}}});
+  await assert.rejects(service.synthesize({input: 'one paid request'}));
+  await assert.rejects(service.synthesize({input: 'one paid request'}), e => e.code === 'generation_outcome_unknown');
+  assert.equal(calls, 1);
+});
+
+for (const code of ['mcp_http_403', 'mcp_http_429', 'mcp_protocol_error', 'mcp_tool_failed'])
+  test('Explicit rejection permits a later user retry after ' + code, async () => {
+    let calls = 0;
+    const service = new SpeechService({tools: async () => [TOOL], call: async () => {
+      calls++; if (calls === 1) throw new BridgeError('fixture explicit rejection', 502, code);
+      return {content: [{type: 'audio', data: wavFixture().toString('base64')}]};
+    }}, {data: {config: {speech: {}}}});
+    await assert.rejects(service.synthesize({input: 'explicit retry'}), e => e.code === code);
+    assert.equal((await service.synthesize({input: 'explicit retry'})).mime, 'audio/wav');
+    assert.equal(calls, 2);
+  });
+
+test('A null tool result is retained rather than triggering another paid submission', async () => {
+  let calls = 0;
+  const service = new SpeechService({tools: async () => [TOOL], call: async () => { calls++; return null; }},
+    {data: {config: {speech: {}}}});
+  for (let n = 0; n < 2; n++) await assert.rejects(service.synthesize({input: 'null result'}), e => e.code === 'audio_not_found');
+  assert.equal(calls, 1);
 });

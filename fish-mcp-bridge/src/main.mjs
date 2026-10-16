@@ -22,7 +22,7 @@ try {
   const mcp = new McpClient(oauth), speech = new SpeechService(mcp, store);
   const server = createBridgeServer({oauth, mcp, speech, store});
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
-  console.log('\nFish MCP → ST-iPhonie  /  实验版 0.1.1');
+  console.log('\nFish MCP → ST-iPhonie  /  实验版 0.1.2');
   console.log('控制台（请勿分享含 #key= 的链接）：');
   console.log(`${publicURL}/#key=${store.data.bridgeKey}`);
   console.log(`TTS: ${publicURL}/v1/audio/speech`);

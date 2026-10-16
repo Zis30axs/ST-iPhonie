@@ -1,6 +1,6 @@
 # ST-iPhonie → Fish Audio MCP Bridge
 
-**实验版 0.1.1（网络限制移除版）：代码已实现、本地模拟集成已测试；真实 Fish 账号端到端未验证。**
+**实验版 0.1.2：恢复待完成的 OAuth 登录、复用有效授权请求，并保护结果未知的生成请求。真实 Fish 语音端到端仍待完成。**
 
 本适配器把 ST-iPhonie「自己的接口」的 HTTP 配音请求转为 Fish 官方 MCP 调用。不是将网页额度充值进 Developer API，也不是抓 Cookie 或模拟 Fish 私有网页接口。
 
@@ -49,11 +49,21 @@ node .\integration\relax-network.mjs "你的 ST-iPhonie 扩展目录"
 ## 本次交付状态
 
 - 已编写独立适配器、浏览器控制台、ST-iPhonie 预设安装器、Fork 发布助手和自动化测试。
-- Fork 中的功能分支为 `feature/fish-mcp-integration`，`main` 保持不变；实际 GitHub 提交与推送以分支提交记录为准。
-- 未获得你的 Fish OAuth 授权；本轮未生成真实 Fish 音频、未验证账号扣费。旧版网络诊断归档在 `evidence/archive-v0.1.0/`，不作为本轮线上测试。
+- 功能已合入本 Fork 的 `main`；实际提交与推送以分支提交记录为准。
+- Windows 酒馆的浏览器直连已取得真实授权，MCP initialize 返回 HTTP 403，响应被分类为浏览器 Origin 拒绝。独立本机桥接授权尚未完成；未生成真实 Fish 音频、未验证账号扣费。旧版网络诊断归档不作为本轮线上测试。
 - 测试内的 `generate_speech`、`get_generation`、`search_voices` 是**测试夹具**，不是声称已查明的 Fish 线上工具名。运行时读取真实 tools/list；不能唯一匹配就停下，允许手动映射。
 
 ## 1. 直接运行，不必先 Fork
+
+### 减少重复登录与二次验证
+
+固定使用同一个桥接数据目录、OAuth 客户端和日常浏览器。未过期、配置一致的待完成登录会复用同一请求，桥接重启后可恢复；仍只保留原有十分钟有效期。回调在交换授权码前先持久化为已消费，不能通过重启重放。授权成功后保存的刷新令牌用于正常续期，不需要每次配音重新登录。
+
+这只能减少客户端重复发起登录造成的麻烦，不能关闭或保证免除 Fish 的邮件验证码、人机验证或账户风控。需要验证时由账号持有人在 Fish 官方页面完成。改变连接地址、客户端、Scope、过期或授权被撤销时仍可能需要重新授权。
+
+待完成请求包含 OAuth state 与 PKCE verifier，与访问/刷新令牌一样保存在本机私有 `state.json`；不要上传该文件、回调 URL 或完整数据目录。
+
+成功回调会用 `303` 返回控制台，移除地址栏的 code/state。语音请求遇到网络中断、超时、无效响应或 HTTP 5xx 时，相同输入在当前进程内不会再次提交；先核对 Fish 历史。该生成守卫仍只在内存，重启会清除。
 
 要求 Node.js **22 或更新**。没有第三方 npm 依赖，不需要 `npm install`。
 
@@ -243,7 +253,7 @@ npm run doctor
 
 `npm test` 完全本地，使用本地 HTTP/HTTPS 服务、假的授权服务、假的 MCP 工具和合成测试波形，不访问 Fish、不生成真实配音。`doctor` 尝试读取真实 OAuth 元数据；已授权时读取工具列表，不提交生成，不输出令牌。
 
-本轮 55 项本地测试通过，包括真实本地 HTTP/HTTPS 下载、局域网访问与模拟 OAuth/MCP。没有真实 Fish 授权/配音/扣费验证。报告及原始输出见 `TEST-REPORT.md` 和 `evidence/test-results.txt`。旧版诊断仅作历史归档。
+本轮 77 项桥接本地测试通过，包括真实本地 HTTP/HTTPS 下载、局域网访问、模拟 OAuth/MCP、重启恢复授权请求和结果未知防重投。Windows 浏览器直连的真实授权及 initialize 403 已复现；桥接授权、真实配音和扣费仍未验证。报告见 `TEST-REPORT.md`；旧版诊断仅作历史归档。
 
 ## 参考
 

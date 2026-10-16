@@ -3,6 +3,8 @@ import http from 'node:http';
 import assert from 'node:assert/strict';
 import {readFile, stat} from 'node:fs/promises';
 import {fixture} from './fixture.mjs';
+import {FishOAuth} from '../src/oauth.mjs';
+import {StateStore} from '../src/state.mjs';
 
 test('HTTP end-to-end: PKCE registration, callback, MCP, Chinese IDs, audio and cache (LOCAL MOCK)', async t => {
   const f = await fixture(t); const callback = await f.login();
@@ -105,4 +107,104 @@ test('Oversized and incorrect Content-Type HTTP bodies fail before processing', 
   const big = await f.request('/v1/audio/speech', {input: 'x'.repeat(70000)}); assert.equal(big.status, 413);
   const wrongType = await f.request('/v1/audio/speech', {input:'hi'}, {'Content-Type':'text/plain'}); assert.equal(wrongType.status, 415);
   assert.equal(f.state.generations,0);
+});
+
+const oauthOptions = f => ({endpoint: f.oauth.endpoint, redirectURI: f.oauth.redirectURI, clientID: f.oauth.clientID, scope: f.oauth.scope});
+test('Pending PKCE login survives a bridge restart without extending its expiry (LOCAL MOCK)', async t => {
+  const f = await fixture(t), first = new URL(await f.oauth.start());
+  f.state.expectedChallenge = first.searchParams.get('code_challenge');
+  const saved = await new StateStore(f.dir).open();
+  const restored = new FishOAuth(saved, oauthOptions(f));
+  assert.ok(await restored.start() === first.href, 'restart must restore the same pending authorization URL');
+  const before = f.store.data.oauth.pending[0].expires;
+  assert.equal(saved.data.oauth.pending[0].expires, before);
+  await restored.finish('fixture-authorization-code', first.searchParams.get('state'));
+  assert.equal(restored.status().authorized, true); assert.equal(f.state.exchanges, 1);
+});
+
+test('Repeated and concurrent login clicks reuse one unexpired PKCE request (LOCAL MOCK)', async t => {
+  const f = await fixture(t);
+  const links = await Promise.all(Array.from({length: 4}, () => f.oauth.start()));
+  links.push(await f.oauth.start());
+  assert.ok(links.every(link => link === links[0]), 'matching pending login must not create another OAuth request');
+  assert.equal(f.state.registers, 1);
+  assert.equal(f.store.data.oauth.pending.filter(p => !p.consumed).length, 1);
+});
+
+for (const [field, value] of [['scope', 'speech:read'], ['redirectURI', 'http://127.0.0.1:3789/changed-callback'], ['clientID', 'different-fixture-client']]) {
+  test('Pending login is bound to ' + field + ' (LOCAL MOCK)', async t => {
+    const f = await fixture(t), first = new URL(await f.oauth.start());
+    f.oauth[field] = value;
+    const next = await f.oauth.start();
+    assert.ok(next !== first.href, 'changed OAuth configuration must create a new request');
+    await assert.rejects(f.oauth.finish('fixture-authorization-code', first.searchParams.get('state')), e => e.code === 'invalid_oauth_state');
+    assert.equal(f.state.exchanges, 0);
+  });
+}
+
+test('Pending login cannot cross MCP endpoints after a restart (LOCAL MOCK)', async t => {
+  const f = await fixture(t), other = await fixture(t), first = new URL(await f.oauth.start());
+  const restored = new FishOAuth(await new StateStore(f.dir).open(), {...oauthOptions(f), endpoint: other.oauth.endpoint});
+  const next = await restored.start();
+  assert.ok(next !== first.href);
+  await assert.rejects(restored.finish('fixture-authorization-code', first.searchParams.get('state')), e => e.code === 'invalid_oauth_state');
+  assert.equal(f.state.exchanges + other.state.exchanges, 0);
+});
+
+test('Expired pending login is rejected and replaced rather than extended (LOCAL MOCK)', async t => {
+  const f = await fixture(t), first = new URL(await f.oauth.start());
+  await f.store.update(s => { for (const pending of s.oauth.pending || []) pending.expires = Date.now() - 1; });
+  const restored = new FishOAuth(await new StateStore(f.dir).open(), oauthOptions(f));
+  await assert.rejects(restored.finish('fixture-authorization-code', first.searchParams.get('state')), e => e.code === 'invalid_oauth_state');
+  assert.ok(await restored.start() !== first.href);
+  assert.equal(f.state.exchanges, 0);
+});
+
+test('Callback consumption is durable before token exchange and prevents restart replay (LOCAL MOCK)', async t => {
+  const f = await fixture(t), first = new URL(await f.oauth.start()); let exchanges = 0;
+  f.oauth.tokenRequest = async () => {
+    exchanges++;
+    const saved = await new StateStore(f.dir).open();
+    assert.ok(saved.data.oauth.pending.some(p => p.consumed), 'consumed state must reach private storage before network exchange');
+    const restored = new FishOAuth(saved, oauthOptions(f));
+    await assert.rejects(restored.finish('fixture-authorization-code', first.searchParams.get('state')), e => e.code === 'invalid_oauth_state');
+    throw new Error('synthetic lost token response');
+  };
+  await assert.rejects(f.oauth.finish('fixture-authorization-code', first.searchParams.get('state')), /synthetic lost token response/);
+  const restored = new FishOAuth(await new StateStore(f.dir).open(), oauthOptions(f));
+  await assert.rejects(restored.finish('fixture-authorization-code', first.searchParams.get('state')), e => e.code === 'invalid_oauth_state');
+  assert.equal(exchanges, 1);
+});
+
+test('Failure to persist consumed state stops before token exchange (LOCAL MOCK)', async t => {
+  const f = await fixture(t), first = new URL(await f.oauth.start()); let exchanges = 0;
+  f.oauth.tokenRequest = async () => { exchanges++; };
+  f.store.update = async () => { throw new Error('synthetic storage failure'); };
+  await assert.rejects(f.oauth.finish('fixture-authorization-code', first.searchParams.get('state')), /synthetic storage failure/);
+  assert.equal(exchanges, 0);
+});
+
+test('Concurrent callbacks consume one pending state and exchange only once (LOCAL MOCK)', async t => {
+  const f = await fixture(t), first = new URL(await f.oauth.start());
+  f.state.expectedChallenge = first.searchParams.get('code_challenge');
+  const outcomes = await Promise.allSettled(Array.from({length: 2}, () => f.oauth.finish('fixture-authorization-code', first.searchParams.get('state'))));
+  assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.filter(result => result.status === 'rejected' && result.reason.code === 'invalid_oauth_state').length, 1);
+  assert.equal(f.state.exchanges, 1);
+});
+
+test('Clearing authorization removes persistent pending logins (LOCAL MOCK)', async t => {
+  const f = await fixture(t), first = new URL(await f.oauth.start());
+  await f.oauth.clear();
+  const saved = await new StateStore(f.dir).open();
+  assert.ok(!saved.data.oauth.pending?.length);
+  const restored = new FishOAuth(saved, oauthOptions(f));
+  await assert.rejects(restored.finish('fixture-authorization-code', first.searchParams.get('state')), e => e.code === 'invalid_oauth_state');
+});
+
+test('Starting login on a changed endpoint cannot relabel old tokens for the new service (LOCAL MOCK)', async t => {
+  const f = await fixture(t), other = await fixture(t); await f.login();
+  const changed = new FishOAuth(f.store, {...oauthOptions(f), endpoint: other.oauth.endpoint});
+  await changed.start();
+  await assert.rejects(changed.accessToken(), e => e.code === 'login_required');
 });

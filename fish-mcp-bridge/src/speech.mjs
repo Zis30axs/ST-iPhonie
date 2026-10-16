@@ -223,9 +223,20 @@ export class SpeechService {
     this.waiting++;
     const task = this.tail.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
-      let result = this.jobs.get(hash)?.result;
-      if (!result && this.jobs.size >= 20) throw new BridgeError('已有 20 个未处理的生成任务/结果，请先处理它们，避免继续提交和扣费。', 429, 'pending_results_full');
-      if (!result) { result = await this.mcp.call(plan.tool.name, args, signal); this.jobs.set(hash, {result}); }
+      const saved = this.jobs.get(hash), hasResult = saved && Object.hasOwn(saved, 'result');
+      if (saved?.outcomeUnknown) throw new BridgeError('上一笔相同输入的生成结果未知，可能已执行并扣费。请先核对 Fish 历史记录；此次没有再次提交。此保护仅保存在当前进程内存，重启后不会保留。', 409, 'generation_outcome_unknown');
+      let result = saved?.result;
+      if (!hasResult && this.jobs.size >= 20) throw new BridgeError('已有 20 个未处理的生成任务/结果，请先处理它们，避免继续提交和扣费。', 429, 'pending_results_full');
+      if (!hasResult) {
+        // Keep a guard before sending: a lost response cannot prove that synthesis did not run.
+        this.jobs.set(hash, {outcomeUnknown: true});
+        try { result = await this.mcp.call(plan.tool.name, args, signal); this.jobs.set(hash, {result}); }
+        catch (error) {
+          const rejected = error instanceof BridgeError && (/^mcp_http_4\d\d$/.test(error.code) || ['mcp_protocol_error', 'mcp_tool_failed'].includes(error.code));
+          if (rejected) this.jobs.delete(hash);
+          throw error;
+        }
+      }
       let audio = extractAudio(result, config.resultPath);
       if (!audio) {
         const job = jobOf(result, config);

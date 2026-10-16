@@ -60,7 +60,7 @@ export function createBridgeServer({oauth, mcp, speech, store}) {
       }
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       if (req.method === 'GET' && url.pathname === '/health') {
-        json(res, 200, {service: 'st-iphonie-fish-mcp-bridge', version: '0.1.1', ready: oauth.status().authorized}); return;
+        json(res, 200, {service: 'st-iphonie-fish-mcp-bridge', version: '0.1.2', ready: oauth.status().authorized}); return;
       }
       if (req.method === 'GET' && ['/', '/app.js', '/app.css'].includes(url.pathname)) {
         const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
@@ -70,8 +70,8 @@ export function createBridgeServer({oauth, mcp, speech, store}) {
       if (req.method === 'GET' && url.pathname === '/oauth/callback') {
         await oauth.finish(url.searchParams.get('code'), url.searchParams.get('state'), url.searchParams.get('error'));
         mcp.reset(); speech.reset();
-        res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-        res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>授权完成</title><h1>Fish 授权已保存到本机</h1><p>尚未生成音频。回到控制台读取工具列表，然后手动试听。</p><p><a href="/">返回控制台</a></p></html>'); return;
+        res.writeHead(303, {Location: '/'});
+        res.end(); return;
       }
       const authorization = String(req.headers.authorization || '');
       if (!authorization.startsWith('Bearer ') || !safeEqual(authorization.slice(7), store.data.bridgeKey))

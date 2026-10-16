@@ -76,7 +76,7 @@ export class McpClient {
     if (this.ready) return;
     if (!this.initializing) this.initializing = (async () => {
       const result = await this.raw('initialize', {protocolVersion: '2025-06-18', capabilities: {},
-        clientInfo: {name: 'st-iphonie-fish-mcp-bridge', version: '0.1.1'}}, {signal});
+        clientInfo: {name: 'st-iphonie-fish-mcp-bridge', version: '0.1.2'}}, {signal});
       if (!['2025-03-26', '2025-06-18', '2025-11-25'].includes(result?.protocolVersion))
         throw new BridgeError('服务端协商的 MCP 版本不在本实验版支持范围内。', 502, 'mcp_version_unsupported');
       this.protocol = result.protocolVersion;
