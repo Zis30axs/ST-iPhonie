@@ -4,6 +4,7 @@ const TIERS = {0: '未订阅', 1: 'Tablet', 2: 'Scroll', 3: 'Opus'};
 import {icon, spark} from './icons.js';
 import {fly} from './carry.js';
 import {CUSTOM_TEMPLATES, voicesFromFolder, shortLanguage, customHint} from '../core/custom-voice.js';
+import {openFishIosOAuth} from './fish-ios-oauth.js';
 
 export function enginesApp(ctx) {
   const {api} = ctx, v = createView(ctx, 'engines'), drafts = new Map();
@@ -371,7 +372,7 @@ export function enginesApp(ctx) {
           ${engine === 'mini' ? field('服务区域', select('region', c.region, [['cn', '国内'], ['global', '国际'], ['uw', '国际 · 低延迟入口']])) : ''}
         </div>`
       + (fish ? `<details data-group="fish-relay"><summary>中转<small class="fold-note">${fish.relay ? esc(fish.relay.replace(/^https?:\/\//, '')) : '直连 Fish Audio'}</small></summary><div class="fold-body">${fishRelay()}</div></details>` : '')
-      + (engine === 'custom' ? customImport() + customTemplates() : '')
+      + (engine === 'custom' ? customImport() + customTemplates() + `<div class="actions">${btn('fish-ios-oauth', 'iPhone · Fish OAuth 无电脑实验', 'secondary')}</div>` : '')
       + balanceGroup()
       + groupTitle(engine === 'custom' ? '接口和音色' : '参数')
       + schema.groups.map((g, i) => `<details data-group="${engine}:${g.id}" ${i === 0 ? 'open' : ''}><summary>${esc(g.title)}</summary><div>${g.fields.map(f => control(f, c)).join('')}</div></details>`).join('')
@@ -748,6 +749,7 @@ export function enginesApp(ctx) {
         v.root.querySelector('[data-voice-folder]')?.click();
         break;
       }
+      case 'fish-ios-oauth': openFishIosOAuth(ctx); break;
       case 'voice-template': {
         const t = CUSTOM_TEMPLATES.find(x => x.id === el.dataset.template), base = v.root.querySelector(`[data-field="voice-base-${el.dataset.template}"]`)?.value.trim().replace(/\/+$/, '') || '';
         if (!t || !/^https?:\/\/[^\s/]+/i.test(base)) { ctx.notify('先填服务的地址，比如 ' + t?.example, {error: true}); break; }
