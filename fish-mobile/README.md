@@ -53,3 +53,11 @@ node --test fish-mobile/test/client.test.mjs
 - TauriTavern 宿主契约（移动端外部浏览器）：https://github.com/Darkatse/TauriTavern/blob/main/docs/FrontendHostContract.md
 
 这是此 Fork 的实验实现，不是 Fish Audio 或 TauriTavern 官方功能；不更改上游许可证状态。
+
+## 0.1.1：Safari 显示 client_id and redirect_uri are required
+
+「生成登录链接」会先校验完整 OAuth 授权 URL，确认 client_id、redirect_uri、state、PKCE 必要参数均存在且不重复。现在也可以点「校验链接参数」。点击复制或浏览器打开之前都会校验，切回 App 后可恢复有效期内的完整 URL。
+
+如果校验通过，但 Safari 仍提示缺少这两个参数，建议用「复制登录链接」，把整个 URL 粘贴 Safari 地址栏；如果仍失败，可能是授权端点的重定向链丢失参数，或 Fish 对动态客户端的注册要求。请只提供页面错误文字或「复制脱敏诊断」，不要发原始授权链接、回调 URL、Token。
+
+本次只是客户端前置诊断和链接恢复改进，尚未证明 Fish iOS OAuth 真机登录成功。

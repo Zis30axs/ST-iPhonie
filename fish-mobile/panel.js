@@ -1,4 +1,4 @@
-import {MobileFishClient, mapFields, buildArguments, errorText} from './client.js';
+import {MobileFishClient, inspectAuthorizationLink, mapFields, buildArguments, errorText} from './client.js';
 
 let client, dialog, observer, button, stopTimer, lastError = '', blobURL = '';
 const STYLE = `
@@ -28,7 +28,7 @@ export function openMobilePanel(doc = document) {
 <label>Client ID（留空自动注册）<input data-fm="client" autocomplete="off"></label><label>Scope（可留空）<input data-fm="scope" autocomplete="off"></label>
 <p class="fm-note">只填写你信任的服务；HTTP 是明文。更改连接参数会清除旧授权。这里的回调地址只是注册给 Fish 的目标，不会在手机上启动监听服务。</p></details>
 <button data-fm="login">生成登录链接</button><label>登录链接<input data-fm="link" readonly aria-label="登录链接"></label>
-<button data-fm="copy-link" disabled>复制登录链接</button><button data-fm="open-link" disabled>在浏览器打开</button>
+<button data-fm="copy-link" disabled>复制登录链接</button><button data-fm="open-link" disabled>在浏览器打开</button><button data-fm="check-link" disabled>校验链接参数</button>
 <p class="fm-note">用 Safari 登录并选择 Plus 所在团队。跳转后复制包含 code 和 state 的完整回调 URL。若 Safari 显示无法连接，先查看地址栏；没有回调参数就不能继续。</p>
 <h3>2. 粘贴回调</h3><label>完整回调 URL<textarea data-fm="callback" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://127.0.0.1:3789/oauth/callback?code=…&state=…"></textarea></label>
 <button data-fm="finish">交换令牌</button><p class="fm-note">只能粘贴回发起登录的这个 App；不要把回调、令牌或登录记录发给别人。</p>
@@ -47,8 +47,12 @@ export function openMobilePanel(doc = document) {
   doc.body.append(d);
   const $ = name => d.querySelector(`[data-fm="${name}"]`);
   const message = (text, error = false) => { $('status').textContent = text; if (error) lastError = text; };
+  const verifyLink = () => inspectAuthorizationLink($('link').value, {clientId: c.state.pending?.client?.client_id || '', redirectURI: c.config.redirectURI});
+  const linkStatus = checked => '授权 URL 已检查：' + checked.authorizationOrigin + checked.authorizationPath + '；client_id ✓ · redirect_uri ✓ · PKCE ✓。如 Safari 仍报缺参，使用「复制登录链接」粘贴完整地址，不要只打开 Fish 首页。';
   const status = () => { const s = c.status(); message(s.authorized ? '已保存授权。读取工具成功后再试听；登录成功不等于配音成功。' : s.pending ? '已有待完成登录，可继续粘贴这次的回调。' : '尚未授权。先生成登录链接。'); };
   $('endpoint').value = c.config.endpoint; $('redirect').value = c.config.redirectURI; $('client').value = c.config.clientId; $('scope').value = c.config.scope;
+  const restoredLink = c.pendingAuthorizationUrl();
+  if (restoredLink) { $('link').value = restoredLink; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = false; }
   let tools = [], busy = false;
   const on = (name, handler, lock = true) => $(name).addEventListener('click', async () => {
     if (lock && busy) return;
@@ -61,15 +65,16 @@ export function openMobilePanel(doc = document) {
   on('login', async () => {
     if ((c.status().pending || c.status().authorized) && !doc.defaultView.confirm('重新开始登录会替换待完成回调；修改连接参数还会清除旧授权。继续？')) return;
     c.configure({endpoint: $('endpoint').value.trim(), redirectURI: $('redirect').value.trim(), clientId: $('client').value.trim(), scope: $('scope').value.trim()});
-    $('link').value = ''; $('copy-link').disabled = $('open-link').disabled = true;
+    $('link').value = ''; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = true;
     message('正在读取授权元数据并注册客户端，没有提交语音生成。');
-    const link = await c.startLogin(); $('link').value = link; $('copy-link').disabled = $('open-link').disabled = false;
-    message('登录链接已生成。复制到 Safari 或点击“在浏览器打开”，授权后带回完整回调。');
+    const link = await c.startLogin(); $('link').value = link; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = false;
+    message(linkStatus(verifyLink()) + ' 授权后带回完整回调。');
   });
-  on('copy-link', async () => { await copy($('link').value, doc); message('登录链接已复制。'); });
+  on('copy-link', async () => { verifyLink(); await copy($('link').value, doc); message('完整 OAuth 登录链接已复制，请直接粘贴到 Safari 地址栏。'); });
+  on('check-link', () => message(linkStatus(verifyLink())));
   // A separate user gesture avoids iOS blocking a window opened after await.
-  on('open-link', () => { doc.defaultView.open($('link').value, '_blank', 'noopener,noreferrer'); message('已请求系统打开链接。若没有打开，请复制链接到 Safari。'); }, false);
-  on('finish', async () => { const callback = $('callback').value; $('callback').value = ''; message('正在交换令牌；未自动重试。'); await c.finishLogin(callback); $('link').value = ''; $('copy-link').disabled = $('open-link').disabled = true; status(); });
+  on('open-link', () => { const checked = verifyLink(); doc.defaultView.open($('link').value, '_blank', 'noopener,noreferrer'); message(linkStatus(checked) + ' 已请求系统浏览器打开；若它报缺参，请复制完整链接到 Safari。'); }, false);
+  on('finish', async () => { const callback = $('callback').value; $('callback').value = ''; message('正在交换令牌；未自动重试。'); await c.finishLogin(callback); $('link').value = ''; $('copy-link').disabled = $('open-link').disabled = $('check-link').disabled = true; status(); });
   function selected() {
     const t = tools.find(t => t.name === $('tool').value);
     $('schema').textContent = t ? JSON.stringify(t.inputSchema || {}, null, 2) : '请选择真实语音合成工具。';
@@ -102,7 +107,7 @@ export function openMobilePanel(doc = document) {
   $('audio').addEventListener('error', () => message('音频播放：浏览器无法获取或解码音频；没有把拿到链接当作已经播出。', true));
   on('unlock', () => { if (doc.defaultView.confirm('上一笔请求可能已执行并扣费。先核对 Fish 历史；清除标记后再次生成可能重复扣费。继续？')) { c.forgetPendingGeneration(); message('已清除标记；没有自动生成。'); } });
   on('logout', () => { if (doc.defaultView.confirm('清除这台设备里的 Fish 登录状态？不删除角色和聊天记录。')) { c.logout(); tools = []; $('tool').replaceChildren(new Option('先读取工具', '')); selected(); status(); } });
-  on('diagnostics', async () => { const report = {version: 'fish-mobile/0.1.0', tauriHost: !!globalThis.__TAURITAVERN__, webCrypto: !!globalThis.crypto?.subtle, state: c.status(), stageError: lastError, toolNames: tools.map(t => t.name)}; await copy(JSON.stringify(report, null, 2), doc); message('已复制脱敏诊断，不含令牌、回调、登录链接和试听文字。'); });
+  on('diagnostics', async () => { const report = {version: 'fish-mobile/0.1.1', tauriHost: !!globalThis.__TAURITAVERN__, webCrypto: !!globalThis.crypto?.subtle, state: c.status(), authorizationLink: $('link').value ? verifyLink() : null, stageError: lastError, toolNames: tools.map(t => t.name)}; await copy(JSON.stringify(report, null, 2), doc); message('已复制脱敏诊断，不含令牌、回调、登录链接和试听文字。'); });
   status();
   try { d.showModal(); } catch { d.setAttribute('open', ''); }
 }
