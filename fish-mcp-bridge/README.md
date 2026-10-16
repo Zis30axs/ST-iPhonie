@@ -84,6 +84,8 @@ node src/main.mjs
 在控制台中完成（手机/反代访问见下方 BRIDGE_PUBLIC_URL）：
 
 1. 点击「登录 Fish 官方账号」，在官方页面授权并选择赠送 Plus 所在的团队。
+
+Windows 需要使用日常 Edge 登录时，点击「准备 Edge 授权」，再手动点击出现的「在 Edge 中继续授权」。该链接使用[微软支持的 Edge URI](https://learn.microsoft.com/en-us/windows/apps/develop/launch/launch-default-app#microsoft-edge-uri-scheme)，保留同一请求的 OAuth 参数；不会把桥接密钥放进登录链接。完成后回到原控制台点击「刷新状态」：Edge 返回的控制台没有原浏览器的会话密钥，提示缺少密钥不代表 Fish 授权失败。新入口只接受 Fish 官方 HTTPS 地址，自定义授权服务器仍用普通登录入口。
 2. 返回后点击「读取 MCP 工具与参数」。这一步只读取工具，不生成音频。
 3. 音色先填 `default`、语言填 `zh`、模型留空，点击「生成试听」。**这一步会提交生成并使用网页套餐积分。**
 
@@ -253,7 +255,7 @@ npm run doctor
 
 `npm test` 完全本地，使用本地 HTTP/HTTPS 服务、假的授权服务、假的 MCP 工具和合成测试波形，不访问 Fish、不生成真实配音。`doctor` 尝试读取真实 OAuth 元数据；已授权时读取工具列表，不提交生成，不输出令牌。
 
-本轮 77 项桥接本地测试通过，包括真实本地 HTTP/HTTPS 下载、局域网访问、模拟 OAuth/MCP、重启恢复授权请求和结果未知防重投。Windows 浏览器直连的真实授权及 initialize 403 已复现；桥接授权、真实配音和扣费仍未验证。报告见 `TEST-REPORT.md`；旧版诊断仅作历史归档。
+本轮 91 项桥接本地测试通过，包括真实本地 HTTP/HTTPS 下载、局域网访问、模拟 OAuth/MCP、重启恢复授权请求、结果未知防重投和手动准备 Edge 授权入口。Windows 浏览器直连的真实授权及 initialize 403 已复现；桥接授权、真实配音和扣费仍未验证。报告见 `TEST-REPORT.md`；旧版诊断仅作历史归档。
 
 ## 参考
 

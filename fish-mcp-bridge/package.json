@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/main.mjs",
-    "test": "node --test test/bridge.test.mjs test/logic.test.mjs test/integration.test.mjs test/network.test.mjs",
+    "test": "node --test test/bridge.test.mjs test/logic.test.mjs test/integration.test.mjs test/network.test.mjs test/login-ui.test.mjs",
     "doctor": "node src/doctor.mjs",
     "install-template": "node integration/install-template.mjs",
     "fork-publish": "node scripts/fork-publish.mjs",

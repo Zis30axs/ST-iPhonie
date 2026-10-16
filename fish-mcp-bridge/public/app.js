@@ -29,7 +29,18 @@ async function refresh() {
 }
 on('refresh', refresh);
 on('login', async () => { message('正在发现 Fish 官方授权服务…'); const data = await (await call('/admin/login', {})).json(); location.assign(data.url); });
-on('logout', async () => { await call('/admin/logout', {}); await refresh(); });
+function clearEdgeLogin() { $('edge-login').hidden = true; $('open-edge').removeAttribute('href'); }
+on('prepare-edge', async () => {
+  clearEdgeLogin(); message('正在准备 Fish 官方授权入口…');
+  const data = await (await call('/admin/login', {})).json();
+  const url = new URL(data.url);
+  if (url.protocol !== 'https:' || !['fish.audio', 'api.fish.audio'].includes(url.hostname) || url.username || url.password)
+    throw new Error('授权入口不是可识别的 Fish 官方 HTTPS 地址，已停止打开。');
+  $('open-edge').href = 'microsoft-edge:' + url.href;
+  $('edge-login').hidden = false;
+  message('入口已准备好。请点击“在 Edge 中继续授权”；完成后回到本页点击“刷新状态”。');
+});
+on('logout', async () => { clearEdgeLogin(); await call('/admin/logout', {}); await refresh(); });
 on('tools', async () => {
   message('正在读取真实 MCP 工具，不提交配音…'); const result = await (await call('/admin/tools?refresh=1')).json();
   $('catalog').textContent = JSON.stringify(result.tools, null, 2); $('detected').textContent = JSON.stringify(result.detected, null, 2);
