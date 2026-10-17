@@ -98,7 +98,7 @@ export function chatApp(ctx) {
   const statusLine = () => { const p = profile(); return `<i class="qq-dot" data-status="${p.status}"></i>${esc(PROFILE_STATUS[p.status])}${p.statusText ? ' · ' + esc(p.statusText) : ''}`; };
   const starred = () => api.getState().chat.starred || [];
   /** A contact's one line: a manual contact's persona, or where a role comes from. */
-  const signatureOf = c => c.source === 'manual' ? (c.persona || '还没有写人设').split('\n')[0].slice(0, 40) : c.voice ? '角色 · 能发语音消息' : '角色 · 还没有配音';
+  const signatureOf = c => c.source === 'story' ? (c.persona || '剧情联系人').split('\n')[0].slice(0, 40) : c.source === 'manual' ? (c.persona || '还没有写人设').split('\n')[0].slice(0, 40) : c.voice ? '角色 · 能发语音消息' : '角色 · 还没有配音';
   const moments = momentsPanel(ctx, {v, frame: html => frame(html), me: () => ({name: myName(), avatar: myAvatar}), visible: () => ctx.visible?.('chat') !== false && mode === 'list' && tab === 'moments'});
   /** A tab page with the tab bar under it. */
   function frame(html) {
@@ -188,7 +188,7 @@ export function chatApp(ctx) {
     const atMe = t.type === 'group' && t.unread && last && last.from !== 'me' && String(last.text || '').includes('@' + me) ? '<em class="at-me">[有人@我]</em>' : '';
     const badge = t.unread ? `<span class="badge${t.muted ? ' muted' : ''}">${t.unread > 99 ? '99+' : t.unread}</span>` : '';
     const spark = t.type === 'dm' && t.streak >= 3 ? `<span class="spark" title="聊天火花：连续 ${t.streak} 天">🔥${t.streak}</span>` : '';
-    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${spark}<span class="conv-time">${last ? stamp(last.at) : ''}</span></span><span class="conv-bot"><span class="pv">${atMe}${esc(who + preview(last))}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
+    return `<button class="conv${t.pinned ? ' pinned' : ''}" data-action="open" data-id="${esc(t.id)}" data-conv="${esc(t.id)}">${threadAvatar(t, 50)}<span class="grow"><span class="conv-top"><strong>${esc(t.type === 'group' ? t.name : shown(t.members[0] || t.name))}</strong>${t.type === 'group' ? '<span class="tag-s">群</span>' : t.label ? `<span class="tag-s">${esc(t.label)}</span>` : ''}${spark}<span class="conv-time">${last ? esc(last.storyAt || stamp(last.at)) : ''}</span></span><span class="conv-bot"><span class="pv">${atMe}${esc(who + preview(last))}</span>${t.muted ? `<span class="mute-ico" aria-label="免打扰">${icon('mute')}</span>` : ''}${badge}</span></span></button>`;
   }
   async function renderMessages(ticket) {
     const [threads] = await Promise.all([api.listThreads(), counts()]);
@@ -257,7 +257,7 @@ export function chatApp(ctx) {
     if (!c) { mode = 'list'; return render(); }
     const star = starred().includes(c.name), manual = c.source === 'manual' && api.getState().chat.contacts.find(x => x.name === c.name);
     v.draw(`<div class="qq-card" data-engine="${c.engine}"><span class="qq-card-cover" aria-hidden="true"></span>${avatar(c.name, c.engine, 84)}<h2>${esc(shown(c.name))}</h2>${shown(c.name) !== c.name ? `<p class="qq-card-real">昵称：${esc(c.name)}</p>` : ''}<p>${esc(signatureOf(c))}</p>
-        <div class="qq-card-tags"><span class="chip">${c.source === 'role' ? '角色' : '手动联系人'}</span>${c.voice ? '<span class="chip">能发语音</span>' : ''}${star ? '<span class="chip">★ 特别关心</span>' : ''}</div></div>
+        <div class="qq-card-tags"><span class="chip">${c.source === 'story' ? '剧情联系人' : c.source === 'role' ? '角色' : '手动联系人'}</span>${c.voice ? '<span class="chip">能发语音</span>' : ''}${star ? '<span class="chip">★ 特别关心</span>' : ''}</div></div>
       <div class="actions">${btn('profile-chat', icon('chat') + '发消息', 'primary')}${api.callDial ? btn('profile-call', icon('phone') + '打电话', 'secondary') : ''}${btn('profile-moments', icon('moments') + 'TA 的动态', 'secondary')}</div>
       <div class="group">${btn('remark', `${icon('edit')}<span><strong>设置备注</strong><small>${esc(remarks()[c.name] || '只有你看得到，聊天里显示这个名字')}</small></span>`, 'list-row')}${btn('avatar-pick', `${icon('image')}<span><strong>换头像</strong><small>${esc(avatarState(c.name))}</small></span>`, 'list-row', `data-key="${esc(c.name)}"`)}${btn('star', `<span>${star ? '★ 取消特别关心' : '☆ 设为特别关心'}</span>`, 'list-row')}${manual ? `<button class="list-row" data-action="contact-edit" data-id="${esc(manual.id)}">${icon('edit')}<span><strong>编辑资料和人设</strong></span></button>` : ''}</div>
       <div class="actions">${btn('unfriend', '删除好友', 'danger')}</div>`);
@@ -388,7 +388,7 @@ export function chatApp(ctx) {
     return `<button type="button" class="ph-note ph-draw" data-action="photo-draw" data-mid="${esc(m.id)}">${esc(m.imageState === 'failed' && m.imageNote ? m.imageNote + ' · ' : '')}画出来</button>`;
   }
   function messageHTML(m, i, list) {
-    const day = i === 0 || new Date(list[i - 1].at).toDateString() !== new Date(m.at).toDateString() ? `<div class="day">${dayLabel(m.at)}</div>` : '';
+    const day = m.storyAt ? (i === 0 || list[i - 1].storyAt !== m.storyAt ? `<div class="day">${esc(m.storyAt)}</div>` : '') : i === 0 || list[i - 1].storyAt || new Date(list[i - 1].at).toDateString() !== new Date(m.at).toDateString() ? `<div class="day">${dayLabel(m.at)}</div>` : '';
     if (LINE_KINDS.includes(m.kind)) return day + lineHTML(m);
     const me = m.from === 'me', group = thread.type === 'group', picked = selecting?.has(m.id);
     const quoted = m.quote ? `<span class="m-quote">${esc(you(m.quote.from))}：${esc(m.quote.text)}</span>` : '';
@@ -430,10 +430,11 @@ export function chatApp(ctx) {
     if (v.disposed || ticket !== epoch) return;
     thread = loaded;
     if (!thread) { mode = 'list'; threadId = null; return render(); }
-    if (thread.unread) api.markThreadRead(threadId).catch(() => {});
+    if (thread.unread && ctx.visible?.('chat') !== false) api.markThreadRead(threadId).catch(() => {});
     const group = thread.type === 'group', contacts = api.chatContacts(true);
     const voiced = thread.members.filter(n => contacts.find(c => c.name === n)?.voice).length;
-    const sub = group ? `${thread.members.length} 人 · ${voiced} 人能发语音` : contacts.find(c => c.name === thread.members[0])?.source === 'manual' ? '手动联系人' : voiced ? '能发语音消息' : '还没有配音 · 只发文字';
+    const source = contacts.find(c => c.name === thread.members[0])?.source;
+    const sub = group ? `${thread.members.length} 人 · ${voiced} 人能发语音` : source === 'story' ? '剧情联系人 · 消息随故事同步' : source === 'manual' ? '手动联系人' : voiced ? '能发语音消息' : '还没有配音 · 只发文字';
     const bring = pendingBring(), scroller = v.root.querySelector('.msgs'), atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
     const focused = ctx.doc.activeElement?.dataset?.field === 'draft' && v.root.contains(ctx.doc.activeElement);
     track(thread.messages);
@@ -945,7 +946,7 @@ export function chatApp(ctx) {
       : group
       ? `<div class="pick-list">${contacts.map(c => `<label class="setting-row"><span>${avatar(c.name, c.engine, 28)}${esc(shown(c.name))}</span><input class="switch" type="checkbox" data-member="${esc(c.name)}" aria-label="拉 ${esc(c.name)} 进群"></label>`).join('')}</div>
         ${field('群名', input('group-name', '', 'text', 'maxlength="40" placeholder="可以不填"'))}<div class="actions">${btn('create-group', icon('group') + '建群', 'primary')}</div>`
-      : `<div class="pick-list">${contacts.map(c => `<button class="list-row" data-new-dm="${esc(c.name)}">${avatar(c.name, c.engine, 36)}<span><strong>${esc(shown(c.name))}</strong><small>${c.source === 'role' ? (c.voice ? '角色 · 能发语音' : '角色 · 只发文字') : '手动联系人'}</small></span>${icon('next')}</button>`).join('')}</div>`);
+      : `<div class="pick-list">${contacts.map(c => `<button class="list-row" data-new-dm="${esc(c.name)}">${avatar(c.name, c.engine, 36)}<span><strong>${esc(shown(c.name))}</strong><small>${c.source === 'story' ? '剧情联系人' : c.source === 'role' ? (c.voice ? '角色 · 能发语音' : '角色 · 只发文字') : '手动联系人'}</small></span>${icon('next')}</button>`).join('')}</div>`);
     d.body.addEventListener('click', e => {
       const b = e.target.closest('button');
       if (!b) return;
@@ -1481,6 +1482,8 @@ export function chatApp(ctx) {
     return false;
   };
   v.refresh = () => render();
+  v.resume = () => render();
+  v.onSpace = () => { mode = 'list'; threadId = null; thread = null; selecting = null; quote = null; panel = null; search = ''; return render(); };
   v.onAvatars = () => render();
   v.openThread = open;
   /** The chat on screen (null on the lists). */

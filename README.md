@@ -217,3 +217,19 @@ ComfyUI 的方案、LoRA、模型和参数都在绘画 App：先选方案，换 
 - [直连实验说明与验证结果](fish-mobile/README.md)：覆盖宿主初始化、同源父窗口与失败会话清理；真实 Fish 授权后的 403、配音与 Plus 积分扣费仍待实际账号验证。
 - OAuth 凭据仅应保存于运行桥接器的用户目录，不能提交到仓库。
 - 上游尚未为整个项目明确声明许可证，Fork 不自行添加许可证或声称获得额外的再分发授权。
+
+## 沉浸前端中的手机展示（Fork）
+
+本地补丁在插件启用时公开 `window.STiPhoniePanelHost.mount(anchor, { onClose })`，返回 `release()`、`sync()`、`focus()`，供《未读之城》等同源前端展示原手机。槽位必须属于当前酒馆页面、已连接且可见；插件把原有 dialog 以非模态方式定位到槽位，原 iframe 留在原 DOM，不重建应用。`release()` 幂等且不触发 `onClose`；手机主动关闭、插件停用、宿主被替换或槽位失效时通知 `onClose`。释放后仍可从原入口打开手机，iframe 内的 Esc 沿用原有 App 返回规则。
+
+接口仅控制展示，不提供 backend、设置或存储访问，不改手机存档与 `card:` / `group:` 分区。补丁文件为 `index.js` 和 `panel-host.js`；源码副本、酒馆安装副本与刷新后的接口加载结果需分别核对，manifest 版本或基础提交号不能证明本地补丁已实装。Shell 内展示不等于联系人、消息或世界事件同步。
+
+## 《未读之城》剧情联动（Fork）
+
+另有独立的 `window.STiPhonieStoryHost` 数据接口：`bind({ sessionId, chatId, label, contacts })` 返回当前剧情的连接，提供 `sync({ contacts, messages })`、`snapshot()`、`subscribe(listener)`、`openContact(npcId)`、`release()`。`sessionId` 是角色身份与酒馆聊天 ID 的 SHA-256；绑定必须与当前真实聊天 ID 相符，切换聊天或停用插件即失效。联系人使用稳定 NPC ID，相同名字的不同 NPC 会明确报错，避免错误合并。
+
+消息由手机自己的 `ChatStore` 在同一事务内写入并记录事件 ID。重复加载不会再次添加消息，已读记录优先于旧的未读快照，原始世界时间以纯文本保留在消息上。只有打开可见的对应聊天时才自动已读；手机收起、处于其他 App 或页面在后台时不再因重绘偷读。NPC 联系人显示为“剧情联系人”，可以从前端直接打开对应会话。
+
+联动期间使用 `unread-city:<sessionId>` 的严格分区，同一角色的不同聊天互不混入，也不展示原有共享联系人/会话。释放后恢复原手机视图；不修改用户原先的 `partition` 设置，不迁移、覆盖或删除旧手机数据。手机聊天、联系人与读取状态仍由手机维护；世界侧只提交经过校验的 NPC/消息及接收读取回执。未绑定该接口时，普通插件继续原有分区方式。
+
+本轮数据接口和隔离/去重/迟到结果有 `node --test core/story-link.test.js core/panel-host.test.js` 回归覆盖；角色卡打包、实际酒馆和手机 TauriTavern 验收由主工程分别记录。这里不代表模型服务、手机真机或全部手机应用已实测。

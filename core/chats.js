@@ -16,6 +16,7 @@
 // the user (the user's messages are refused until a 好友申请 is accepted).
 // streak (聊天火花): days in a row, up to today or yesterday, on which both the user and the other side wrote.
 import {connectionLost, lostError} from './idb.js';
+import {storyBatch, applyStoryBatch, storySpace, storyThreadId, STORY_LINK_LIMITS} from './story-link.js';
 
 export const CHAT_STORE_LIMITS = Object.freeze({messages: 1000, text: 4000, members: 20});
 const KINDS = ['text', 'voice', 'photo', 'sticker', 'system', 'redpacket', 'transfer', 'location', 'pat', 'dice', 'notice', 'recall', 'call', 'gift', 'song'];
@@ -42,6 +43,8 @@ function cleanMessage(m, id, at) {
   const from = clip(m.from, 40).trim();
   if (!from) throw fail('消息缺少发送人');
   const out = {id, from, kind, text: clip(m.text, CHAT_STORE_LIMITS.text), at};
+  if (typeof m.storyEventId === 'string' && m.storyEventId.length <= 240) out.storyEventId = m.storyEventId;
+  if (typeof m.storyAt === 'string' && m.storyAt.length <= 80) out.storyAt = m.storyAt;
   if (Number.isFinite(m.updatedAt) && m.updatedAt > 0) out.updatedAt = m.updatedAt;
   if (kind === 'voice') { out.translation = clip(m.translation, CHAT_STORE_LIMITS.text); out.emotion = clip(m.emotion, 100); }
   if (kind === 'photo' && m.photoId) out.photoId = clip(m.photoId, 512);
@@ -152,6 +155,32 @@ export class ChatStore {
   async get(id) {
     return this.#tx('readonly', (store, done) => this.#get(store, id, row => done(this.#public(row))));
   }
+  /** Story sessions use the ordinary phone store, with their own strict space.
+   * One transaction seeds NPC threads, appends unseen events, and records reads. */
+  async syncStory(sessionId, contacts, messages = [], guard = () => {}) {
+    const batch = storyBatch(sessionId, contacts, messages);
+    guard();
+    return this.#tx('readwrite', (store, done, abort) => {
+      const request = store.index('scope').getAll(this.#scope);
+      request.onsuccess = () => {
+        try {
+          guard();
+          const wanted = new Set(batch.contacts.map(contact => storyThreadId(batch.space, contact.id)));
+          const existing = request.result.filter(row => row.space === batch.space || wanted.has(row.id)).map(row => this.#public(row));
+          const result = applyStoryBatch(existing, batch, {now: this.#now(), id: this.#id});
+          for (const row of result.rows) if (result.changed.includes(row.id)) store.put({...row, scope: this.#scope});
+          done(structuredClone(result));
+        } catch (error) { abort(error); }
+      };
+    });
+  }
+  async storyThreads(sessionId, {all = false} = {}) {
+    const space = storySpace(sessionId);
+    return this.#tx('readonly', (store, done) => {
+      const request = store.index('scope').getAll(this.#scope);
+      request.onsuccess = () => done(request.result.filter(row => row.space === space && (all || row.storyLink)).map(row => this.#public(row)));
+    });
+  }
   async create({type = 'dm', name = '', members = [], space = '', windowOf = ''} = {}) {
     const list = [...new Set((Array.isArray(members) ? members : []).map(m => clip(m, 40).trim()).filter(Boolean))];
     if (!list.length) throw fail('请选择聊天对象');
@@ -190,8 +219,9 @@ export class ChatStore {
     });
   }
   /** Adds messages. Replies count as unread unless `read` is set (the chat is open on screen). */
-  async append(id, messages, {read = false} = {}) {
+  async append(id, messages, {read = false, guard} = {}) {
     return this.#change(id, row => {
+      guard?.(row);
       const now = this.#now();
       const added = messages.map((m, i) => cleanMessage(m, this.#id(), now + i));
       row.messages.push(...added);
@@ -241,8 +271,8 @@ export class ChatStore {
     const drop = new Set(ids);
     return this.#change(id, row => { row.messages = row.messages.filter(m => !drop.has(m.id)); });
   }
-  async markRead(id) {
-    return this.#change(id, row => { row.unread = 0; });
+  async markRead(id, guard) {
+    return this.#change(id, row => { guard?.(row); row.unread = 0; for (const event of row.storyLink?.events || []) event.read = true; });
   }
   async remove(id) {
     return this.#tx('readwrite', (store, done) => { store.delete([this.#scope, String(id)]); done(true); });
@@ -264,7 +294,8 @@ export class ChatStore {
       if (!members.length) throw fail('备份里有一段聊天没有聊天对象');
       const messages = (Array.isArray(t.messages) ? t.messages : []).slice(-CHAT_STORE_LIMITS.messages).map(m => cleanMessage(m, clip(m?.id || this.#id(), 512), Number.isFinite(m?.at) ? m.at : now));
       return {scope: this.#scope, id: clip(t.id, 512), type: t.type === 'group' ? 'group' : 'dm', name: clip(t.name, 40).trim() || members.join('、').slice(0, 40), members: t.type === 'group' ? members : [members[0]], pinned: t.pinned === true, muted: t.muted === true, ...(t.story === true ? {story: true} : {}), ...(Number.isFinite(t.openedAt) ? {openedAt: t.openedAt} : {}), ...(typeof t.label === 'string' && t.label.trim() ? {label: clip(t.label, 40).trim()} : {}), ...(t.type === 'group' && t.windowOf ? {windowOf: clip(t.windowOf, 512)} : {}),
-        unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {})};
+        unread: Math.max(0, Math.min(CHAT_STORE_LIMITS.messages, Math.round(Number(t.unread)) || 0)), createdAt: Number.isFinite(t.createdAt) ? t.createdAt : now, updatedAt: Number.isFinite(t.updatedAt) ? t.updatedAt : now, messages, ...(t.space ? {space: clip(t.space, 300)} : {}), ...(t.type !== 'group' && cleanFriend(t.friend) ? {friend: cleanFriend(t.friend)} : {}),
+        ...(t.storyLink && /^unread-city:[a-f0-9]{64}$/.test(t.space || '') ? {storyLink: {npcId: clip(t.storyLink.npcId, 80), description: clip(t.storyLink.description, 4000), events: (Array.isArray(t.storyLink.events) ? t.storyLink.events : []).slice(0, STORY_LINK_LIMITS.events).filter(e => typeof e?.id === 'string' && e.id.length <= 240).map(e => ({id: e.id, messageId: clip(e.messageId, 512), read: e.read === true}))}} : {})};
     });
     const rows = prepare(threads);
     return this.#tx('readwrite', (store, done, abort) => {

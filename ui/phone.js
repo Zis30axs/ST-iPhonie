@@ -202,16 +202,20 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
 
   const routeFor = name => findRoute(api.getState().routes, name);
   const engineOf = name => { const r = routeFor(name); return r?.voice ? r.engine : 'none'; };
-  const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, openPendingRole: name => openPendingRole(name), visible: name => active === name && !locked,
+  const ctx = {api, doc, win, notify, dialog, confirm, help, lock, open, routeFor, engineOf, openPendingRole: name => openPendingRole(name), visible: name => panelVisible && !doc.hidden && active === name && !locked,
     editEngine: id => views.get('engines')?.edit?.(id), showPresetKind: kind => views.get('presets')?.showKind?.(kind), momentsSeen: () => { if (fresh) { fresh = 0; renderHome(); } }};
   installMotion(win, mount, signal);
   // On a computer the phone is a floating window: its top bar moves it.
   const stageBar = $('.stage-bar'), sizeButton = $('[data-system=size]');
   function floatingBar() {
-    let float = false;
-    try { float = !!api.panelFloating?.(); } catch { /* outside the tavern */ }
+    let float = false, hosted = false;
+    try {
+      hosted = panelVisible && !!api.panelHosted?.();
+      float = !hosted && !!api.panelFloating?.();
+    } catch { /* outside the tavern */ }
     stageBar.toggleAttribute('data-draggable', float);
     doc.documentElement.toggleAttribute('data-floating', float);
+    doc.documentElement.toggleAttribute('data-hosted', hosted);
     sizeButton.hidden = !float;
     if (float) sizeButton.textContent = api.panelSizeName?.() || '中';
   }
@@ -867,7 +871,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     if (event.type === 'call') calls.update(event.call);
     if (event.type === 'forum' || event.type === 'peek') { const app = event.type; if (active === app) run(() => views.get(app)?.refresh()); }
     // 分区: another card was opened in the tavern; the open app and the badges follow it.
-    if (event.type === 'space') { if (active && views.get(active)?.refresh) run(() => views.get(active).refresh()); countUnread(); countMoments(); }
+    if (event.type === 'space') { views.get('chat')?.onSpace?.(); if (active && active !== 'chat' && views.get(active)?.refresh) run(() => views.get(active).refresh()); countUnread(); countMoments(); }
     if (event.type === 'sync') {
       views.get('settings')?.onSync?.();
       // Content from another device: say so once, when that sync is over.
@@ -934,7 +938,8 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
   win.stTtsPanelVisibility = (visible, {preserveView = false} = {}) => {
     const reopening = visible && !panelVisible;
     panelVisible = visible;
-    if (visible) { callState(); run(refreshAvatars); floatingBar(); }
+    floatingBar();
+    if (visible) { callState(); run(refreshAvatars); }
     if (!visible) { sheet?.close(null); if (active) views.get(active)?.leave?.(); }
     else if (takeDraw()) { /* opened from a chat picture */ }
     else if (takeThread()) { /* opened from a message card */ }
@@ -950,6 +955,7 @@ export function createPhoneApp({window: win, api, mount = win.document.getElemen
     appearanceEpoch++;
     unsubscribe();
     controller.abort();
+    doc.documentElement.removeAttribute('data-hosted');
     sheet?.close(null);
     for (const v of views.values()) v.dispose();
     calls.dispose();

@@ -1888,6 +1888,14 @@ export class TTSBackend {
         return this.save(next).moments;
     }
     // ---------- 分区 ----------
+    /** Temporary story view; persisted phone settings and ordinary contacts stay intact. */
+    setStorySpace(space) {
+        const next = space ? clone({...space, strict: true}) : null;
+        if (JSON.stringify(next) === JSON.stringify(this.storySpace || null)) return;
+        this.storySpace = next;
+        this.emit('space', {space: clone(next || this.space), story: !!next});
+        this.emit('chat', {threadId: ''});
+    }
     /** The card open in the tavern now: {key, name, members}. With 分区 on, the phone shows that card's own things. */
     setSpace(space) {
         const next = { key: String(space?.key || '').slice(0, 300), name: String(space?.name || '').slice(0, 80), members: (Array.isArray(space?.members) ? space.members : []).map(String).filter(Boolean).slice(0, 30) };
@@ -1900,12 +1908,12 @@ export class TTSBackend {
         this.emit('chat', { threadId: '' }); this.emit('moments', {}); this.emit('forum', {}); this.emit('peek', {});
     }
     /** The space lists are filtered by, or null when 分区 is off (or no card is open). */
-    here() { return activeSpace(this.settings, this.space); }
+    here() { return this.storySpace || activeSpace(this.settings, this.space); }
     /** The key lists are filtered and 查手机 is stored by ('' = shared, also when 分区 is off). */
     spaceKey() { return this.here()?.key || ''; }
     /** The card open now, whether 分区 is on or not: new things remember the card they were made in, so turning 分区 on
      *  later sorts them. ('' when no card is open: shared.) */
-    cardKey() { return this.space.key || ''; }
+    cardKey() { return this.storySpace?.key || this.space.key || ''; }
     /** Who the picture rules name: the open card's people and the given speakers (null: everyone). */
     drawCast(speakers = []) { return drawCast(this.settings, this.space, speakers); }
     /** The roles that speak in a card's story belong to that card's contacts. Saved only when something changed. */
@@ -1922,7 +1930,12 @@ export class TTSBackend {
         return changed;
     }
     /** Contacts of the card open now (all of them when 分区 is off). */
-    contacts() { return chatContacts(this.settings, this.here()); }
+    contacts() {
+        if (!this.storySpace) return chatContacts(this.settings, this.here());
+        const linked = this.storySpace.contacts.map(c => ({id: c.id, name: c.name, persona: c.description, source: 'story', voice: false, engine: 'none', language: ''}));
+        const manual = chatContacts({...this.settings, routes: []}, this.here()).filter(c => !linked.some(npc => npc.name === c.name));
+        return [...linked, ...manual];
+    }
     /** Who 论坛 and 朋友圈 write about. With 分区 on: the open card's own people (its characters, roles met in its
      *  story or added to it, contacts added under it), not the roles no story has met yet, which can be added from
      *  联系人 →「＋」. All contacts when that leaves no one. */
@@ -1934,6 +1947,15 @@ export class TTSBackend {
     }
     /** Phone chats of the card open now. */
     async threads() { const here = this.here(); return (await this.chats.list()).filter(t => inSpace(t, here)); }
+    /** A stale app view must not display or read the previous story's thread. */
+    async threadForView(id) {
+        const space = this.here(), row = await this.chats.get(id);
+        if ((space?.key || '') !== (this.here()?.key || '')) return null;
+        return row && inSpace(row, this.here()) ? row : null;
+    }
+    assertStoryThread(row) {
+        if ((this.storySpace || String(row?.space || '').startsWith('unread-city:')) && (!row || !inSpace(row, this.here()))) throw Error('聊天已经切换，请重新打开当前人物的手机会话');
+    }
     /** Removes what was made under the open card (or everything, with 分区 off). */
     async clearHere(list, remove, clearAll) {
         const here = this.here();
@@ -1991,6 +2013,7 @@ export class TTSBackend {
     }
     async chatMutate(threadId, task) {
         this.assertOpen();
+        if (threadId && (this.storySpace || String(threadId).startsWith('unread-city:'))) this.assertStoryThread(await this.chats.get(threadId));
         const result = await task();
         this.emit('chat', { threadId });
         return result;
@@ -2031,7 +2054,8 @@ export class TTSBackend {
     /** The user's messages to someone who deleted them: sent, then refused with the usual note. */
     async appendChat(id, messages, options) {
         const thread = await this.chats.get(id);
-        let saved = await this.chats.append(id, messages, options);
+        this.assertStoryThread(thread);
+        let saved = await this.chats.append(id, messages, {...options, guard: row => this.assertStoryThread(row)});
         if (thread?.friend?.by === 'them' && messages.some(m => m?.from === 'me' && m.kind !== 'system')) {
             const name = thread.members[0];
             saved = await this.chats.append(id, [{ from: 'me', kind: 'system', text: `消息已发出，但被对方拒收了。${name}开启了好友验证，你还不是TA的好友。请先发送好友申请，对方通过后才能聊天。` }], { read: true });
@@ -2360,14 +2384,14 @@ export class TTSBackend {
             getPeek: async name => (await this.apps.get(peekId(name, this.spaceKey()))) || (this.spaceKey() ? this.apps.get(peekId(name)) : null),
             deletePeek: name => this.appsMutate('peek', async () => { await this.apps.remove(peekId(name, this.spaceKey())); if (this.spaceKey()) await this.apps.remove(peekId(name)); return true; }),
             /** 分区: the card open now ({key, name}) and whether 分区 is on. */
-            phoneSpace: () => ({ ...clone(this.space), on: !!this.here() }),
+            phoneSpace: () => ({ ...clone(this.storySpace || this.space), on: !!this.here() }),
             saveChatPreset: preset => this.saveChatPreset(preset), deleteChatPreset: id => this.deleteChatPreset(id), selectChatPreset: id => this.selectChatPreset(id),
             previewChatPrompt: preset => this.previewChatPrompt(preset), validateChatPreset: preset => { try { validateChatPreset(normalizeChatPreset(clone(preset))); return ''; } catch (error) { return message(error); } },
             saveChatOptions: patch => this.saveChatOptions(clone(patch)),
             wallet: () => this.wallet(), buyDecoration: (kind, key) => this.buyDecoration(kind, key), saveGift: gift => this.saveGift(gift), deleteGift: id => this.deleteGift(id),
             sendPaid: (threadId, message) => this.sendPaid(threadId, message), takeSent: (threadId, messageId, accept) => this.takeSent(threadId, messageId, accept !== false),
-            shopCatalog: () => clone({ premium: PREMIUM, kinds: DECOR_KINDS, gifts: shopGifts(this.settings.chat.wallet), ledgerKinds: LEDGER_KINDS }), saveContact: contact => this.saveContact(contact), deleteContact: id => this.deleteContact(id), chatContacts: all => clone(all ? chatContacts(this.settings) : this.contacts()), addRoleContact: name => this.addRoleContact(name),
-            listThreads: () => this.threads(), getThread: id => this.chats.get(id), chatUnread: async () => (await this.threads()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0),
+            shopCatalog: () => clone({ premium: PREMIUM, kinds: DECOR_KINDS, gifts: shopGifts(this.settings.chat.wallet), ledgerKinds: LEDGER_KINDS }), saveContact: contact => this.saveContact(contact), deleteContact: id => this.deleteContact(id), chatContacts: all => clone(all && !this.storySpace ? chatContacts(this.settings) : this.contacts()), addRoleContact: name => this.addRoleContact(name),
+            listThreads: () => this.threads(), getThread: id => this.threadForView(id), chatUnread: async () => (await this.threads()).reduce((n, t) => n + (t.muted ? 0 : t.unread), 0),
             createThread: value => this.chatMutate(null, () => this.chats.create({ ...clone(value), space: this.cardKey() })),
             updateThread: (id, patch) => this.chatMutate(id, () => this.chats.update(id, clone(patch))),
             deleteThread: id => this.chatMutate(id, async () => { const done = await this.chats.remove(id); this.noteGone('chats', [id]); await this.memoryForget(id).catch(() => {}); return done; }),
@@ -2383,7 +2407,7 @@ export class TTSBackend {
             unfriend: name => this.unfriend(name), refriend: threadId => this.refriend(threadId),
             deleteChatMessages: (id, ids) => this.chatMutate(id, async () => { const thread = await this.chats.removeMessages(id, clone(ids)); this.noteGone('chats', (ids || []).map(m => `${id}/${m}`)); return thread; }),
             updateChatMessage: (id, messageId, patch) => this.chatMutate(id, () => this.chats.updateMessage(id, messageId, clone(patch || {}))),
-            markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id)),
+            markThreadRead: id => this.chatMutate(id, () => this.chats.markRead(id, row => this.assertStoryThread(row))),
             speak: line => this.speak(clone(line)), voiceFormat: () => this.voiceFormat(),
         };
         return Object.freeze({ apiVersion: BACKEND_API_VERSION, defaultPrompt: DEFAULT_PROMPT, defaultFormat: DEFAULT_FORMAT,

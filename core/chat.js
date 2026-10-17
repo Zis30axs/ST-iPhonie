@@ -320,7 +320,12 @@ export const activeChatPreset = chat => chat.presets.find(p => p.id === chat.act
  * group). space: {key, name, members} of the card open now. Items carry the key they were made under; items from before
  * (no key) are shared by every card.
  */
-export const inSpace = (item, space) => !space?.key || !item?.space || item.space === space.key;
+export const inSpace = (item, space) => {
+  // Story sessions are always private to their exact chat, even when the user's
+  // ordinary phone preference is shared. Legacy unscoped data remains unchanged.
+  if (space?.strict || String(item?.space || '').startsWith('unread-city:')) return !!space?.key && item?.space === space.key;
+  return !space?.key || !item?.space || item.space === space.key;
+};
 /** The space to filter by: the open card's, when partition is on and a card is open; else null (everything). */
 export const activeSpace = (settings, space) => settings.chat?.partition === 'card' && space?.key ? space : null;
 export function chatContacts(settings, space = null) {

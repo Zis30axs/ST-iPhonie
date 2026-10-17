@@ -2512,3 +2512,32 @@ summary:has(.fold-note):after{margin-left:8px;flex-shrink:0}
 :root[data-paint-full] .overlay.pop .sheet{position:absolute;border-radius:20px;box-shadow:0 14px 40px rgba(0,0,0,.28),0 0 0 1px color-mix(in srgb,var(--ink) 10%,transparent);animation:pop-in .18s ease-out;transform-origin:50% 0}
 @keyframes pop-in{from{opacity:0;transform:scale(.96) translateY(-6px)}}
 .paint-top [data-action=paint-actions][aria-pressed=true]{color:var(--accent-ink);background:var(--accent-soft)}
+
+/* A hosted phone uses its owner's available rectangle instead of squeezing an
+   entire physical device into a fixed aspect ratio. Releasing the host removes
+   data-hosted; all ordinary floating/mobile presentation rules remain intact. */
+:root[data-hosted]:not([data-paint-full]) body{background:transparent}
+:root[data-hosted]:not([data-paint-full]) .stage{padding:0;align-items:stretch}
+:root[data-hosted]:not([data-paint-full]) .stage-bar,
+:root[data-hosted]:not([data-paint-full]) .power-key,
+:root[data-hosted]:not([data-paint-full]) .pull-tab,
+:root[data-hosted]:not([data-paint-full]) .home-close{display:none}
+:root[data-hosted]:not([data-paint-full]) .device{width:100%;max-width:none;flex:1;aspect-ratio:auto;border-radius:28px;padding:0;background:none!important;box-shadow:none!important}
+:root[data-hosted]:not([data-paint-full]) .screen{width:100%;border-radius:28px}
+:root[data-hosted]:not([data-paint-full]) .statusbar{display:flex}
+:root[data-hosted]:not([data-paint-full]) .home-page{padding-top:52px}
+:root[data-hosted]:not([data-paint-full]) .phone-dock{margin-bottom:24px}
+:root[data-hosted]:not([data-paint-full]) .app-nav{height:92px;padding-top:46px}
+:root[data-hosted]:not([data-paint-full]) .view:before{top:-92px}
+:root[data-hosted]:not([data-paint-full]) .island{top:10px;display:flex}
+:root[data-hosted]:not([data-paint-full]) .toast,
+:root[data-hosted]:not([data-paint-full]) .island-card{top:10px}
+:root[data-hosted]:not([data-paint-full]) .home-indicator{bottom:3px}
+:root[data-hosted]:not([data-paint-full]) .savebar{padding-bottom:50px}
+:root[data-hosted]:not([data-paint-full]) .lockscreen{padding-top:64px}
+:root[data-hosted]:not([data-paint-full]) .overlay.top{padding-top:52px}
+:root[data-hosted]:not([data-paint-full]) .peek-phone{--pp-top:44px}
+:root[data-hosted]:not([data-paint-full]) .pp-status{display:flex}
+:root[data-hosted]:not([data-paint-full]) .pp-homebar{bottom:6px}
+:root[data-hosted]:not([data-paint-full]) .today-page{padding-top:52px}
+:root[data-hosted]:not([data-paint-full]) .today-top{margin-right:2px}
